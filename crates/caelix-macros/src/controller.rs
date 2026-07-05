@@ -15,6 +15,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let mut wrappers = Vec::new();
     let mut registrations = Vec::new();
+    let mut routes = Vec::new();
 
     for item in &mut impl_block.items {
         if let ImplItem::Fn(method) = item {
@@ -108,8 +109,18 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 });
 
                 let full_path = format!("{}{}", base_path, path);
+                let display_path = full_path.replace("{", ":").replace("}", "");
+                let handler_name = method_name.to_string();
+
                 registrations.push(quote! {
                     cfg.route(#full_path, actix_web::web::#actix_verb().to(#struct_type::#wrapper_name));
+                });
+                routes.push(quote! {
+                    caelix_core::RouteDef {
+                        method: #verb,
+                        path: #display_path,
+                        handler: #handler_name,
+                    }
                 });
             }
         }
@@ -120,6 +131,12 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
         impl caelix_core::Controller for #struct_type {
             fn base_path() -> &'static str { #base_path }
+
+            fn routes() -> &'static [caelix_core::RouteDef] {
+                &[
+                    #(#routes),*
+                ]
+            }
 
             fn register_routes(cfg_any: &mut dyn std::any::Any) {
                 let cfg = cfg_any

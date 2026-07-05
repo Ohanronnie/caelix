@@ -16,6 +16,7 @@ async fn resolves_service_through_hello_world_app_module() {
         service.call_async_provider(),
         "hello from Repo + hello from async factory"
     );
+    assert!(service.expensive_provider_warmed());
 }
 
 #[actix_web::test]

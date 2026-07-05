@@ -4,10 +4,12 @@ use std::{
     fmt::Debug,
     future::Future,
     sync::Arc,
+    time::Instant,
 };
 
 pub struct ProviderDef {
     type_id: TypeId,
+    type_name: &'static str,
     build: Box<
         dyn for<'a> Fn(&'a Container) -> BoxFuture<'a, Arc<dyn Any + Send + Sync>> + Send + Sync,
     >,
@@ -17,6 +19,7 @@ impl ProviderDef {
     pub fn of<T: Injectable>() -> Self {
         Self {
             type_id: TypeId::of::<T>(),
+            type_name: std::any::type_name::<T>(),
             build: Box::new(|container| {
                 Box::pin(async move {
                     let value = T::create(container).await;
@@ -36,6 +39,7 @@ impl ProviderDef {
     {
         Self {
             type_id: TypeId::of::<T>(),
+            type_name: std::any::type_name::<T>(),
             build: Box::new(move |container| {
                 let container = Arc::new(container.clone());
                 let future = factory(container);
@@ -58,6 +62,7 @@ impl ProviderDef {
 
 pub struct ControllerDef {
     pub register_fn: fn(&mut dyn Any),
+    pub route_log_fn: fn(),
     provider: ProviderDef,
 }
 
@@ -65,13 +70,15 @@ impl ControllerDef {
     pub fn of<C: Controller + Injectable + 'static>() -> Self {
         Self {
             register_fn: |any| C::register_routes(any),
+            route_log_fn: || crate::log_controller_routes::<C>(),
             provider: ProviderDef::of::<C>(),
         }
     }
 }
 pub struct ModuleDef {
-    register_fn: for<'a> fn(&'a mut Container) -> BoxFuture<'a, ()>,
-    controller_register_fn: fn(&mut dyn Any),
+    pub(crate) register_fn: for<'a> fn(&'a mut Container) -> BoxFuture<'a, ()>,
+    pub(crate) controller_register_fn: fn(&mut dyn Any),
+    pub(crate) route_log_fn: fn(),
 }
 
 impl ModuleDef {
@@ -79,6 +86,7 @@ impl ModuleDef {
         Self {
             register_fn: |container| Box::pin(async move { register_module::<M>(container).await }),
             controller_register_fn: |any| register_module_controllers::<M>(any),
+            route_log_fn: || crate::log_module_routes::<M>(),
         }
     }
 }
@@ -132,6 +140,7 @@ impl ModuleMetadata {
 }
 
 pub async fn register_module<M: Module>(container: &mut Container) {
+    let module_start = Instant::now();
     let metadata = M::register();
 
     for import in &metadata.imports {
@@ -139,17 +148,24 @@ pub async fn register_module<M: Module>(container: &mut Container) {
     }
 
     for provider in &metadata.providers {
+        let provider_start = Instant::now();
         let value = (provider.build)(container).await;
         container.register_erased(provider.type_id, value);
+        crate::log_provider_initialized(provider.type_name, provider_start.elapsed());
     }
 
     for controller in &metadata.controllers {
+        let provider_start = Instant::now();
         let value = (controller.provider.build)(container).await;
         container.register_erased(controller.provider.type_id, value);
+        crate::log_provider_initialized(controller.provider.type_name, provider_start.elapsed());
     }
+
+    crate::log_module_initialized(std::any::type_name::<M>(), module_start.elapsed());
 }
 
 pub async fn build_container<M: Module>() -> Container {
+    crate::log_application_starting();
     let mut container = Container::new();
     register_module::<M>(&mut container).await;
     container

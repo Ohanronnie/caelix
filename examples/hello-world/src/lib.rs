@@ -34,10 +34,29 @@ async fn connect_async_greeting_provider(
     })
 }
 
+pub struct ExpensiveStartupProvider {
+    warmed: bool,
+}
+
+impl ExpensiveStartupProvider {
+    pub fn warmed(&self) -> bool {
+        self.warmed
+    }
+}
+
+async fn warm_expensive_startup_provider(
+    _container: Arc<Container>,
+) -> Result<ExpensiveStartupProvider> {
+    actix_web::rt::time::sleep(Duration::from_millis(120)).await;
+
+    Ok(ExpensiveStartupProvider { warmed: true })
+}
+
 #[injectable]
 pub struct Service {
     repo: Arc<Repo>,
     async_greeting: Arc<AsyncGreetingProvider>,
+    expensive_startup: Arc<ExpensiveStartupProvider>,
 }
 
 impl Service {
@@ -47,6 +66,10 @@ impl Service {
 
     pub fn call_async_provider(&self) -> String {
         self.async_greeting.greet().to_string()
+    }
+
+    pub fn expensive_provider_warmed(&self) -> bool {
+        self.expensive_startup.warmed()
     }
 
     pub fn find_user(&self, id: i64) -> String {
@@ -108,6 +131,9 @@ impl Module for UserModule {
         ModuleMetadata::new()
             .provider::<Repo>()
             .provider_async_factory::<AsyncGreetingProvider, _, _>(connect_async_greeting_provider)
+            .provider_async_factory::<ExpensiveStartupProvider, _, _>(
+                warm_expensive_startup_provider,
+            )
             .provider::<Service>()
             .controller::<UserController>()
     }
