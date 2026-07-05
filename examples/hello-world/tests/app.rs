@@ -5,24 +5,41 @@ use caelix::prelude::build_container;
 use caelix_core::register_module_controllers;
 use hello_world::{AppModule, Service};
 
-#[test]
-fn resolves_service_through_hello_world_app_module() {
-    let container = build_container::<AppModule>();
+#[actix_web::test]
+async fn resolves_service_through_hello_world_app_module() {
+    let container = build_container::<AppModule>().await;
 
     let service = container.resolve::<Service>();
 
     assert_eq!(service.call_repo(), "hello from Repo");
+    assert_eq!(
+        service.call_async_provider(),
+        "hello from Repo + hello from async factory"
+    );
 }
 
 #[actix_web::test]
 async fn mounts_imported_controller_routes_with_extractors() {
-    let container = Arc::new(build_container::<AppModule>());
+    let container = Arc::new(build_container::<AppModule>().await);
     let app = actix_test::init_service(
         App::new()
             .app_data(web::Data::new(container))
             .configure(|cfg| register_module_controllers::<AppModule>(cfg)),
     )
     .await;
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/users/async-provider")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        actix_test::read_body(response).await,
+        "hello from Repo + hello from async factory"
+    );
 
     let response = actix_test::call_service(
         &app,

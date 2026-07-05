@@ -1,13 +1,20 @@
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
+    future::Future,
+    pin::Pin,
     sync::Arc,
 };
 
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 pub trait Injectable: Send + Sync + 'static {
-    fn create(container: &Container) -> Self;
+    fn create(container: &Container) -> BoxFuture<'_, Self>
+    where
+        Self: Sized;
 }
 
+#[derive(Clone)]
 pub struct Container {
     services: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
 }
@@ -23,9 +30,13 @@ impl Container {
         self.services.insert(TypeId::of::<T>(), Arc::new(value));
     }
 
-    pub fn register<T: Injectable>(&mut self) {
-        let instance = T::create(self);
+    pub async fn register<T: Injectable>(&mut self) {
+        let instance = T::create(self).await;
         self.services.insert(TypeId::of::<T>(), Arc::new(instance));
+    }
+
+    pub(crate) fn register_erased(&mut self, type_id: TypeId, value: Arc<dyn Any + Send + Sync>) {
+        self.services.insert(type_id, value);
     }
 
     pub fn resolve<T: Send + Sync + 'static>(&self) -> Arc<T> {

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use caelix::prelude::*;
 use serde::Deserialize;
@@ -12,14 +12,41 @@ impl Repo {
     }
 }
 
+pub struct AsyncGreetingProvider {
+    greeting: String,
+}
+
+impl AsyncGreetingProvider {
+    pub fn greet(&self) -> &str {
+        &self.greeting
+    }
+}
+
+async fn connect_async_greeting_provider(
+    container: Arc<Container>,
+) -> Result<AsyncGreetingProvider> {
+    let repo = container.resolve::<Repo>();
+
+    actix_web::rt::time::sleep(Duration::from_millis(1)).await;
+
+    Ok(AsyncGreetingProvider {
+        greeting: format!("{} + hello from async factory", repo.greet()),
+    })
+}
+
 #[injectable]
 pub struct Service {
     repo: Arc<Repo>,
+    async_greeting: Arc<AsyncGreetingProvider>,
 }
 
 impl Service {
     pub fn call_repo(&self) -> String {
         self.repo.greet()
+    }
+
+    pub fn call_async_provider(&self) -> String {
+        self.async_greeting.greet().to_string()
     }
 
     pub fn find_user(&self, id: i64) -> String {
@@ -53,6 +80,11 @@ pub struct UserController {
 
 #[controller("/users")]
 impl UserController {
+    #[get("/async-provider")]
+    pub async fn async_provider(&self) -> Result<String> {
+        Ok(self.service.call_async_provider())
+    }
+
     #[get("/{id}")]
     pub async fn get_user(&self, #[param] id: i64) -> Result<String> {
         Ok(self.service.find_user(id))
@@ -75,6 +107,7 @@ impl Module for UserModule {
     fn register() -> ModuleMetadata {
         ModuleMetadata::new()
             .provider::<Repo>()
+            .provider_async_factory::<AsyncGreetingProvider, _, _>(connect_async_greeting_provider)
             .provider::<Service>()
             .controller::<UserController>()
     }
