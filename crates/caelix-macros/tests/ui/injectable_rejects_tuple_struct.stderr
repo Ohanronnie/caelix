@@ -1,0 +1,7 @@
+error: custom attribute panicked
+ --> tests/ui/injectable_rejects_tuple_struct.rs:5:1
+  |
+5 | #[injectable]
+  | ^^^^^^^^^^^^^
+  |
+  = help: message: #[injectable] only supports named-field or unit structs

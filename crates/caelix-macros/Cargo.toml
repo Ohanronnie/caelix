@@ -10,3 +10,9 @@ proc-macro = true
 syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
+
+[dev-dependencies]
+actix-web = "4.14.0"
+caelix-core = { path = "../caelix-core" }
+serde = { version = "1.0.228", features = ["derive"] }
+trybuild = "1.0.114"

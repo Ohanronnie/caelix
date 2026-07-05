@@ -1,0 +1,7 @@
+error: custom attribute panicked
+ --> tests/ui/controller_rejects_pattern_extractor.rs:5:1
+  |
+5 | #[controller("/users")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: message: expected a simple identifier for extractor argument
