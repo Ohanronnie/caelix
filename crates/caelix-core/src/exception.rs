@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use http::StatusCode;
 
 #[derive(Debug)]
@@ -5,6 +7,7 @@ pub struct HttpException {
     pub status: StatusCode,
     pub message: String,
     pub error: &'static str,
+    pub errors: Option<BTreeMap<String, Vec<String>>>,
     pub source: Option<anyhow::Error>,
 }
 
@@ -14,12 +17,18 @@ impl HttpException {
             status,
             error,
             message: message.into(),
+            errors: None,
             source: None,
         }
     }
 
     pub fn with_source(mut self, err: impl Into<anyhow::Error>) -> Self {
         self.source = Some(err.into());
+        self
+    }
+
+    pub fn with_errors(mut self, errors: BTreeMap<String, Vec<String>>) -> Self {
+        self.errors = Some(errors);
         self
     }
 }
@@ -287,6 +296,127 @@ impl InternalServerErrorException {
 impl From<sqlx::Error> for HttpException {
     fn from(err: sqlx::Error) -> Self {
         InternalServerErrorException::new(err)
+    }
+}
+
+#[cfg(feature = "validator")]
+impl From<validator::ValidationErrors> for HttpException {
+    fn from(err: validator::ValidationErrors) -> Self {
+        BadRequestException::new("Validation failed").with_errors(format_validation_errors(&err))
+    }
+}
+
+#[cfg(feature = "validator")]
+fn format_validation_errors(err: &validator::ValidationErrors) -> BTreeMap<String, Vec<String>> {
+    let mut errors = BTreeMap::new();
+    collect_validation_errors("", err, &mut errors);
+    errors
+}
+
+#[cfg(feature = "validator")]
+fn collect_validation_errors(
+    prefix: &str,
+    err: &validator::ValidationErrors,
+    field_errors: &mut BTreeMap<String, Vec<String>>,
+) {
+    let mut fields = err.errors().iter().collect::<Vec<_>>();
+    fields.sort_by_key(|(field, _)| **field);
+
+    for (field, kind) in fields {
+        let path = if prefix.is_empty() {
+            (*field).to_string()
+        } else {
+            format!("{prefix}.{field}")
+        };
+
+        collect_validation_error_kind(&path, kind, field_errors);
+    }
+}
+
+#[cfg(feature = "validator")]
+fn collect_validation_error_kind(
+    path: &str,
+    kind: &validator::ValidationErrorsKind,
+    field_errors: &mut BTreeMap<String, Vec<String>>,
+) {
+    match kind {
+        validator::ValidationErrorsKind::Field(errors) => {
+            for error in errors {
+                field_errors
+                    .entry(path.to_string())
+                    .or_default()
+                    .push(format_validation_error(error));
+            }
+        }
+        validator::ValidationErrorsKind::Struct(errors) => {
+            collect_validation_errors(path, errors, field_errors);
+        }
+        validator::ValidationErrorsKind::List(errors) => {
+            for (index, errors) in errors {
+                collect_validation_errors(&format!("{path}[{index}]"), errors, field_errors);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "validator")]
+fn format_validation_error(error: &validator::ValidationError) -> String {
+    if let Some(message) = &error.message {
+        return message.to_string();
+    }
+
+    match error.code.as_ref() {
+        "email" => "must be a valid email".to_string(),
+        "length" => format_length_validation_error(error),
+        "required" => "is required".to_string(),
+        "url" => "must be a valid URL".to_string(),
+        "regex" => "has an invalid format".to_string(),
+        "contains" => match validation_param(error, "needle") {
+            Some(needle) => format!("must contain {needle}"),
+            None => "must contain the required value".to_string(),
+        },
+        "does_not_contain" => match validation_param(error, "needle") {
+            Some(needle) => format!("must not contain {needle}"),
+            None => "contains a forbidden value".to_string(),
+        },
+        "must_match" => match validation_param(error, "other") {
+            Some(other) => format!("must match {other}"),
+            None => "does not match".to_string(),
+        },
+        "ip" => "must be a valid IP address".to_string(),
+        "ipv4" => "must be a valid IPv4 address".to_string(),
+        "ipv6" => "must be a valid IPv6 address".to_string(),
+        code => format!("is invalid ({code})"),
+    }
+}
+
+#[cfg(feature = "validator")]
+fn format_length_validation_error(error: &validator::ValidationError) -> String {
+    match (
+        validation_param(error, "equal"),
+        validation_param(error, "min"),
+        validation_param(error, "max"),
+    ) {
+        (Some(equal), _, _) => format!("must be exactly {equal} characters"),
+        (None, Some(min), Some(max)) => {
+            format!("must be between {min} and {max} characters")
+        }
+        (None, Some(min), None) => format!("must be at least {min} characters"),
+        (None, None, Some(max)) => format!("must be at most {max} characters"),
+        (None, None, None) => "has an invalid length".to_string(),
+    }
+}
+
+#[cfg(feature = "validator")]
+fn validation_param(error: &validator::ValidationError, name: &str) -> Option<String> {
+    let value = error.params.get(name)?;
+
+    match value {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Null => None,
+        value => Some(value.to_string()),
     }
 }
 

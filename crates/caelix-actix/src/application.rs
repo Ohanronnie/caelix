@@ -1,10 +1,13 @@
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use actix_web::{App, HttpResponse, HttpServer, dev::Service, error::JsonPayloadError, web};
 use caelix_core::{
-    BadRequestException, Container, HttpResponse as CaelixHttpResponse, IntoCaelixResponse, Module,
-    PayloadTooLargeException, build_container, log_application_started, log_http_request,
-    log_listening, log_module_routes, register_module_controllers,
+    BadRequestException, Container, HttpResponse as CaelixHttpResponse, IntoCaelixResponse,
+    LogLevel, Module, PayloadTooLargeException, build_container, log, log_application_started,
+    log_http_request, log_listening, log_module_routes, register_module_controllers,
 };
 
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
@@ -137,20 +140,39 @@ impl Application {
         let configure_fn = self.configure_fn;
         let body_limit = self.body_limit;
         let addr = addr.to_string();
+        let http_stall = std::env::var("CAELIX_HTTP_STALL_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|milliseconds| *milliseconds > 0)
+            .map(Duration::from_millis);
 
         log_listening(&addr);
+        if let Some(http_stall) = http_stall {
+            log(
+                "HTTP",
+                LogLevel::Warn,
+                format!("HTTP stall enabled: {}ms", http_stall.as_millis()),
+                None,
+            );
+        }
 
         HttpServer::new(move || {
+            let http_stall = http_stall;
+
             App::new()
                 .app_data(web::Data::new(container.clone()))
                 .app_data(json_config(body_limit))
-                .wrap_fn(|req, service| {
+                .wrap_fn(move |req, service| {
                     let method = req.method().to_string();
                     let path = req.path().to_string();
                     let start = Instant::now();
                     let future = service.call(req);
 
                     async move {
+                        if let Some(http_stall) = http_stall {
+                            actix_web::rt::time::sleep(http_stall).await;
+                        }
+
                         let response = future.await?;
                         let status = response.status().as_u16();
                         log_http_request(&method, &path, status, start.elapsed());

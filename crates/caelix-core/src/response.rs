@@ -109,12 +109,14 @@ impl IntoCaelixResponse for HttpException {
             status: u16,
             error: &'static str,
             message: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            errors: Option<std::collections::BTreeMap<String, Vec<String>>>,
         }
 
-        let message = if self.status.is_server_error() {
-            "Internal Server Error".to_string()
+        let (message, errors) = if self.status.is_server_error() {
+            ("Internal Server Error".to_string(), None)
         } else {
-            self.message
+            (self.message, self.errors)
         };
 
         HttpResponse::json(
@@ -123,6 +125,7 @@ impl IntoCaelixResponse for HttpException {
                 status: self.status.as_u16(),
                 error: self.error,
                 message,
+                errors,
             },
         )
     }

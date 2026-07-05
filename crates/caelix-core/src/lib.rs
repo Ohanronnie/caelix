@@ -24,3 +24,6 @@ pub use logging::*;
 pub use module::*;
 pub use response::*;
 pub use result::Result;
+
+#[cfg(feature = "validator")]
+pub use validator;

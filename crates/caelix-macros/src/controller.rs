@@ -84,6 +84,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             for input in method.sig.inputs.iter_mut() {
                 if let FnArg::Typed(pat_type) = input {
                     let mut found: Option<Extractor> = None;
+                    let mut needs_validation = false;
 
                     pat_type.attrs.retain(|attr| {
                         if attr.path().is_ident("param") {
@@ -98,6 +99,9 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         } else if attr.path().is_ident("user") {
                             found = Some(Extractor::User);
                             false
+                        } else if attr.path().is_ident("validate") {
+                            needs_validation = true;
+                            false
                         } else {
                             true
                         }
@@ -110,7 +114,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         };
                         let arg_type = pat_type.ty.clone();
 
-                        extractor_args.push((extractor, arg_name, arg_type));
+                        extractor_args.push((extractor, arg_name, arg_type, needs_validation));
                     }
                 }
             }
@@ -130,7 +134,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
                 let wrapper_params = extractor_args
                     .iter()
-                    .filter_map(|(extractor, name, ty)| match extractor {
+                    .filter_map(|(extractor, name, ty, _needs_validation)| match extractor {
                         Extractor::Param => Some(quote! { #name: actix_web::web::Path<#ty> }),
                         Extractor::Body => Some(quote! { #name: actix_web::web::Json<#ty> }),
                         Extractor::Query => Some(quote! { #name: actix_web::web::Query<#ty> }),
@@ -140,15 +144,29 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
                 let call_args = extractor_args
                     .iter()
-                    .map(|(extractor, name, ty)| match extractor {
-                        Extractor::Param | Extractor::Body | Extractor::Query => {
+                    .map(|(extractor, name, ty, needs_validation)| {
+                        let base = match extractor {
+                            Extractor::Param | Extractor::Body | Extractor::Query => {
                             quote! { #name.into_inner() }
-                        }
-                        Extractor::User => quote! {
+                            }
+                            Extractor::User => quote! {
                             request_context.get::<#ty>()
                                 .map(|value| (*value).clone())
                                 .ok_or_else(|| caelix_core::UnauthorizedException::new("Not authenticated"))?
-                        },
+                            },
+                        };
+
+                        if *needs_validation {
+                            quote! {
+                                {
+                                    let value = #base;
+                                    caelix_core::validator::Validate::validate(&value)?;
+                                    value
+                                }
+                            }
+                        } else {
+                            base
+                        }
                     })
                     .collect::<Vec<_>>();
                 let interceptor_chain = interceptor_types

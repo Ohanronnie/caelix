@@ -3,6 +3,7 @@ use std::sync::Arc;
 use caelix::prelude::*;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool, sqlite::SqlitePoolOptions};
+use validator::Validate;
 
 #[derive(Clone)]
 pub struct Database {
@@ -58,15 +59,19 @@ pub struct User {
     pub email: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct CreateUserDto {
+    #[validate(length(min = 3))]
     pub name: String,
+    #[validate(email)]
     pub email: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct UpdateUserDto {
+    #[validate(length(min = 3))]
     pub name: Option<String>,
+    #[validate(email)]
     pub email: Option<String>,
 }
 
@@ -200,7 +205,12 @@ impl UserController {
     }
 
     #[post("")]
-    pub async fn create_user(&self, #[body] body: CreateUserDto) -> Result<Response<User>> {
+    pub async fn create_user(
+        &self,
+        #[body]
+        #[validate]
+        body: CreateUserDto,
+    ) -> Result<Response<User>> {
         self.service.create_user(body).await
     }
 
@@ -208,7 +218,9 @@ impl UserController {
     pub async fn update_user(
         &self,
         #[param] id: i64,
-        #[body] body: UpdateUserDto,
+        #[body]
+        #[validate]
+        body: UpdateUserDto,
     ) -> Result<Response<User>> {
         self.service.update_user(id, body).await
     }

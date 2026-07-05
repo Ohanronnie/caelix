@@ -92,6 +92,28 @@ async fn full_user_crud_routes_work_against_sqlite() {
 
     let response = actix_test::call_service(
         &app,
+        actix_test::TestRequest::post()
+            .uri("/users")
+            .insert_header(("content-type", "application/json"))
+            .set_payload(r#"{"name":"a","email":"not-an-email"}"#)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error: Value = actix_test::read_body_json(response).await;
+    assert_eq!(error["status"], 400);
+    assert_eq!(error["error"], "Bad Request");
+    assert_eq!(error["message"], "Validation failed");
+    assert_eq!(
+        error["errors"],
+        serde_json::json!({
+            "email": ["must be a valid email"],
+            "name": ["must be at least 3 characters"]
+        })
+    );
+
+    let response = actix_test::call_service(
+        &app,
         actix_test::TestRequest::get().uri("/users/1").to_request(),
     )
     .await;
@@ -112,6 +134,25 @@ async fn full_user_crud_routes_work_against_sqlite() {
     let updated: Value = actix_test::read_body_json(response).await;
     assert_eq!(updated["name"], "Ada Lovelace");
     assert_eq!(updated["email"], "ada@caelix.dev");
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::patch()
+            .uri("/users/1")
+            .insert_header(("content-type", "application/json"))
+            .set_payload(r#"{"email":"not-an-email"}"#)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error: Value = actix_test::read_body_json(response).await;
+    assert_eq!(error["message"], "Validation failed");
+    assert_eq!(
+        error["errors"],
+        serde_json::json!({
+            "email": ["must be a valid email"]
+        })
+    );
 
     let response = actix_test::call_service(
         &app,

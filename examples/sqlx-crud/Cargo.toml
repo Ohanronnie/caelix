@@ -7,7 +7,8 @@ edition = "2024"
 actix-web = "4.14.0"
 caelix = { path = "../../crates/caelix" }
 caelix-actix = { path = "../../crates/caelix-actix" }
-caelix-core = { path = "../../crates/caelix-core", features = ["sqlx"] }
+caelix-core = { path = "../../crates/caelix-core", features = ["sqlx", "validator"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "macros"] }
+validator = { version = "0.18", features = ["derive"] }

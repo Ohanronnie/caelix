@@ -137,7 +137,7 @@ impl Logger {
         let timestamp = Local::now().format("%m/%d/%Y, %I:%M:%S %p");
         let level_label = format!("{:>5}", level.label());
         let elapsed = elapsed
-            .map(|duration| format!(" +{}ms", duration.as_millis()))
+            .map(|duration| format!(" {}", format_elapsed(duration)))
             .unwrap_or_default();
 
         let message = match level {
@@ -173,6 +173,16 @@ impl Logger {
             LogLevel::Error => tracing::error!(target: "caelix", message = line.as_str()),
             LogLevel::Debug => tracing::debug!(target: "caelix", message = line.as_str()),
         }
+    }
+}
+
+fn format_elapsed(duration: Duration) -> String {
+    let milliseconds = duration.as_millis();
+
+    if milliseconds > 0 {
+        format!("+{milliseconds}ms")
+    } else {
+        format!("+{}µs", duration.as_micros())
     }
 }
 
@@ -481,5 +491,18 @@ fn parse_log_level(value: &str) -> Option<u8> {
         "error" => Some(LogLevel::Error.priority()),
         "off" => Some(0),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn elapsed_format_preserves_sub_millisecond_detail() {
+        assert_eq!(format_elapsed(Duration::ZERO), "+0µs");
+        assert_eq!(format_elapsed(Duration::from_micros(742)), "+742µs");
+        assert_eq!(format_elapsed(Duration::from_micros(1_200)), "+1ms");
+        assert_eq!(format_elapsed(Duration::from_millis(42)), "+42ms");
     }
 }
