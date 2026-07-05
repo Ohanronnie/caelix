@@ -1,2 +1,3 @@
 /target/
 PLAN.md
+examples/sqlx-crud/users.db

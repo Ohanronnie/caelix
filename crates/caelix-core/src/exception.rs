@@ -1,5 +1,6 @@
 use http::StatusCode;
 
+#[derive(Debug)]
 pub struct HttpException {
     pub status: StatusCode,
     pub message: String,
@@ -279,6 +280,13 @@ impl InternalServerErrorException {
             "Internal Server Error",
         )
         .with_source(err)
+    }
+}
+
+#[cfg(feature = "sqlx")]
+impl From<sqlx::Error> for HttpException {
+    fn from(err: sqlx::Error) -> Self {
+        InternalServerErrorException::new(err)
     }
 }
 

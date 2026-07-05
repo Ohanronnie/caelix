@@ -8,8 +8,13 @@ license = "MIT"
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+sqlx = ["dep:sqlx"]
+
 [dependencies]
 anyhow = "1.0.103"
 http = "1.4.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+sqlx = { version = "0.8.6", optional = true, default-features = false }

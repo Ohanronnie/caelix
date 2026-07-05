@@ -1,7 +1,10 @@
 [workspace]
 members = [
     "crates/caelix-core",
-    "crates/caelix", "crates/caelix-actix"
-, "examples/hello-world", "crates/caelix-macros"]
+    "crates/caelix",
+    "crates/caelix-actix",
+    "crates/caelix-macros",
+    "examples/hello-world",
+    "examples/sqlx-crud",
+]
 resolver = "3"
-
