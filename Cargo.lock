@@ -374,6 +374,7 @@ name = "caelix-macros"
 version = "0.1.0"
 dependencies = [
  "actix-web",
+ "caelix-actix",
  "caelix-core",
  "proc-macro2",
  "quote",

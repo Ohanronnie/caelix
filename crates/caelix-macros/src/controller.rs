@@ -1,17 +1,45 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{FnArg, ImplItem, ItemImpl, LitStr, Pat, parse_macro_input};
+use syn::{
+    FnArg, ImplItem, ItemImpl, LitStr, Pat, Token, Type, parse::Parser, parse_macro_input,
+    punctuated::Punctuated,
+};
 
 enum Extractor {
     Param,
     Body,
     Query,
+    User,
+}
+
+fn parse_guard_types(attr: &syn::Attribute) -> Vec<Type> {
+    Punctuated::<Type, Token![,]>::parse_terminated
+        .parse2(
+            attr.meta
+                .require_list()
+                .expect("expected guard list")
+                .tokens
+                .clone(),
+        )
+        .expect("expected one or more guard types")
+        .into_iter()
+        .collect()
 }
 
 pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     let base_path = parse_macro_input!(args as LitStr).value();
     let mut impl_block = parse_macro_input!(input as ItemImpl);
     let struct_type = impl_block.self_ty.clone();
+    let mut controller_guards = Vec::new();
+
+    impl_block.attrs.retain(|attr| {
+        if attr.path().is_ident("use_guard") {
+            controller_guards.extend(parse_guard_types(attr));
+            false
+        } else {
+            true
+        }
+    });
 
     let mut wrappers = Vec::new();
     let mut registrations = Vec::new();
@@ -20,6 +48,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     for item in &mut impl_block.items {
         if let ImplItem::Fn(method) = item {
             let mut route: Option<(&str, String)> = None;
+            let mut method_guards = Vec::new();
 
             // Strip route attributes off before re-emitting, or rustc
             // complains about an unrecognized attribute in the final output
@@ -31,6 +60,12 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         return false;
                     }
                 }
+
+                if attr.path().is_ident("use_guard") {
+                    method_guards.extend(parse_guard_types(attr));
+                    return false;
+                }
+
                 true
             });
 
@@ -49,6 +84,9 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             false
                         } else if attr.path().is_ident("query") {
                             found = Some(Extractor::Query);
+                            false
+                        } else if attr.path().is_ident("user") {
+                            found = Some(Extractor::User);
                             false
                         } else {
                             true
@@ -71,39 +109,85 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 let method_name = &method.sig.ident;
                 let wrapper_name = format_ident!("__{}_handler", method_name);
                 let actix_verb = format_ident!("{}", verb);
+                let guard_types = controller_guards
+                    .iter()
+                    .chain(method_guards.iter())
+                    .collect::<Vec<_>>();
 
-                let wrapper_params =
-                    extractor_args
-                        .iter()
-                        .map(|(extractor, name, ty)| match extractor {
-                            Extractor::Param => quote! { #name: actix_web::web::Path<#ty> },
-                            Extractor::Body => quote! { #name: actix_web::web::Json<#ty> },
-                            Extractor::Query => quote! { #name: actix_web::web::Query<#ty> },
-                        });
+                let wrapper_params = extractor_args
+                    .iter()
+                    .filter_map(|(extractor, name, ty)| match extractor {
+                        Extractor::Param => Some(quote! { #name: actix_web::web::Path<#ty> }),
+                        Extractor::Body => Some(quote! { #name: actix_web::web::Json<#ty> }),
+                        Extractor::Query => Some(quote! { #name: actix_web::web::Query<#ty> }),
+                        Extractor::User => None,
+                    })
+                    .collect::<Vec<_>>();
 
-                let call_args = extractor_args.iter().map(|(_, name, _)| {
-                    quote! { #name.into_inner() }
-                });
+                let call_args = extractor_args
+                    .iter()
+                    .map(|(extractor, name, ty)| match extractor {
+                        Extractor::Param | Extractor::Body | Extractor::Query => {
+                            quote! { #name.into_inner() }
+                        }
+                        Extractor::User => quote! {
+                            ctx.get::<#ty>()
+                                .map(|value| (*value).clone())
+                                .ok_or_else(|| caelix_core::UnauthorizedException::new("Not authenticated"))?
+                        },
+                    })
+                    .collect::<Vec<_>>();
 
                 wrappers.push(quote! {
                     async fn #wrapper_name(
                         container: actix_web::web::Data<std::sync::Arc<caelix_core::Container>>,
+                        req: actix_web::HttpRequest,
                         #(#wrapper_params),*
                     ) -> actix_web::HttpResponse {
+                        let headers = req
+                            .headers()
+                            .iter()
+                            .filter_map(|(name, value)| {
+                                Some((name.to_string(), value.to_str().ok()?.to_string()))
+                            })
+                            .collect();
+                        let ctx = caelix_core::RequestContext::new(
+                            req.method().to_string(),
+                            req.path().to_string(),
+                            headers,
+                        );
+
+                        #(
+                            let guard = container.resolve::<#guard_types>();
+                            match caelix_core::Guard::can_activate(&*guard, &ctx).await {
+                                Ok(true) => {}
+                                Ok(false) => {
+                                    return caelix_actix::to_actix_response(
+                                        caelix_core::IntoCaelixResponse::into_response(
+                                            caelix_core::ForbiddenException::new("Access denied"),
+                                        ),
+                                    );
+                                }
+                                Err(err) => {
+                                    return caelix_actix::to_actix_response(
+                                        caelix_core::IntoCaelixResponse::into_response(err),
+                                    );
+                                }
+                            }
+                        )*
+
                         let controller = container.resolve::<#struct_type>();
-                        match controller.#method_name(#(#call_args),*).await {
-                            Ok(value) => {
-                                let r = caelix_core::IntoCaelixResponse::into_response(value);
-                                actix_web::HttpResponse::build(
-                                    actix_web::http::StatusCode::from_u16(r.status.as_u16()).unwrap()
-                                ).content_type(r.content_type).body(r.body)
-                            }
-                            Err(e) => {
-                                let r = caelix_core::IntoCaelixResponse::into_response(e);
-                                actix_web::HttpResponse::build(
-                                    actix_web::http::StatusCode::from_u16(r.status.as_u16()).unwrap()
-                                ).content_type(r.content_type).body(r.body)
-                            }
+                        let result: caelix_core::Result<_> = async {
+                            Ok(controller.#method_name(#(#call_args),*).await?)
+                        }.await;
+
+                        match result {
+                            Ok(value) => caelix_actix::to_actix_response(
+                                caelix_core::IntoCaelixResponse::into_response(value),
+                            ),
+                            Err(err) => caelix_actix::to_actix_response(
+                                caelix_core::IntoCaelixResponse::into_response(err),
+                            ),
                         }
                     }
                 });

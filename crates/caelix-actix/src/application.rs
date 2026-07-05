@@ -2,12 +2,20 @@ use std::{sync::Arc, time::Instant};
 
 use actix_web::{App, HttpResponse, HttpServer, dev::Service, error::JsonPayloadError, web};
 use caelix_core::{
-    BadRequestException, Container, IntoCaelixResponse, Module, PayloadTooLargeException,
-    build_container, log_application_started, log_http_request, log_listening, log_module_routes,
-    register_module_controllers,
+    BadRequestException, Container, HttpResponse as CaelixHttpResponse, IntoCaelixResponse, Module,
+    PayloadTooLargeException, build_container, log_application_started, log_http_request,
+    log_listening, log_module_routes, register_module_controllers,
 };
 
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+
+pub fn to_actix_response(response: CaelixHttpResponse) -> HttpResponse {
+    let status = actix_web::http::StatusCode::from_u16(response.status.as_u16()).unwrap();
+
+    HttpResponse::build(status)
+        .content_type(response.content_type)
+        .body(response.body)
+}
 
 pub struct Application {
     container: Arc<Container>,
@@ -29,11 +37,7 @@ fn json_config(body_limit: usize) -> web::JsonConfig {
             } else {
                 BadRequestException::new("invalid JSON request body")
             };
-            let response = exception.into_response();
-            let status = actix_web::http::StatusCode::from_u16(response.status.as_u16()).unwrap();
-            let response = HttpResponse::build(status)
-                .content_type(response.content_type)
-                .body(response.body);
+            let response = to_actix_response(exception.into_response());
 
             actix_web::error::InternalError::from_response(err, response).into()
         })

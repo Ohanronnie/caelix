@@ -58,6 +58,33 @@ fn container_provides_framework_logger_by_default() {
     assert_eq!(logger.context(), "Application");
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AuthenticatedUser {
+    id: i64,
+}
+
+#[test]
+fn request_context_exposes_request_metadata_headers_and_typed_extensions() {
+    let ctx = RequestContext::new(
+        "GET".to_string(),
+        "/users/me".to_string(),
+        [("Authorization".to_string(), "Bearer token-123".to_string())]
+            .into_iter()
+            .collect(),
+    );
+
+    assert_eq!(ctx.method(), "GET");
+    assert_eq!(ctx.path(), "/users/me");
+    assert_eq!(ctx.header("authorization"), Some("Bearer token-123"));
+    assert_eq!(ctx.header("AUTHORIZATION"), Some("Bearer token-123"));
+    assert_eq!(ctx.bearer_token(), Some("token-123"));
+
+    ctx.set(AuthenticatedUser { id: 42 });
+
+    assert_eq!(ctx.get::<AuthenticatedUser>().unwrap().id, 42);
+    assert!(ctx.get::<String>().is_none());
+}
+
 struct AwaitingProvider {
     greeting: &'static str,
 }

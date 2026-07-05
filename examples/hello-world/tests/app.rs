@@ -81,3 +81,47 @@ async fn mounts_imported_controller_routes_with_extractors() {
         "hello from Repo: created Ronnie <r@x.com>"
     );
 }
+
+#[actix_web::test]
+async fn guarded_route_threads_context_into_user_extractor() {
+    let container = Arc::new(build_container::<AppModule>().await);
+    let app = actix_test::init_service(
+        App::new()
+            .app_data(web::Data::new(container))
+            .configure(|cfg| register_module_controllers::<AppModule>(cfg)),
+    )
+    .await;
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/profile/me")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/profile/me")
+            .insert_header(("authorization", "Bearer wrong"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/profile/me")
+            .insert_header(("authorization", "Bearer secret-token"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        actix_test::read_body(response).await,
+        "hello from Repo: user 7"
+    );
+}

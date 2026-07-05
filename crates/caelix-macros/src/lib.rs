@@ -9,6 +9,11 @@ pub fn injectable(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
+pub fn guard(args: TokenStream, input: TokenStream) -> TokenStream {
+    injectable::expand(args, input)
+}
+
+#[proc_macro_attribute]
 pub fn controller(args: TokenStream, input: TokenStream) -> TokenStream {
     controller::expand(args, input)
 }

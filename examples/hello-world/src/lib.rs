@@ -100,6 +100,29 @@ pub struct CreateUserDto {
     email: String,
 }
 
+#[derive(Clone)]
+pub struct CurrentUser {
+    pub id: i64,
+}
+
+#[guard]
+pub struct TokenGuard;
+
+impl Guard for TokenGuard {
+    fn can_activate<'a>(&'a self, ctx: &'a RequestContext) -> BoxFuture<'a, Result<bool>> {
+        Box::pin(async move {
+            match ctx.bearer_token() {
+                Some("secret-token") => {
+                    ctx.set(CurrentUser { id: 7 });
+                    Ok(true)
+                }
+                Some(_) => Err(UnauthorizedException::new("Invalid token")),
+                None => Err(UnauthorizedException::new("Missing token")),
+            }
+        })
+    }
+}
+
 #[injectable]
 pub struct UserController {
     service: Arc<Service>,
@@ -128,6 +151,20 @@ impl UserController {
     }
 }
 
+#[injectable]
+pub struct ProfileController {
+    service: Arc<Service>,
+}
+
+#[controller("/profile")]
+#[use_guard(TokenGuard)]
+impl ProfileController {
+    #[get("/me")]
+    pub async fn me(&self, #[user] user: CurrentUser) -> Result<String> {
+        Ok(self.service.find_user(user.id))
+    }
+}
+
 pub struct UserModule;
 
 impl Module for UserModule {
@@ -138,8 +175,10 @@ impl Module for UserModule {
             .provider_async_factory::<ExpensiveStartupProvider, _, _>(
                 warm_expensive_startup_provider,
             )
+            .provider::<TokenGuard>()
             .provider::<Service>()
             .controller::<UserController>()
+            .controller::<ProfileController>()
     }
 }
 

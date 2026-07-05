@@ -1,5 +1,5 @@
-use caelix_core::{Container, Result};
-use caelix_macros::{controller, injectable};
+use caelix_core::{BoxFuture, Container, Guard, RequestContext, Result};
+use caelix_macros::{controller, guard, injectable};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -12,10 +12,28 @@ struct CreateUser {
     name: String,
 }
 
+#[derive(Clone)]
+struct CurrentUser {
+    id: i64,
+}
+
+#[guard]
+struct AuthGuard;
+
+impl Guard for AuthGuard {
+    fn can_activate<'a>(&'a self, ctx: &'a RequestContext) -> BoxFuture<'a, Result<bool>> {
+        Box::pin(async move {
+            ctx.set(CurrentUser { id: 42 });
+            Ok(true)
+        })
+    }
+}
+
 #[injectable]
 struct UserController;
 
 #[controller("/users")]
+#[use_guard(AuthGuard)]
 impl UserController {
     #[get("/{id}")]
     async fn get_user(&self, #[param] id: i64) -> Result<String> {
@@ -31,10 +49,16 @@ impl UserController {
     async fn create_user(&self, #[body] body: CreateUser) -> Result<String> {
         Ok(body.name)
     }
+
+    #[get("/me")]
+    async fn me(&self, #[user] user: CurrentUser) -> Result<String> {
+        Ok(user.id.to_string())
+    }
 }
 
 async fn exercise() {
     let mut container = Container::new();
+    container.register::<AuthGuard>().await;
     container.register::<UserController>().await;
 
     let _controller = container.resolve::<UserController>();
