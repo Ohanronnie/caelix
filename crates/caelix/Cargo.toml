@@ -1,0 +1,13 @@
+[package]
+name = "caelix"
+version = "0.1.0"
+edition = "2024"
+description = "Public Caelix framework crate."
+license = "MIT"
+
+[dependencies]
+caelix-core = { path = "../caelix-core", version = "0.1.0" }
+
+[lib]
+path = "src/lib.rs"
+

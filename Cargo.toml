@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/caelix-core",
+    "crates/caelix",
+]
+resolver = "3"
+
