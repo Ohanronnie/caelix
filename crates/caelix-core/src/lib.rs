@@ -1,11 +1,18 @@
 //! Core primitives for Caelix.
 
-pub use http::StatusCode;
-pub mod container;
-pub mod exception;
-pub mod module;
-pub mod response;
+extern crate self as caelix_core;
+
+mod container;
+mod controller;
+mod exception;
+mod module;
+mod response;
 mod result;
+
 pub use container::*;
+pub use controller::*;
+pub use exception::*;
+pub use http::StatusCode;
 pub use module::*;
+pub use response::*;
 pub use result::Result;

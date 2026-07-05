@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crates/caelix-core",
-    "crates/caelix",
-]
+    "crates/caelix", "crates/caelix-actix"
+, "examples/hello-world", "crates/caelix-macros"]
 resolver = "3"
 

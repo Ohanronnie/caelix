@@ -1,0 +1,11 @@
+[package]
+name = "hello-world"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+actix-web = "4.14.0"
+caelix = { path = "../../crates/caelix" }
+caelix-actix = { path = "../../crates/caelix-actix" }
+caelix-core = { path = "../../crates/caelix-core" }
+serde = { version = "1.0.228", features = ["derive"] }

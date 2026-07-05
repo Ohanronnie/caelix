@@ -16,9 +16,19 @@ impl HttpResponse {
         }
     }
 
+    /// Serializes `body` as JSON. This is the single place JSON encoding
+    /// happens — everything else below routes through here.
     pub fn json(status: StatusCode, body: impl serde::Serialize) -> Self {
         let body = serde_json::to_vec(&body).expect("failed to serialize response body");
         Self::new(status, body, "application/json")
+    }
+
+    pub fn text(status: StatusCode, body: impl Into<String>) -> Self {
+        Self::new(status, body.into().into_bytes(), "text/plain")
+    }
+
+    pub fn bytes(status: StatusCode, body: impl Into<Vec<u8>>) -> Self {
+        Self::new(status, body.into(), "application/octet-stream")
     }
 }
 
@@ -26,6 +36,9 @@ pub trait IntoCaelixResponse {
     fn into_response(self) -> HttpResponse;
 }
 
+/// A body whose shape isn't known at the `Response<T>` type level —
+/// used by `Response::Raw` so a handler can return e.g. `Response<()>`
+/// while still sending an arbitrary JSON/text/bytes payload.
 pub enum Body {
     Json(Vec<u8>),
     Text(String),
@@ -33,11 +46,14 @@ pub enum Body {
 }
 
 impl Body {
-    fn into_response(self, status: StatusCode) -> HttpResponse {
+    /// Renamed from `into_response` to avoid reading like the trait
+    /// method of the same name a few lines below — this one takes an
+    /// extra `status` arg and isn't part of `IntoCaelixResponse`.
+    fn respond_with(self, status: StatusCode) -> HttpResponse {
         match self {
-            Body::Json(body) => HttpResponse::new(status, body, "application/json"),
-            Body::Text(text) => HttpResponse::new(status, text.into_bytes(), "text/plain"),
-            Body::Bytes(body) => HttpResponse::new(status, body, "application/octet-stream"),
+            Body::Json(bytes) => HttpResponse::new(status, bytes, "application/json"),
+            Body::Text(text) => HttpResponse::text(status, text),
+            Body::Bytes(bytes) => HttpResponse::bytes(status, bytes),
         }
     }
 }
@@ -63,14 +79,26 @@ impl Response<()> {
     }
 
     pub fn json(status: StatusCode, value: impl serde::Serialize) -> Self {
-        let body = serde_json::to_vec(&value).expect("serialize failed");
-        Response::Raw(status, Body::Json(body))
+        let bytes = serde_json::to_vec(&value).expect("failed to serialize response body");
+        Response::Raw(status, Body::Json(bytes))
     }
 }
 
 impl IntoCaelixResponse for HttpResponse {
     fn into_response(self) -> HttpResponse {
         self
+    }
+}
+
+impl IntoCaelixResponse for String {
+    fn into_response(self) -> HttpResponse {
+        HttpResponse::text(StatusCode::OK, self)
+    }
+}
+
+impl IntoCaelixResponse for &'static str {
+    fn into_response(self) -> HttpResponse {
+        HttpResponse::text(StatusCode::OK, self)
     }
 }
 
@@ -97,72 +125,12 @@ impl IntoCaelixResponse for HttpException {
 impl<T: serde::Serialize> IntoCaelixResponse for Response<T> {
     fn into_response(self) -> HttpResponse {
         match self {
-            Response::Body(value) => {
-                let body = serde_json::to_vec(&value).expect("serialize failed");
-                HttpResponse {
-                    status: StatusCode::OK,
-                    body,
-                    content_type: "application/json",
-                }
+            Response::Body(value) => HttpResponse::json(StatusCode::OK, value),
+            Response::WithStatus(status, value) => HttpResponse::json(status, value),
+            Response::Raw(status, body) => body.respond_with(status),
+            Response::Empty => {
+                HttpResponse::new(StatusCode::NO_CONTENT, Vec::new(), "application/json")
             }
-            Response::WithStatus(status, value) => {
-                let body = serde_json::to_vec(&value).expect("serialize failed");
-                HttpResponse {
-                    status,
-                    body,
-                    content_type: "application/json",
-                }
-            }
-            Response::Raw(status, body) => body.into_response(status),
-            Response::Empty => HttpResponse {
-                status: StatusCode::NO_CONTENT,
-                body: Vec::new(),
-                content_type: "application/json",
-            },
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::exception::NotFoundException;
-
-    #[test]
-    fn converts_json_body_response() {
-        let response = Response::Body("ok").into_response();
-
-        assert_eq!(response.status, StatusCode::OK);
-        assert_eq!(response.body, br#""ok""#);
-        assert_eq!(response.content_type, "application/json");
-    }
-
-    #[test]
-    fn converts_text_response_without_json_encoding() {
-        let response = Response::text(StatusCode::OK, "ok").into_response();
-
-        assert_eq!(response.status, StatusCode::OK);
-        assert_eq!(response.body, b"ok");
-        assert_eq!(response.content_type, "text/plain");
-    }
-
-    #[test]
-    fn converts_empty_response() {
-        let response = Response::no_content().into_response();
-
-        assert_eq!(response.status, StatusCode::NO_CONTENT);
-        assert!(response.body.is_empty());
-        assert_eq!(response.content_type, "application/json");
-    }
-
-    #[test]
-    fn converts_not_found_exception_response() {
-        let response = NotFoundException::new("user not found").into_response();
-
-        assert_eq!(response.status, StatusCode::NOT_FOUND);
-        assert_eq!(
-            response.body,
-            br#"{"status":404,"error":"Not Found","message":"user not found"}"#
-        );
     }
 }

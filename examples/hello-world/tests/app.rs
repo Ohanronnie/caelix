@@ -1,0 +1,65 @@
+use std::sync::Arc;
+
+use actix_web::{App, http::StatusCode, test as actix_test, web};
+use caelix::prelude::build_container;
+use caelix_core::register_module_controllers;
+use hello_world::{AppModule, Service};
+
+#[test]
+fn resolves_service_through_hello_world_app_module() {
+    let container = build_container::<AppModule>();
+
+    let service = container.resolve::<Service>();
+
+    assert_eq!(service.call_repo(), "hello from Repo");
+}
+
+#[actix_web::test]
+async fn mounts_imported_controller_routes_with_extractors() {
+    let container = Arc::new(build_container::<AppModule>());
+    let app = actix_test::init_service(
+        App::new()
+            .app_data(web::Data::new(container))
+            .configure(|cfg| register_module_controllers::<AppModule>(cfg)),
+    )
+    .await;
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get().uri("/users/42").to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        actix_test::read_body(response).await,
+        "hello from Repo: user 42"
+    );
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/users/?term=ronnie")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        actix_test::read_body(response).await,
+        "hello from Repo: search ronnie"
+    );
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/users/")
+            .insert_header(("content-type", "application/json"))
+            .set_payload(r#"{"name":"Ronnie","email":"r@x.com"}"#)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        actix_test::read_body(response).await,
+        "hello from Repo: created Ronnie <r@x.com>"
+    );
+}

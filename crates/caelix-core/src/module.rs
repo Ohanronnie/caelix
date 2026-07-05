@@ -1,4 +1,5 @@
-use crate::{Container, Injectable};
+use crate::{Container, Controller, Injectable};
+use std::any::Any;
 
 pub struct ProviderDef {
     register_fn: fn(&mut Container),
@@ -12,14 +13,29 @@ impl ProviderDef {
     }
 }
 
+pub struct ControllerDef {
+    pub register_fn: fn(&mut dyn Any),
+    provider_register_fn: fn(&mut Container),
+}
+
+impl ControllerDef {
+    pub fn of<C: Controller + Injectable + 'static>() -> Self {
+        Self {
+            register_fn: |any| C::register_routes(any),
+            provider_register_fn: |container| container.register::<C>(),
+        }
+    }
+}
 pub struct ModuleDef {
     register_fn: fn(&mut Container),
+    controller_register_fn: fn(&mut dyn Any),
 }
 
 impl ModuleDef {
     pub fn of<M: Module + 'static>() -> Self {
         Self {
             register_fn: |container| register_module::<M>(container),
+            controller_register_fn: |any| register_module_controllers::<M>(any),
         }
     }
 }
@@ -30,6 +46,7 @@ pub trait Module {
 pub struct ModuleMetadata {
     pub imports: Vec<ModuleDef>,
     pub providers: Vec<ProviderDef>,
+    pub controllers: Vec<ControllerDef>,
 }
 
 impl ModuleMetadata {
@@ -37,6 +54,7 @@ impl ModuleMetadata {
         Self {
             imports: vec![],
             providers: vec![],
+            controllers: vec![],
         }
     }
 
@@ -49,9 +67,9 @@ impl ModuleMetadata {
         self.providers.push(ProviderDef::of::<T>());
         self
     }
-
-    pub fn providers<T: Injectable>(self) -> Self {
-        self.provider::<T>()
+    pub fn controller<C: Controller + Injectable + 'static>(mut self) -> Self {
+        self.controllers.push(ControllerDef::of::<C>());
+        self
     }
 }
 
@@ -65,6 +83,10 @@ pub fn register_module<M: Module>(container: &mut Container) {
     for provider in &metadata.providers {
         (provider.register_fn)(container)
     }
+
+    for controller in &metadata.controllers {
+        (controller.provider_register_fn)(container)
+    }
 }
 
 pub fn build_container<M: Module>() -> Container {
@@ -73,66 +95,14 @@ pub fn build_container<M: Module>() -> Container {
     container
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
+pub fn register_module_controllers<M: Module>(any: &mut dyn Any) {
+    let metadata = M::register();
 
-    pub struct Repo;
-
-    impl Repo {
-        pub fn greet(&self) -> String {
-            "hello from Repo".to_string()
-        }
+    for import in &metadata.imports {
+        (import.controller_register_fn)(any)
     }
 
-    impl Injectable for Repo {
-        fn create(_container: &Container) -> Self {
-            Repo
-        }
-    }
-
-    pub struct Service {
-        repo: Arc<Repo>,
-    }
-
-    impl Service {
-        pub fn call_repo(&self) -> String {
-            self.repo.greet()
-        }
-    }
-
-    impl Injectable for Service {
-        fn create(container: &Container) -> Self {
-            Self {
-                repo: container.resolve::<Repo>(),
-            }
-        }
-    }
-
-    pub struct UserModule;
-
-    impl Module for UserModule {
-        fn register() -> ModuleMetadata {
-            ModuleMetadata::new()
-                .provider::<Repo>()
-                .provider::<Service>()
-        }
-    }
-
-    pub struct AppModule;
-
-    impl Module for AppModule {
-        fn register() -> ModuleMetadata {
-            ModuleMetadata::new().import::<UserModule>()
-        }
-    }
-
-    #[test]
-    fn resolves_deeply_nested_provider_through_app_module() {
-        let container = build_container::<AppModule>();
-
-        let service = container.resolve::<Service>();
-        assert_eq!(service.call_repo(), "hello from Repo");
+    for controller in &metadata.controllers {
+        (controller.register_fn)(any)
     }
 }
