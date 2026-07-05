@@ -12,6 +12,18 @@ pub trait Injectable: Send + Sync + 'static {
     fn create(container: &Container) -> BoxFuture<'_, Self>
     where
         Self: Sized;
+
+    fn on_module_init(&self) -> BoxFuture<'_, crate::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn on_bootstrap(&self) -> BoxFuture<'_, crate::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn on_shutdown(&self) -> BoxFuture<'_, crate::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 #[derive(Clone)]
@@ -38,11 +50,24 @@ impl Container {
 
     pub async fn register<T: Injectable>(&mut self) {
         let instance = T::create(self).await;
-        self.services.insert(TypeId::of::<T>(), Arc::new(instance));
+        let instance = Arc::new(instance);
+        instance.on_module_init().await.unwrap_or_else(|err| {
+            panic!(
+                "on_module_init failed for {}: {}: {}",
+                std::any::type_name::<T>(),
+                err.error,
+                err.message
+            )
+        });
+        self.services.insert(TypeId::of::<T>(), instance);
     }
 
     pub(crate) fn register_erased(&mut self, type_id: TypeId, value: Arc<dyn Any + Send + Sync>) {
         self.services.insert(type_id, value);
+    }
+
+    pub(crate) fn resolve_erased(&self, type_id: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.services.get(&type_id).cloned()
     }
 
     pub(crate) fn contains_type_id(&self, type_id: TypeId) -> bool {

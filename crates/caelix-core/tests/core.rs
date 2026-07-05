@@ -1,4 +1,8 @@
-use std::{any::Any, future::Future, sync::Arc};
+use std::{
+    any::Any,
+    future::Future,
+    sync::{Arc, Mutex},
+};
 
 use caelix_core::*;
 use serde::Serialize;
@@ -147,6 +151,62 @@ fn hand_written_provider_can_await_during_creation() {
     let provider = container.resolve::<AwaitingProvider>();
 
     assert_eq!(provider.greeting, "connected");
+}
+
+static LIFECYCLE_EVENTS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+struct LifecycleProvider;
+
+impl Injectable for LifecycleProvider {
+    fn create(_container: &Container) -> BoxFuture<'_, Self> {
+        Box::pin(async move { Self })
+    }
+
+    fn on_module_init(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async {
+            LIFECYCLE_EVENTS.lock().unwrap().push("init");
+            Ok(())
+        })
+    }
+
+    fn on_bootstrap(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async {
+            LIFECYCLE_EVENTS.lock().unwrap().push("bootstrap");
+            Ok(())
+        })
+    }
+
+    fn on_shutdown(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async {
+            LIFECYCLE_EVENTS.lock().unwrap().push("shutdown");
+            Ok(())
+        })
+    }
+}
+
+struct LifecycleModule;
+impl Module for LifecycleModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().provider::<LifecycleProvider>()
+    }
+}
+
+#[test]
+fn injectable_lifecycle_hooks_run_without_special_provider_registration() {
+    LIFECYCLE_EVENTS.lock().unwrap().clear();
+
+    let mut container = Container::new();
+    block_on(register_module::<LifecycleModule>(&mut container));
+    assert_eq!(*LIFECYCLE_EVENTS.lock().unwrap(), vec!["init"]);
+
+    block_on(bootstrap_module::<LifecycleModule>(&container));
+    assert_eq!(*LIFECYCLE_EVENTS.lock().unwrap(), vec!["init", "bootstrap"]);
+
+    block_on(shutdown_module::<LifecycleModule>(&container));
+    assert_eq!(
+        *LIFECYCLE_EVENTS.lock().unwrap(),
+        vec!["init", "bootstrap", "shutdown"]
+    );
 }
 
 struct FactoryBuiltProvider {
