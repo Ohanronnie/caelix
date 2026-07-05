@@ -49,6 +49,15 @@ fn container_registers_instances_and_injectable_providers() {
     assert_eq!(greeter.config.greeting, "hello");
 }
 
+#[test]
+fn container_provides_framework_logger_by_default() {
+    let container = Container::new();
+
+    let logger = container.resolve::<Logger>();
+
+    assert_eq!(logger.context(), "Application");
+}
+
 struct AwaitingProvider {
     greeting: &'static str,
 }
@@ -114,6 +123,14 @@ fn module_can_register_async_factory_provider() {
     let provider = container.resolve::<FactoryBuiltProvider>();
 
     assert_eq!(provider.greeting, "factory");
+}
+
+#[test]
+#[should_panic(expected = "missing provider at startup:")]
+fn startup_provider_validation_panics_for_unregistered_declared_provider() {
+    let container = Container::new();
+
+    validate_module_providers::<FactoryModule>(&container);
 }
 
 #[test]
@@ -305,6 +322,24 @@ fn http_exception_into_response_serializes_error_body() {
             "status": 404,
             "error": "Not Found",
             "message": "missing user"
+        })
+    );
+}
+
+#[test]
+fn server_error_responses_do_not_serialize_source_or_internal_messages() {
+    let response = BadGatewayException::new("upstream database password leaked")
+        .with_source(anyhow::anyhow!("driver error with internal details"));
+    let response = response.into_response();
+
+    assert_eq!(response.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(response.content_type, "application/json");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        json!({
+            "status": 502,
+            "error": "Bad Gateway",
+            "message": "Internal Server Error"
         })
     );
 }

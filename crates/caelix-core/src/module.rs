@@ -58,6 +58,14 @@ impl ProviderDef {
             }),
         }
     }
+
+    fn assert_registered(&self, container: &Container) {
+        assert!(
+            container.contains_type_id(self.type_id),
+            "missing provider at startup: {} was declared by module metadata but was not registered",
+            self.type_name
+        );
+    }
 }
 
 pub struct ControllerDef {
@@ -79,6 +87,7 @@ pub struct ModuleDef {
     pub(crate) register_fn: for<'a> fn(&'a mut Container) -> BoxFuture<'a, ()>,
     pub(crate) controller_register_fn: fn(&mut dyn Any),
     pub(crate) route_log_fn: fn(),
+    pub(crate) validate_fn: fn(&Container),
 }
 
 impl ModuleDef {
@@ -87,6 +96,7 @@ impl ModuleDef {
             register_fn: |container| Box::pin(async move { register_module::<M>(container).await }),
             controller_register_fn: |any| register_module_controllers::<M>(any),
             route_log_fn: || crate::log_module_routes::<M>(),
+            validate_fn: |container| validate_module_providers::<M>(container),
         }
     }
 }
@@ -168,7 +178,24 @@ pub async fn build_container<M: Module>() -> Container {
     crate::log_application_starting();
     let mut container = Container::new();
     register_module::<M>(&mut container).await;
+    validate_module_providers::<M>(&container);
     container
+}
+
+pub fn validate_module_providers<M: Module>(container: &Container) {
+    let metadata = M::register();
+
+    for import in &metadata.imports {
+        (import.validate_fn)(container)
+    }
+
+    for provider in &metadata.providers {
+        provider.assert_registered(container);
+    }
+
+    for controller in &metadata.controllers {
+        controller.provider.assert_registered(container);
+    }
 }
 
 pub fn register_module_controllers<M: Module>(any: &mut dyn Any) {

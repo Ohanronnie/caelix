@@ -57,6 +57,7 @@ pub struct Service {
     repo: Arc<Repo>,
     async_greeting: Arc<AsyncGreetingProvider>,
     expensive_startup: Arc<ExpensiveStartupProvider>,
+    logger: Arc<Logger>,
 }
 
 impl Service {
@@ -73,6 +74,9 @@ impl Service {
     }
 
     pub fn find_user(&self, id: i64) -> String {
+        self.logger.info("creating user");
+        self.logger.debug("payload validated");
+        self.logger.error("failed to create user");
         format!("{}: user {id}", self.repo.greet())
     }
 

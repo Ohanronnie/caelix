@@ -111,12 +111,18 @@ impl IntoCaelixResponse for HttpException {
             message: String,
         }
 
+        let message = if self.status.is_server_error() {
+            "Internal Server Error".to_string()
+        } else {
+            self.message
+        };
+
         HttpResponse::json(
             self.status,
             ErrorBody {
                 status: self.status.as_u16(),
                 error: self.error,
-                message: self.message,
+                message,
             },
         )
     }

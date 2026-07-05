@@ -21,9 +21,15 @@ pub struct Container {
 
 impl Container {
     pub fn new() -> Self {
-        Self {
-            services: HashMap::new(),
-        }
+        crate::logging::init_logging();
+
+        let mut services: HashMap<TypeId, Arc<dyn Any + Send + Sync>> = HashMap::new();
+        services.insert(
+            TypeId::of::<crate::Logger>(),
+            Arc::new(crate::Logger::new("Application")),
+        );
+
+        Self { services }
     }
 
     pub fn register_instance<T: Send + Sync + 'static>(&mut self, value: T) {
@@ -39,6 +45,10 @@ impl Container {
         self.services.insert(type_id, value);
     }
 
+    pub(crate) fn contains_type_id(&self, type_id: TypeId) -> bool {
+        self.services.contains_key(&type_id)
+    }
+
     pub fn resolve<T: Send + Sync + 'static>(&self) -> Arc<T> {
         self.services
             .get(&TypeId::of::<T>())
@@ -46,5 +56,9 @@ impl Container {
             .clone()
             .downcast::<T>()
             .unwrap_or_else(|_| panic!("type mismatch resolving {}", std::any::type_name::<T>()))
+    }
+
+    pub fn resolve_logger(&self, context: impl Into<String>) -> Arc<crate::Logger> {
+        Arc::new(crate::Logger::new(context))
     }
 }

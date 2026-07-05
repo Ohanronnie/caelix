@@ -352,6 +352,7 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "caelix-core",
+ "serde_json",
 ]
 
 [[package]]

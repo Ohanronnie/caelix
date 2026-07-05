@@ -16,6 +16,12 @@ pub(crate) fn expand(_args: TokenStream, input: TokenStream) -> TokenStream {
                         panic!("#[injectable] fields must be std::sync::Arc<T>")
                     });
 
+                    if is_logger_type(resolved_type) {
+                        return quote! {
+                            #field_name: container.resolve_logger(stringify!(#struct_name))
+                        };
+                    }
+
                     quote! {
                         #field_name: container.resolve::<#resolved_type>()
                     }
@@ -68,4 +74,16 @@ fn arc_inner_type(ty: &Type) -> Option<&Type> {
         GenericArgument::Type(inner_type) => Some(inner_type),
         _ => None,
     }
+}
+
+fn is_logger_type(ty: &Type) -> bool {
+    let Type::Path(type_path) = ty else {
+        return false;
+    };
+
+    let Some(segment) = type_path.path.segments.last() else {
+        return false;
+    };
+
+    segment.ident == "Logger"
 }
