@@ -12,7 +12,7 @@ enum Extractor {
     User,
 }
 
-fn parse_guard_types(attr: &syn::Attribute) -> Vec<Type> {
+fn parse_type_list(attr: &syn::Attribute) -> Vec<Type> {
     Punctuated::<Type, Token![,]>::parse_terminated
         .parse2(
             attr.meta
@@ -31,10 +31,14 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut impl_block = parse_macro_input!(input as ItemImpl);
     let struct_type = impl_block.self_ty.clone();
     let mut controller_guards = Vec::new();
+    let mut controller_interceptors = Vec::new();
 
     impl_block.attrs.retain(|attr| {
         if attr.path().is_ident("use_guard") {
-            controller_guards.extend(parse_guard_types(attr));
+            controller_guards.extend(parse_type_list(attr));
+            false
+        } else if attr.path().is_ident("use_interceptor") {
+            controller_interceptors.extend(parse_type_list(attr));
             false
         } else {
             true
@@ -49,6 +53,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
         if let ImplItem::Fn(method) = item {
             let mut route: Option<(&str, String)> = None;
             let mut method_guards = Vec::new();
+            let mut method_interceptors = Vec::new();
 
             // Strip route attributes off before re-emitting, or rustc
             // complains about an unrecognized attribute in the final output
@@ -62,7 +67,12 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
 
                 if attr.path().is_ident("use_guard") {
-                    method_guards.extend(parse_guard_types(attr));
+                    method_guards.extend(parse_type_list(attr));
+                    return false;
+                }
+
+                if attr.path().is_ident("use_interceptor") {
+                    method_interceptors.extend(parse_type_list(attr));
                     return false;
                 }
 
@@ -113,6 +123,10 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     .iter()
                     .chain(method_guards.iter())
                     .collect::<Vec<_>>();
+                let interceptor_types = controller_interceptors
+                    .iter()
+                    .chain(method_interceptors.iter())
+                    .collect::<Vec<_>>();
 
                 let wrapper_params = extractor_args
                     .iter()
@@ -131,10 +145,27 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             quote! { #name.into_inner() }
                         }
                         Extractor::User => quote! {
-                            ctx.get::<#ty>()
+                            request_context.get::<#ty>()
                                 .map(|value| (*value).clone())
                                 .ok_or_else(|| caelix_core::UnauthorizedException::new("Not authenticated"))?
                         },
+                    })
+                    .collect::<Vec<_>>();
+                let interceptor_chain = interceptor_types
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .map(|(index, interceptor_type)| {
+                        let interceptor_name = format_ident!("__caelix_interceptor_{index}");
+                        let interceptor_ref_name = format_ident!("__caelix_interceptor_ref_{index}");
+
+                        quote! {
+                            let #interceptor_name = container.resolve::<#interceptor_type>();
+                            let #interceptor_ref_name = &#interceptor_name;
+                            let next = caelix_core::Next::new(move || {
+                                caelix_core::Interceptor::intercept(&**#interceptor_ref_name, request_context, next)
+                            });
+                        }
                     })
                     .collect::<Vec<_>>();
 
@@ -176,15 +207,20 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             }
                         )*
 
+                        let request_context = &ctx;
                         let controller = container.resolve::<#struct_type>();
-                        let result: caelix_core::Result<_> = async {
-                            Ok(controller.#method_name(#(#call_args),*).await?)
-                        }.await;
+                        let next = caelix_core::Next::new(move || {
+                            Box::pin(async move {
+                                let value = controller.#method_name(#(#call_args),*).await?;
+
+                                Ok(caelix_core::IntoCaelixResponse::into_response(value))
+                            })
+                        });
+                        #(#interceptor_chain)*
+                        let result = next.run().await;
 
                         match result {
-                            Ok(value) => caelix_actix::to_actix_response(
-                                caelix_core::IntoCaelixResponse::into_response(value),
-                            ),
+                            Ok(value) => caelix_actix::to_actix_response(value),
                             Err(err) => caelix_actix::to_actix_response(
                                 caelix_core::IntoCaelixResponse::into_response(err),
                             ),

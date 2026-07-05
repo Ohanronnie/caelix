@@ -124,6 +124,42 @@ impl Guard for TokenGuard {
 }
 
 #[injectable]
+pub struct OuterInterceptor;
+
+impl Interceptor for OuterInterceptor {
+    fn intercept<'a>(
+        &'a self,
+        _ctx: &'a RequestContext,
+        next: Next<'a>,
+    ) -> BoxFuture<'a, Result<HttpResponse>> {
+        Box::pin(async move {
+            let mut response = next.run().await?;
+            let body = String::from_utf8(response.body).expect("expected UTF-8 text response");
+            response.body = format!("outer({body})").into_bytes();
+            Ok(response)
+        })
+    }
+}
+
+#[injectable]
+pub struct InnerInterceptor;
+
+impl Interceptor for InnerInterceptor {
+    fn intercept<'a>(
+        &'a self,
+        _ctx: &'a RequestContext,
+        next: Next<'a>,
+    ) -> BoxFuture<'a, Result<HttpResponse>> {
+        Box::pin(async move {
+            let mut response = next.run().await?;
+            let body = String::from_utf8(response.body).expect("expected UTF-8 text response");
+            response.body = format!("inner({body})").into_bytes();
+            Ok(response)
+        })
+    }
+}
+
+#[injectable]
 pub struct UserController {
     service: Arc<Service>,
 }
@@ -133,6 +169,13 @@ impl UserController {
     #[get("/async-provider")]
     pub async fn async_provider(&self) -> Result<String> {
         Ok(self.service.call_async_provider())
+    }
+
+    #[get("/intercepted")]
+    #[use_interceptor(OuterInterceptor)]
+    #[use_interceptor(InnerInterceptor)]
+    pub async fn intercepted(&self) -> Result<String> {
+        Ok("handler".to_string())
     }
 
     #[get("/{id}")]
@@ -176,6 +219,8 @@ impl Module for UserModule {
                 warm_expensive_startup_provider,
             )
             .provider::<TokenGuard>()
+            .provider::<OuterInterceptor>()
+            .provider::<InnerInterceptor>()
             .provider::<Service>()
             .controller::<UserController>()
             .controller::<ProfileController>()

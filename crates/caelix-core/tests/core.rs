@@ -85,6 +85,40 @@ fn request_context_exposes_request_metadata_headers_and_typed_extensions() {
     assert!(ctx.get::<String>().is_none());
 }
 
+struct PrefixInterceptor;
+
+impl Interceptor for PrefixInterceptor {
+    fn intercept<'a>(
+        &'a self,
+        _ctx: &'a RequestContext,
+        next: Next<'a>,
+    ) -> BoxFuture<'a, Result<HttpResponse>> {
+        Box::pin(async move {
+            let mut response = next.run().await?;
+            let body = String::from_utf8(response.body).expect("expected UTF-8 text response");
+            response.body = format!("prefix:{body}").into_bytes();
+            Ok(response)
+        })
+    }
+}
+
+#[test]
+fn interceptor_wraps_next_and_can_transform_response() {
+    let ctx = RequestContext::new("GET".to_string(), "/hello".to_string(), Default::default());
+    let next = Next::new(|| {
+        Box::pin(async {
+            Ok(HttpResponse::text(
+                StatusCode::OK,
+                "handler response".to_string(),
+            ))
+        })
+    });
+    let response = block_on(PrefixInterceptor.intercept(&ctx, next)).unwrap();
+
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.body, b"prefix:handler response");
+}
+
 struct AwaitingProvider {
     greeting: &'static str,
 }

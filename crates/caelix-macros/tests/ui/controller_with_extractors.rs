@@ -1,4 +1,6 @@
-use caelix_core::{BoxFuture, Container, Guard, RequestContext, Result};
+use caelix_core::{
+    BoxFuture, Container, Guard, HttpResponse, Interceptor, Next, RequestContext, Result,
+};
 use caelix_macros::{controller, guard, injectable};
 use serde::Deserialize;
 
@@ -30,6 +32,19 @@ impl Guard for AuthGuard {
 }
 
 #[injectable]
+struct AuditInterceptor;
+
+impl Interceptor for AuditInterceptor {
+    fn intercept<'a>(
+        &'a self,
+        _ctx: &'a RequestContext,
+        next: Next<'a>,
+    ) -> BoxFuture<'a, Result<HttpResponse>> {
+        Box::pin(async move { next.run().await })
+    }
+}
+
+#[injectable]
 struct UserController;
 
 #[controller("/users")]
@@ -46,6 +61,7 @@ impl UserController {
     }
 
     #[post("/")]
+    #[use_interceptor(AuditInterceptor)]
     async fn create_user(&self, #[body] body: CreateUser) -> Result<String> {
         Ok(body.name)
     }
@@ -59,6 +75,7 @@ impl UserController {
 async fn exercise() {
     let mut container = Container::new();
     container.register::<AuthGuard>().await;
+    container.register::<AuditInterceptor>().await;
     container.register::<UserController>().await;
 
     let _controller = container.resolve::<UserController>();

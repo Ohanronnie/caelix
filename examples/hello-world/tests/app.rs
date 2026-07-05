@@ -44,6 +44,19 @@ async fn mounts_imported_controller_routes_with_extractors() {
 
     let response = actix_test::call_service(
         &app,
+        actix_test::TestRequest::get()
+            .uri("/users/intercepted")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        actix_test::read_body(response).await,
+        "outer(inner(handler))"
+    );
+
+    let response = actix_test::call_service(
+        &app,
         actix_test::TestRequest::get().uri("/users/42").to_request(),
     )
     .await;
