@@ -64,12 +64,11 @@ fn container_provides_framework_logger_by_default() {
 }
 
 #[test]
-fn container_provides_event_bus_by_default() {
+#[should_panic(expected = "no provider registered for")]
+fn container_does_not_provide_event_bus_by_default() {
     let container = Container::new();
 
-    let bus = container.resolve::<EventBus>();
-
-    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>(), 0);
+    let _ = container.resolve::<EventBus>();
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -565,10 +564,11 @@ impl EventHandler<CoreUserCreatedEvent> for AuditUserHandler {
     }
 }
 
-struct EventModule;
-impl Module for EventModule {
+struct UserEventsModule;
+impl Module for UserEventsModule {
     fn register() -> ModuleMetadata {
         ModuleMetadata::new()
+            .import::<EventModule>()
             .provider::<EventAuditLog>()
             .provider::<WelcomeEmailHandler>()
             .provider::<AuditUserHandler>()
@@ -579,7 +579,7 @@ impl Module for EventModule {
 
 #[test]
 fn module_event_handlers_fan_out_for_the_same_event() {
-    let container = block_on(build_container::<EventModule>());
+    let container = block_on(build_container::<UserEventsModule>());
     let bus = container.resolve::<EventBus>();
 
     assert_eq!(bus.handler_count::<CoreUserCreatedEvent>(), 2);
@@ -599,6 +599,7 @@ struct ForgotEventHandlerRegistrationModule;
 impl Module for ForgotEventHandlerRegistrationModule {
     fn register() -> ModuleMetadata {
         ModuleMetadata::new()
+            .import::<EventModule>()
             .provider::<EventAuditLog>()
             .provider::<WelcomeEmailHandler>()
     }
@@ -638,7 +639,9 @@ struct MissingEventHandlerModule;
 
 impl Module for MissingEventHandlerModule {
     fn register() -> ModuleMetadata {
-        ModuleMetadata::new().event_handler_for::<CoreUserCreatedEvent, MissingEventHandler>()
+        ModuleMetadata::new()
+            .import::<EventModule>()
+            .event_handler_for::<CoreUserCreatedEvent, MissingEventHandler>()
     }
 }
 
@@ -648,6 +651,33 @@ fn event_handler_registration_requires_a_registered_provider() {
     let mut container = Container::new();
 
     block_on(register_module::<MissingEventHandlerModule>(&mut container));
+}
+
+#[test]
+fn event_module_registers_event_bus() {
+    let container = block_on(build_container::<EventModule>());
+    let bus = container.resolve::<EventBus>();
+
+    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>(), 0);
+}
+
+struct MissingEventModule;
+
+impl Module for MissingEventModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new()
+            .provider::<EventAuditLog>()
+            .provider::<WelcomeEmailHandler>()
+            .event_handler::<WelcomeEmailHandler>()
+    }
+}
+
+#[test]
+#[should_panic(expected = "no provider registered for")]
+fn event_using_module_without_event_module_fails_at_startup() {
+    let mut container = Container::new();
+
+    block_on(register_module::<MissingEventModule>(&mut container));
 }
 
 #[derive(Serialize)]

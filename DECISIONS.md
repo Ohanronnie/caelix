@@ -17,7 +17,7 @@
 
 ## Events
 
-- `EventBus` is a framework service registered by `Container::new()`, alongside the default application logger.
+- `EventBus` is opt-in through `EventModule`. The default application logger remains registered by `Container::new()`.
 - Event handlers are normal injectable providers. A module must register the handler as a provider before adding it with `.event_handler::<H>()` or `.event_handler_for::<E, H>()`.
 - Rust cannot infer an event type out of a generic `impl EventHandler<E> for H` in a blanket `RegisterableEventHandler` impl, so `.event_handler::<H>()` uses an associated `RegisterableEventHandler::Event` type. `.event_handler_for::<E, H>()` is available when explicit event registration is clearer.
 - `EventBus::emit` clones the matching handler list before awaiting handlers, so the registry lock is not held across async work.

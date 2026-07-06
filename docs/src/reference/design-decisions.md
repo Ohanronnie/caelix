@@ -8,6 +8,6 @@ Middleware remains adapter-specific. The Actix layer can continue to use native 
 
 Lifecycle hooks live on `Injectable`. Normal providers use `.provider::<T>()`; async factory providers keep construction-only behavior.
 
-Events use a default `EventBus` registered by `Container::new()`. Event handlers must be providers before being registered as handlers.
+Events are opt-in through `EventModule`, which registers `EventBus`. Event handlers must be providers before being registered as handlers.
 
 Cache support is explicit service-level caching through `Cache`, `CacheStore`, `MemoryCacheStore`, and `CacheModule`.

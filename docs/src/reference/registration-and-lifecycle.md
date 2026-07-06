@@ -25,6 +25,7 @@ Startup can fail for:
 
 - Missing providers declared in module metadata.
 - Missing event handler providers.
+- Missing `EventModule` import before resolving `Arc<EventBus>` or registering event handlers.
 - Async factory errors.
 - Lifecycle hook errors.
 - Dependency resolution panics during provider construction.

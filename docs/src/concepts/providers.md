@@ -114,6 +114,21 @@ ModuleMetadata::new()
 
 Async factory providers are construction-only. They use no-op lifecycle callbacks, so providers that need `on_module_init`, `on_bootstrap`, or `on_shutdown` should implement `Injectable` directly and use `.provider::<T>()`.
 
+## Owned Resources
+
+An application-owned provider can store external resources directly:
+
+```rust
+pub struct AppConfig {
+    pub database_url: String,
+    pub pool: PgPool,
+}
+```
+
+When `AppConfig` is registered with `.provider::<AppConfig>()`, services can inject `Arc<AppConfig>` and use `config.pool`. This does not register `PgPool` as its own provider. Injecting `Arc<PgPool>` only works if `PgPool` itself is registered separately.
+
+Application crates usually cannot write `impl Injectable for PgPool` because Rust's orphan rules prevent implementing a foreign trait for a foreign type. For fallible startup errors instead of `expect` panics, keep using `.provider_async_factory::<PgPool, _, _>(...)` or wrap the pool in an application-owned newtype and implement `Injectable` for that wrapper.
+
 ## Provider Visibility
 
 Providers are visible after registration. Imports are processed first, then the importing module's providers, then its controllers. This allows controllers to inject providers from the same module or any earlier imported module.

@@ -1,6 +1,6 @@
 # Events
 
-`EventBus` is registered in every container. Event handlers are normal injectable providers and must be registered as providers before being registered as event handlers.
+`EventBus` is opt-in. Import `EventModule` in a module that emits events or registers event handlers. Event handlers are normal injectable providers and must be registered as providers before being registered as event handlers.
 
 ```rust
 #[derive(Clone)]
@@ -10,7 +10,10 @@ pub struct UserCreated {
 
 use std::sync::Arc;
 
-use caelix::{BoxFuture, EventBus, EventHandler, RegisterableEventHandler, Result, injectable};
+use caelix::{
+    BoxFuture, EventBus, EventHandler, EventModule, Module, ModuleMetadata,
+    RegisterableEventHandler, Result, injectable,
+};
 
 #[injectable]
 pub struct SendWelcomeEmail;
@@ -50,6 +53,7 @@ pub struct UsersModule;
 impl Module for UsersModule {
     fn register() -> ModuleMetadata {
         ModuleMetadata::new()
+            .import::<EventModule>()
             .provider::<UsersService>()
             .provider::<SendWelcomeEmail>()
             .event_handler::<SendWelcomeEmail>()
@@ -61,6 +65,7 @@ Use `.event_handler_for::<Event, Handler>()` when explicit event registration is
 
 ```rust
 ModuleMetadata::new()
+    .import::<EventModule>()
     .provider::<SendWelcomeEmail>()
     .event_handler_for::<UserCreated, SendWelcomeEmail>()
 ```

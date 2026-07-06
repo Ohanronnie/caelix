@@ -1,4 +1,4 @@
-use crate::{BoxFuture, Container, Injectable, Result};
+use crate::{BoxFuture, Container, Injectable, Module, ModuleMetadata, Result};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -120,6 +120,20 @@ impl EventBus {
 impl Default for EventBus {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Injectable for EventBus {
+    fn create(_container: &Container) -> BoxFuture<'_, Self> {
+        Box::pin(async { Self::new() })
+    }
+}
+
+pub struct EventModule;
+
+impl Module for EventModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().provider::<EventBus>()
     }
 }
 

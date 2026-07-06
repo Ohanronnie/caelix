@@ -49,7 +49,7 @@ The common registrations are:
 
 ## Registration Order
 
-Imported modules are registered before the module that imports them. Inside a module, providers are registered before controllers because controllers are providers too. Event handlers are registered after their provider instances exist.
+Imported modules are registered before the module that imports them. Inside a module, providers are registered before controllers because controllers are providers too. Event handlers are registered after their provider instances exist. Modules that emit events or register handlers must import `EventModule` before providers that inject `Arc<EventBus>`.
 
 This means an imported module's providers are visible to later providers and controllers:
 
@@ -88,6 +88,7 @@ Application startup fails when metadata references a provider that was not regis
 
 - A controller depends on `Arc<UsersService>`, but `UsersService` is not registered with `.provider::<UsersService>()`.
 - An event handler is listed with `.event_handler::<SendWelcomeEmail>()`, but the handler was not also registered as a provider.
+- A provider injects `Arc<EventBus>` or a module registers event handlers, but the module did not import `EventModule`.
 - A factory provider returns an error.
 - A lifecycle hook returns an `Err(HttpException)`.
 

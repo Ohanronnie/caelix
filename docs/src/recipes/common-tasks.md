@@ -60,9 +60,15 @@ async fn create(&self, #[body] #[validate] input: CreateUser) -> Result<Response
 
 ## Emit Events After Writes
 
-Inject or resolve `EventBus` in a service, perform the write, then emit a cloned event type.
+Import `EventModule`, inject or resolve `EventBus` in a service, perform the write, then emit a cloned event type.
 
 ```rust
+ModuleMetadata::new()
+    .import::<EventModule>()
+    .provider::<UsersService>()
+    .provider::<SendWelcomeEmail>()
+    .event_handler::<SendWelcomeEmail>();
+
 self.events.emit(UserCreated { id: user.id }).await?;
 ```
 
