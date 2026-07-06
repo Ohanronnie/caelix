@@ -8,7 +8,7 @@ caelix new <name>
 
 Creates a new Caelix application directory named `<name>`.
 
-The command creates `Cargo.toml`, `src/main.rs`, `src/lib.rs`, and `src/app.rs`. The package name comes from the target directory and is converted to kebab case.
+The command creates `Cargo.toml`, `AGENTS.md`, `src/main.rs`, `src/lib.rs`, and `src/app.rs`. The package name comes from the target directory and is converted to kebab case.
 
 ## `caelix generate module`
 

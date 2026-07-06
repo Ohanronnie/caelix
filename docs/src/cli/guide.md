@@ -19,11 +19,14 @@ caelix new demo-api
 The command creates:
 
 - `Cargo.toml`
+- `AGENTS.md`
 - `src/main.rs`
 - `src/lib.rs`
 - `src/app.rs`
 
 The generated `Cargo.toml` uses `caelix = "0.0.2"` from crates.io.
+
+The generated `AGENTS.md` gives AI coding agents the app-level Caelix conventions: explicit module registration, provider/controller registration, injectable field shape, service-level cache behavior, and the usual `cargo test` check.
 
 Generated `src/main.rs` starts the Actix adapter:
 

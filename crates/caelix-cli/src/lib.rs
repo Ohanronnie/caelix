@@ -178,6 +178,7 @@ fn generate_new(args: NewArgs, cwd: &Path) -> Result<String> {
 
     let cargo_toml = render_app_cargo_toml(&package_name);
     create_file(target_dir.join("Cargo.toml"), &cargo_toml)?;
+    create_file(target_dir.join("AGENTS.md"), render_agents_md())?;
     create_file(target_dir.join("src/main.rs"), &render_main_rs(&crate_name))?;
     create_file(target_dir.join("src/lib.rs"), render_lib_rs())?;
     create_file(target_dir.join("src/app.rs"), render_app_rs())?;
@@ -348,6 +349,139 @@ impl Module for AppModule {
         ModuleMetadata::new()
     }
 }
+"#
+}
+
+fn render_agents_md() -> &'static str {
+    r#"# Agent Instructions
+
+This is a Caelix application. Use this file as the quick working reference when changing generated app code.
+
+For fuller documentation, refer to https://ohanronnie.github.io/caelix/.
+
+## App Structure
+
+- `src/main.rs` starts the Actix runtime with `Application::new::<AppModule>()`.
+- `src/lib.rs` exports the root `AppModule` and should declare feature modules with `pub mod feature_name;`.
+- `src/app.rs` owns the root `AppModule`.
+- Feature folders usually contain `mod.rs`, `service.rs`, and `controller.rs`.
+- Prefer the Caelix CLI for new framework files: `caelix g module name`, `caelix g service name`, and `caelix g controller name`.
+
+## Registration Model
+
+Caelix uses explicit module metadata. Do not rely on filesystem discovery or hidden auto-registration.
+
+- A module implements `Module` and returns `ModuleMetadata`.
+- Add generated feature modules to `src/lib.rs`.
+- Import feature modules in `src/app.rs`.
+- Add `.import::<FeatureModule>()` inside `AppModule::register()`.
+- Register services with `.provider::<Service>()`.
+- Register controllers with `.controller::<Controller>()`.
+- Register async factory values with `.provider_async_factory::<T, _, _>(...)` when construction cannot be expressed as `#[injectable]`.
+
+Example:
+
+```rust
+use caelix::{Module, ModuleMetadata};
+use crate::users::UsersModule;
+
+pub struct AppModule;
+
+impl Module for AppModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().import::<UsersModule>()
+    }
+}
+```
+
+## Providers And Injection
+
+Prefer `#[injectable]` for services, controllers, guards, and interceptors.
+
+- Injectable fields must be `Arc<T>`.
+- `Arc<Logger>` is provided automatically with the struct name as context.
+- Unit structs are valid injectables.
+- Tuple structs are not supported by `#[injectable]`.
+- Manual `Injectable` implementations are acceptable for custom async construction.
+- Lifecycle hooks can be implemented on providers: `on_module_init`, `on_bootstrap`, and `on_shutdown`.
+
+Example:
+
+```rust
+use std::sync::Arc;
+use caelix::{injectable, Logger};
+
+#[injectable]
+pub struct UsersService {
+    logger: Arc<Logger>,
+}
+```
+
+## Controllers
+
+Use `#[controller("/base-path")]` on an impl block. Route handlers are async methods.
+
+- Supported route attributes: `#[get]`, `#[post]`, `#[patch]`, `#[put]`, `#[delete]`.
+- Supported extractor attributes: `#[param]`, `#[body]`, `#[query]`, `#[user]`.
+- Add `#[validate]` to extracted DTOs that implement `validator::Validate`.
+- `#[user]` reads from `RequestContext`; missing users become `UnauthorizedException`.
+
+Example:
+
+```rust
+use std::sync::Arc;
+use caelix::{controller, get, injectable, Result};
+use super::UsersService;
+
+#[injectable]
+pub struct UsersController {
+    service: Arc<UsersService>,
+}
+
+#[controller("/users")]
+impl UsersController {
+    #[get("/{id}")]
+    async fn find_one(&self, #[param] id: String) -> Result<String> {
+        Ok(self.service.find_one(id).await?)
+    }
+}
+```
+
+## Guards, Interceptors, And Context
+
+- Guards implement `Guard` and return whether a request may continue.
+- Interceptors implement `Interceptor` and can wrap handler execution.
+- Apply them with `#[use_guard(Type)]` or `#[use_interceptor(Type)]` at controller or method level.
+- Controller-level guards/interceptors apply before method-level ones.
+- Use `RequestContext` for request method, path, headers, and per-request values such as authenticated users.
+
+## Responses And Errors
+
+Handlers should return values that implement `IntoCaelixResponse`.
+
+- `Result<String>` returns `200 text/plain`.
+- `Result<Response<T>>` is the usual JSON response path.
+- `Response::Body(value)` returns `200` JSON.
+- `Response::WithStatus(status, value)` returns JSON with a custom status.
+- `Response::json`, `Response::text`, and `Response::bytes` return explicit raw payloads.
+- `Response::no_content()` returns `204`.
+- Use Caelix exception types such as `BadRequestException`, `UnauthorizedException`, `ForbiddenException`, `NotFoundException`, and `InternalServerErrorException` for errors.
+- Server error messages are intentionally hidden from HTTP responses.
+
+## Cache
+
+Cache support is explicit service-level caching.
+
+- Import `CacheModule` into a module that needs cache support.
+- Inject `Arc<Cache>` into services that need cache reads/writes.
+- Do not add automatic HTTP response caching.
+- If the app needs response caching, implement it with an interceptor that reads from and writes to `Cache`.
+
+## Checks
+
+- Run `cargo test` after code changes when feasible.
+- Keep public app code using the `caelix` facade (`use caelix::...`) instead of internal Caelix crate paths.
+- When using CLI-generated files, keep the manual registration steps in the command output aligned with `src/lib.rs` and `src/app.rs`.
 "#
 }
 

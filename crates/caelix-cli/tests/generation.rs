@@ -10,6 +10,7 @@ fn new_creates_application_structure_with_crates_io_dependency() {
 
     let app_dir = tmp.path().join("demo-api");
     let cargo_toml = fs::read_to_string(app_dir.join("Cargo.toml")).unwrap();
+    let agents_md = fs::read_to_string(app_dir.join("AGENTS.md")).unwrap();
     let main_rs = fs::read_to_string(app_dir.join("src/main.rs")).unwrap();
     let lib_rs = fs::read_to_string(app_dir.join("src/lib.rs")).unwrap();
     let app_rs = fs::read_to_string(app_dir.join("src/app.rs")).unwrap();
@@ -21,6 +22,16 @@ fn new_creates_application_structure_with_crates_io_dependency() {
     assert!(!cargo_toml.contains("path = "));
     assert!(!cargo_toml.contains("caelix-core"));
     assert!(!cargo_toml.contains("caelix-actix"));
+    assert!(agents_md.contains("Use this file as the quick working reference"));
+    assert!(agents_md.contains("https://ohanronnie.github.io/caelix/"));
+    assert!(agents_md.contains("Prefer the Caelix CLI for new framework files"));
+    assert!(agents_md.contains("caelix g module name"));
+    assert!(agents_md.contains("## Registration Model"));
+    assert!(agents_md.contains("A module implements `Module` and returns `ModuleMetadata`."));
+    assert!(agents_md.contains("## Controllers"));
+    assert!(agents_md.contains("Supported extractor attributes"));
+    assert!(agents_md.contains("## Responses And Errors"));
+    assert!(agents_md.contains("Do not add automatic HTTP response caching"));
     assert!(main_rs.contains("use caelix::Application;"));
     assert!(main_rs.contains("use demo_api::AppModule;"));
     assert!(main_rs.contains("#[caelix::main]"));
