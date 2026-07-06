@@ -6,7 +6,7 @@ use std::{
 };
 
 use caelix_core::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -256,6 +256,35 @@ fn module_can_register_async_factory_provider() {
     assert_eq!(provider.greeting, "factory");
 }
 
+struct FailingFactoryProvider;
+
+async fn fail_factory_provider(
+    _container: Arc<Container>,
+) -> std::result::Result<FailingFactoryProvider, &'static str> {
+    Err("connection refused")
+}
+
+struct FailingFactoryModule;
+impl Module for FailingFactoryModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new()
+            .provider_async_factory::<FailingFactoryProvider, _, _>(fail_factory_provider)
+    }
+}
+
+#[test]
+fn try_build_container_returns_startup_errors_without_panicking() {
+    let result = block_on(try_build_container::<FailingFactoryModule>());
+    let err = match result {
+        Ok(_) => panic!("expected factory failure"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(err.message.contains("async factory failed"));
+    assert!(err.message.contains("connection refused"));
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct CachedUser {
     id: i64,
@@ -308,6 +337,33 @@ fn cache_expires_entries_with_ttl_when_read() {
 
     assert_eq!(block_on(cache.get::<String>("short")).unwrap(), None);
     assert!(store.is_empty());
+}
+
+#[test]
+fn memory_cache_enforces_configured_capacity_and_value_size() {
+    let store = Arc::new(MemoryCacheStore::with_options(MemoryCacheOptions {
+        max_entries: 2,
+        max_value_bytes: 16,
+        default_ttl: None,
+    }));
+    let cache = Cache::new(store);
+
+    block_on(cache.set("a", "one")).unwrap();
+    block_on(cache.set("b", "two")).unwrap();
+    block_on(cache.set("c", "three")).unwrap();
+
+    assert_eq!(block_on(cache.get::<String>("a")).unwrap(), None);
+    assert_eq!(
+        block_on(cache.get::<String>("b")).unwrap(),
+        Some("two".to_string())
+    );
+    assert_eq!(
+        block_on(cache.get::<String>("c")).unwrap(),
+        Some("three".to_string())
+    );
+
+    let err = block_on(cache.set("large", "this value is too large")).unwrap_err();
+    assert_eq!(err.status, StatusCode::PAYLOAD_TOO_LARGE);
 }
 
 #[test]
@@ -668,6 +724,44 @@ fn into_caelix_response_covers_strings_structured_values_raw_values_and_empty() 
     assert_eq!(response.status, StatusCode::NO_CONTENT);
     assert_eq!(response.content_type, "application/json");
     assert!(response.body.is_empty());
+}
+
+struct FailingSerialize;
+
+impl Serialize for FailingSerialize {
+    fn serialize<S>(&self, _serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        Err(serde::ser::Error::custom("serialization failed"))
+    }
+}
+
+#[test]
+fn json_response_helpers_do_not_panic_on_serialization_failure() {
+    let response = HttpResponse::json(StatusCode::OK, FailingSerialize);
+
+    assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        json!({
+            "status": 500,
+            "error": "Internal Server Error",
+            "message": "Internal Server Error"
+        })
+    );
+
+    let response = Response::json(StatusCode::OK, FailingSerialize).into_response();
+
+    assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        json!({
+            "status": 500,
+            "error": "Internal Server Error",
+            "message": "Internal Server Error"
+        })
+    );
 }
 
 #[test]

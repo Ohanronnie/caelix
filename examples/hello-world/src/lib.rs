@@ -131,11 +131,17 @@ pub struct CurrentUser {
 #[guard]
 pub struct TokenGuard;
 
+const DEMO_ONLY_FALLBACK_TOKEN: &str = "secret-token";
+
+fn configured_demo_token() -> String {
+    std::env::var("HELLO_WORLD_TOKEN").unwrap_or_else(|_| DEMO_ONLY_FALLBACK_TOKEN.to_string())
+}
+
 impl Guard for TokenGuard {
     fn can_activate<'a>(&'a self, ctx: &'a RequestContext) -> BoxFuture<'a, Result<bool>> {
         Box::pin(async move {
             match ctx.bearer_token() {
-                Some("secret-token") => {
+                Some(token) if token == configured_demo_token() => {
                     ctx.set(CurrentUser { id: 7 });
                     Ok(true)
                 }

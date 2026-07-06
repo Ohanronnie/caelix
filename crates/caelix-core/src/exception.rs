@@ -1,3 +1,5 @@
+#![allow(clippy::new_ret_no_self)]
+
 use std::collections::BTreeMap;
 
 use http::StatusCode;
@@ -31,6 +33,14 @@ impl HttpException {
         self.errors = Some(errors);
         self
     }
+}
+
+pub(crate) fn startup_error(message: impl Into<String>) -> HttpException {
+    HttpException::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Internal Server Error",
+        message,
+    )
 }
 
 pub struct BadRequestException;

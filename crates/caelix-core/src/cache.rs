@@ -1,5 +1,6 @@
 use crate::{
     BoxFuture, Container, Injectable, InternalServerErrorException, Module, ModuleMetadata,
+    PayloadTooLargeException,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -8,6 +9,9 @@ use std::{
     sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
+
+const DEFAULT_MAX_ENTRIES: usize = 1024;
+const DEFAULT_MAX_VALUE_BYTES: usize = 1024 * 1024;
 
 pub trait CacheStore: Send + Sync + 'static {
     fn get(&self, key: String) -> BoxFuture<'_, crate::Result<Option<Value>>>;
@@ -24,14 +28,17 @@ pub trait CacheStore: Send + Sync + 'static {
 #[derive(Clone)]
 struct CacheEntry {
     value: Value,
+    inserted_at: Instant,
     expires_at: Option<Instant>,
 }
 
 impl CacheEntry {
     fn new(value: Value, ttl: Option<Duration>) -> Self {
+        let now = Instant::now();
         Self {
             value,
-            expires_at: ttl.map(|ttl| Instant::now() + ttl),
+            inserted_at: now,
+            expires_at: ttl.and_then(|ttl| now.checked_add(ttl)),
         }
     }
 
@@ -41,13 +48,36 @@ impl CacheEntry {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct MemoryCacheOptions {
+    pub max_entries: usize,
+    pub max_value_bytes: usize,
+    pub default_ttl: Option<Duration>,
+}
+
+impl Default for MemoryCacheOptions {
+    fn default() -> Self {
+        Self {
+            max_entries: DEFAULT_MAX_ENTRIES,
+            max_value_bytes: DEFAULT_MAX_VALUE_BYTES,
+            default_ttl: None,
+        }
+    }
+}
+
 pub struct MemoryCacheStore {
+    options: MemoryCacheOptions,
     entries: RwLock<HashMap<String, CacheEntry>>,
 }
 
 impl MemoryCacheStore {
     pub fn new() -> Self {
+        Self::with_options(MemoryCacheOptions::default())
+    }
+
+    pub fn with_options(options: MemoryCacheOptions) -> Self {
         Self {
+            options,
             entries: RwLock::new(HashMap::new()),
         }
     }
@@ -61,6 +91,29 @@ impl MemoryCacheStore {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    fn remove_expired(entries: &mut HashMap<String, CacheEntry>) {
+        entries.retain(|_, entry| !entry.is_expired());
+    }
+
+    fn evict_to_capacity(&self, entries: &mut HashMap<String, CacheEntry>) {
+        if self.options.max_entries == 0 {
+            entries.clear();
+            return;
+        }
+
+        while entries.len() > self.options.max_entries {
+            let Some(oldest_key) = entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.inserted_at)
+                .map(|(key, _)| key.clone())
+            else {
+                return;
+            };
+
+            entries.remove(&oldest_key);
+        }
     }
 }
 
@@ -100,10 +153,22 @@ impl CacheStore for MemoryCacheStore {
         ttl: Option<Duration>,
     ) -> BoxFuture<'_, crate::Result<()>> {
         Box::pin(async move {
-            self.entries
-                .write()
-                .expect("cache store lock poisoned")
-                .insert(key, CacheEntry::new(value, ttl));
+            let value_size = serde_json::to_vec(&value)
+                .map_err(InternalServerErrorException::new)?
+                .len();
+
+            if value_size > self.options.max_value_bytes {
+                return Err(PayloadTooLargeException::new(format!(
+                    "cache value exceeds the configured limit of {} bytes",
+                    self.options.max_value_bytes
+                )));
+            }
+
+            let ttl = ttl.or(self.options.default_ttl);
+            let mut entries = self.entries.write().expect("cache store lock poisoned");
+            Self::remove_expired(&mut entries);
+            entries.insert(key, CacheEntry::new(value, ttl));
+            self.evict_to_capacity(&mut entries);
             Ok(())
         })
     }

@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use actix_web::{App, http::StatusCode, test as actix_test, web};
+use actix_web::{
+    App,
+    http::{StatusCode, header::HeaderValue},
+    test as actix_test, web,
+};
 use caelix::prelude::build_container;
 use caelix_core::register_module_controllers;
 use hello_world::{AppModule, Service};
@@ -155,6 +159,19 @@ async fn guarded_route_threads_context_into_user_extractor() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/profile/me")
+            .insert_header((
+                "authorization",
+                HeaderValue::from_bytes(b"Bearer \xff").unwrap(),
+            ))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let response = actix_test::call_service(
         &app,

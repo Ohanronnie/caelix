@@ -161,12 +161,15 @@ impl EventHandlerDef {
         }
     }
 
-    pub(crate) fn assert_registered(&self, container: &Container) {
-        assert!(
-            container.contains_type_id(self.type_id),
+    pub(crate) fn try_assert_registered(&self, container: &Container) -> Result<()> {
+        if container.contains_type_id(self.type_id) {
+            return Ok(());
+        }
+
+        Err(crate::exception::startup_error(format!(
             "missing event handler provider at startup: {} was declared by module metadata but was not registered as a provider",
             self.type_name
-        );
+        )))
     }
 
     pub(crate) fn register(&self, container: &Container) {

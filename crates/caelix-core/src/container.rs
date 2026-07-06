@@ -53,17 +53,24 @@ impl Container {
     }
 
     pub async fn register<T: Injectable>(&mut self) {
+        self.try_register::<T>()
+            .await
+            .unwrap_or_else(|err| panic!("{}", err.message));
+    }
+
+    pub async fn try_register<T: Injectable>(&mut self) -> crate::Result<()> {
         let instance = T::create(self).await;
         let instance = Arc::new(instance);
-        instance.on_module_init().await.unwrap_or_else(|err| {
-            panic!(
+        instance.on_module_init().await.map_err(|err| {
+            crate::exception::startup_error(format!(
                 "on_module_init failed for {}: {}: {}",
                 std::any::type_name::<T>(),
                 err.error,
                 err.message
-            )
-        });
+            ))
+        })?;
         self.services.insert(TypeId::of::<T>(), instance);
+        Ok(())
     }
 
     pub(crate) fn register_erased(&mut self, type_id: TypeId, value: Arc<dyn Any + Send + Sync>) {
@@ -89,5 +96,11 @@ impl Container {
 
     pub fn resolve_logger(&self, context: impl Into<String>) -> Arc<crate::Logger> {
         Arc::new(crate::Logger::new(context))
+    }
+}
+
+impl Default for Container {
+    fn default() -> Self {
+        Self::new()
     }
 }

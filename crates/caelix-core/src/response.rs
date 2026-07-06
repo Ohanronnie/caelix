@@ -19,8 +19,10 @@ impl HttpResponse {
     /// Serializes `body` as JSON. This is the single place JSON encoding
     /// happens — everything else below routes through here.
     pub fn json(status: StatusCode, body: impl serde::Serialize) -> Self {
-        let body = serde_json::to_vec(&body).expect("failed to serialize response body");
-        Self::new(status, body, "application/json")
+        match serde_json::to_vec(&body) {
+            Ok(body) => Self::new(status, body, "application/json"),
+            Err(_) => json_serialization_error_response(),
+        }
     }
 
     pub fn text(status: StatusCode, body: impl Into<String>) -> Self {
@@ -79,9 +81,29 @@ impl Response<()> {
     }
 
     pub fn json(status: StatusCode, value: impl serde::Serialize) -> Self {
-        let bytes = serde_json::to_vec(&value).expect("failed to serialize response body");
+        let bytes = match serde_json::to_vec(&value) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return Response::Raw(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Body::Json(json_serialization_error_body()),
+                );
+            }
+        };
         Response::Raw(status, Body::Json(bytes))
     }
+}
+
+fn json_serialization_error_response() -> HttpResponse {
+    HttpResponse::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        json_serialization_error_body(),
+        "application/json",
+    )
+}
+
+fn json_serialization_error_body() -> Vec<u8> {
+    br#"{"status":500,"error":"Internal Server Error","message":"Internal Server Error"}"#.to_vec()
 }
 
 impl IntoCaelixResponse for HttpResponse {

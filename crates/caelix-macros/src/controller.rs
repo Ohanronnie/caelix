@@ -193,13 +193,21 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         req: actix_web::HttpRequest,
                         #(#wrapper_params),*
                     ) -> actix_web::HttpResponse {
-                        let headers = req
-                            .headers()
-                            .iter()
-                            .filter_map(|(name, value)| {
-                                Some((name.to_string(), value.to_str().ok()?.to_string()))
-                            })
-                            .collect();
+                        let mut headers = std::collections::HashMap::new();
+                        for (name, value) in req.headers().iter() {
+                            let value = match value.to_str() {
+                                Ok(value) => value,
+                                Err(_) => {
+                                    return caelix_actix::to_actix_response(
+                                        caelix_core::IntoCaelixResponse::into_response(
+                                            caelix_core::BadRequestException::new("invalid request header value"),
+                                        ),
+                                    );
+                                }
+                            };
+
+                            headers.insert(name.to_string(), value.to_string());
+                        }
                         let ctx = caelix_core::RequestContext::new(
                             req.method().to_string(),
                             req.path().to_string(),

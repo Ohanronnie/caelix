@@ -3,9 +3,9 @@ use std::{sync::Arc, time::Instant};
 use actix_web::{App, HttpResponse, HttpServer, dev::Service, error::JsonPayloadError, web};
 use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpResponse as CaelixHttpResponse,
-    IntoCaelixResponse, Module, PayloadTooLargeException, build_container, log_application_started,
+    IntoCaelixResponse, Module, PayloadTooLargeException, log_application_started,
     log_http_request, log_listening, log_module_routes, register_module_controllers,
-    shutdown_module,
+    try_build_container, try_shutdown_module,
 };
 
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
@@ -23,7 +23,7 @@ pub fn to_actix_response(response: CaelixHttpResponse) -> HttpResponse {
 pub struct Application {
     container: Arc<Container>,
     configure_fn: fn(&mut web::ServiceConfig),
-    shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, ()>,
+    shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, caelix_core::Result<()>>,
     body_limit: usize,
 }
 
@@ -54,6 +54,88 @@ fn configure_caelix_services(
 ) {
     cfg.app_data(json_config(body_limit));
     configure_fn(cfg);
+}
+
+impl Application {
+    pub async fn new<M: Module + 'static>() -> Self {
+        Self::try_new::<M>()
+            .await
+            .unwrap_or_else(|err| panic!("{}", err.message))
+    }
+
+    pub async fn try_new<M: Module + 'static>() -> caelix_core::Result<Self> {
+        let start = Instant::now();
+        let container = try_build_container::<M>().await?;
+        log_module_routes::<M>();
+        log_application_started(start.elapsed());
+
+        Ok(Self {
+            container: Arc::new(container),
+            configure_fn: |cfg| register_module_controllers::<M>(cfg),
+            shutdown_fn: |container| {
+                Box::pin(async move { try_shutdown_module::<M>(container).await })
+            },
+            body_limit: DEFAULT_BODY_LIMIT_BYTES,
+        })
+    }
+
+    pub fn body_limit(mut self, bytes: usize) -> Self {
+        self.body_limit = bytes;
+        self
+    }
+
+    #[cfg(test)]
+    fn configure_services(&self, cfg: &mut web::ServiceConfig) {
+        configure_caelix_services(cfg, self.body_limit, self.configure_fn);
+    }
+
+    async fn shutdown(&self) -> caelix_core::Result<()> {
+        (self.shutdown_fn)(&self.container).await
+    }
+
+    pub async fn listen(self, addr: &str) -> std::io::Result<()> {
+        let container = self.container.clone();
+        let configure_fn = self.configure_fn;
+        let body_limit = self.body_limit;
+        let addr = addr.to_string();
+
+        log_listening(&addr);
+
+        let server = match HttpServer::new(move || {
+            App::new()
+                .app_data(web::Data::new(container.clone()))
+                .wrap_fn(move |req, service| {
+                    let method = req.method().to_string();
+                    let path = req.path().to_string();
+                    let start = Instant::now();
+                    let future = service.call(req);
+
+                    async move {
+                        let response = future.await?;
+                        let status = response.status().as_u16();
+                        log_http_request(&method, &path, status, start.elapsed());
+                        Ok(response)
+                    }
+                })
+                .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn))
+        })
+        .bind(addr.as_str())
+        {
+            Ok(server) => server.run(),
+            Err(err) => {
+                let _ = self.shutdown().await;
+                return Err(err);
+            }
+        };
+
+        let result = server.await;
+        self.shutdown().await.map_err(to_io_error)?;
+        result
+    }
+}
+
+fn to_io_error(err: caelix_core::HttpException) -> std::io::Error {
+    std::io::Error::other(err.message)
 }
 
 #[cfg(test)]
@@ -227,78 +309,8 @@ mod tests {
         SHUTDOWN_COUNT.store(0, Ordering::SeqCst);
 
         let application = Application::new::<ShutdownModule>().await;
-        application.shutdown().await;
+        application.shutdown().await.unwrap();
 
         assert_eq!(SHUTDOWN_COUNT.load(Ordering::SeqCst), 1);
-    }
-}
-
-impl Application {
-    pub async fn new<M: Module + 'static>() -> Self {
-        let start = Instant::now();
-        let container = build_container::<M>().await;
-        log_module_routes::<M>();
-        log_application_started(start.elapsed());
-
-        Self {
-            container: Arc::new(container),
-            configure_fn: |cfg| register_module_controllers::<M>(cfg),
-            shutdown_fn: |container| Box::pin(async move { shutdown_module::<M>(container).await }),
-            body_limit: DEFAULT_BODY_LIMIT_BYTES,
-        }
-    }
-
-    pub fn body_limit(mut self, bytes: usize) -> Self {
-        self.body_limit = bytes;
-        self
-    }
-
-    #[cfg(test)]
-    fn configure_services(&self, cfg: &mut web::ServiceConfig) {
-        configure_caelix_services(cfg, self.body_limit, self.configure_fn);
-    }
-
-    async fn shutdown(&self) {
-        (self.shutdown_fn)(&self.container).await;
-    }
-
-    pub async fn listen(self, addr: &str) -> std::io::Result<()> {
-        let container = self.container.clone();
-        let configure_fn = self.configure_fn;
-        let body_limit = self.body_limit;
-        let addr = addr.to_string();
-
-        log_listening(&addr);
-
-        let server = match HttpServer::new(move || {
-            App::new()
-                .app_data(web::Data::new(container.clone()))
-                .wrap_fn(move |req, service| {
-                    let method = req.method().to_string();
-                    let path = req.path().to_string();
-                    let start = Instant::now();
-                    let future = service.call(req);
-
-                    async move {
-                        let response = future.await?;
-                        let status = response.status().as_u16();
-                        log_http_request(&method, &path, status, start.elapsed());
-                        Ok(response)
-                    }
-                })
-                .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn))
-        })
-        .bind(addr.as_str())
-        {
-            Ok(server) => server.run(),
-            Err(err) => {
-                self.shutdown().await;
-                return Err(err);
-            }
-        };
-
-        let result = server.await;
-        self.shutdown().await;
-        result
     }
 }
