@@ -23,7 +23,7 @@ The command creates:
 - `src/lib.rs`
 - `src/app.rs`
 
-The generated `Cargo.toml` uses `caelix = "0.0.1"` from crates.io.
+The generated `Cargo.toml` uses `caelix = "0.0.2"` from crates.io.
 
 Generated `src/main.rs` starts the Actix adapter:
 

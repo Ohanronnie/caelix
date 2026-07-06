@@ -1,13 +1,13 @@
 [package]
 name = "caelix-actix"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Actix Web runtime adapter for Caelix."
 license = "MIT"
 
 [dependencies]
 actix-web = "4.14.0"
-caelix-core = { path = "../caelix-core", version = "0.0.1" }
+caelix-core = { path = "../caelix-core", version = "0.0.2" }
 
 [dev-dependencies]
 serde_json = "1.0.150"
