@@ -386,9 +386,11 @@ name = "{package_name}"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+
 [dependencies]
 actix-web = "4.14.0"
-caelix = {{ path = "{caelix}" }}
+caelix = {{ path = "{caelix}", features = ["actix"] }}
 caelix-core = {{ path = "{caelix_core}" }}
 caelix-actix = {{ path = "{caelix_actix}" }}
 serde = {{ version = "1.0.228", features = ["derive"] }}
@@ -401,7 +403,7 @@ fn render_main_rs(crate_name: &str) -> String {
         r#"use caelix_actix::Application;
 use {crate_name}::AppModule;
 
-#[actix_web::main]
+#[caelix::main]
 async fn main() -> std::io::Result<()> {{
     Application::new::<AppModule>()
         .await

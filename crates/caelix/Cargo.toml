@@ -5,9 +5,17 @@ edition = "2024"
 description = "Public Caelix framework crate."
 license = "MIT"
 
+[features]
+default = []
+actix = ["dep:caelix-actix"]
+
 [dependencies]
+caelix-actix = { path = "../caelix-actix", version = "0.1.0", optional = true }
 caelix-core = { path = "../caelix-core", version = "0.1.0" }
 caelix-macros = { path = "../caelix-macros", version = "0.1.0" }
+
+[dev-dependencies]
+actix-web = "4.14.0"
 
 [lib]
 path = "src/lib.rs"

@@ -35,10 +35,13 @@ fn new_creates_application_structure_with_local_paths() {
 
     assert!(output.contains("Created Caelix application `demo-api`"));
     assert!(cargo_toml.contains("edition = \"2024\""));
+    assert!(cargo_toml.contains("[workspace]"));
     assert!(cargo_toml.contains("caelix = { path = "));
+    assert!(cargo_toml.contains("features = [\"actix\"]"));
     assert!(cargo_toml.contains("caelix-core = { path = "));
     assert!(cargo_toml.contains("caelix-actix = { path = "));
     assert!(main_rs.contains("use demo_api::AppModule;"));
+    assert!(main_rs.contains("#[caelix::main]"));
     assert!(main_rs.contains("Application::new::<AppModule>()"));
     assert_eq!(lib_rs, "pub mod app;\n\npub use app::AppModule;\n");
     assert!(app_rs.contains("ModuleMetadata::new()"));
