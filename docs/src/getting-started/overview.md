@@ -17,7 +17,7 @@ Create and run an application:
 ```sh
 caelix new demo-api
 cd demo-api
-cargo run
+caelix run
 ```
 
 The generated application uses `caelix = "0.0.3"` from crates.io:

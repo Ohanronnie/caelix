@@ -10,6 +10,24 @@ cargo install caelix-cli
 
 After installation, run commands with the `caelix` binary.
 
+## Run An Application
+
+```sh
+caelix run
+```
+
+This clears the terminal, then delegates to `cargo run` in the current project. Use `--watch` to restart the application when files under `src/` or `Cargo.toml` change:
+
+```sh
+caelix run --watch
+```
+
+Arguments after `--` are passed directly to the application:
+
+```sh
+caelix run --watch -- --port 4000 --verbose
+```
+
 ## Create An Application
 
 ```sh

@@ -1,14 +1,27 @@
 use std::{
-    env, fmt, fs, io,
+    env,
+    ffi::OsString,
+    fmt, fs,
+    io::{self, Write},
     path::{Path, PathBuf},
-    process::Command as ProcessCommand,
+    process::{Child, Command as ProcessCommand},
+    sync::{Arc, Mutex, mpsc},
+    time::Duration,
 };
 
 use clap::{Args, Parser, Subcommand};
 use heck::{ToKebabCase, ToPascalCase, ToSnakeCase};
+use notify::RecursiveMode;
+use notify_debouncer_mini::new_debouncer;
 use toml_edit::{DocumentMut, Item, Value};
 
 pub type Result<T> = std::result::Result<T, CliError>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CliOutcome {
+    Output(String),
+    Exit(i32),
+}
 
 #[derive(Debug)]
 pub enum CliError {
@@ -27,6 +40,8 @@ pub enum CliError {
     CratesIo(reqwest::Error),
     CratesIoResponse,
     CargoUpdateFailed(Option<i32>),
+    Watcher(String),
+    SignalHandler(ctrlc::Error),
 }
 
 impl fmt::Display for CliError {
@@ -57,6 +72,8 @@ impl fmt::Display for CliError {
                 Some(code) => write!(f, "`cargo update -p caelix` failed with exit code {code}"),
                 None => write!(f, "`cargo update -p caelix` was terminated by a signal"),
             },
+            Self::Watcher(message) => write!(f, "{message}"),
+            Self::SignalHandler(source) => write!(f, "failed to install Ctrl+C handler: {source}"),
         }
     }
 }
@@ -83,6 +100,8 @@ enum Command {
     Generate(GenerateArgs),
     /// Update the caelix dependency in the current Cargo.toml
     Update,
+    /// Run the current Caelix application
+    Run(RunArgs),
 }
 
 #[derive(Args, Debug)]
@@ -94,6 +113,17 @@ struct NewArgs {
 struct GenerateArgs {
     #[command(subcommand)]
     kind: GenerateKind,
+}
+
+#[derive(Args, Debug)]
+struct RunArgs {
+    /// Restart the application when source files change
+    #[arg(long)]
+    watch: bool,
+
+    /// Arguments passed to the application after `--`
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    app_args: Vec<OsString>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -168,12 +198,13 @@ impl FeatureName {
     }
 }
 
-pub fn run_from_env() -> Result<String> {
+pub fn run_from_env() -> Result<CliOutcome> {
     let cwd = env::current_dir().map_err(|source| CliError::Io {
         path: PathBuf::from("."),
         source,
     })?;
-    run_from(env::args_os(), cwd)
+    let cli = Cli::parse_from(env::args_os());
+    run_cli(cli, cwd.as_path())
 }
 
 pub fn run_from<I, T>(args: I, cwd: impl AsRef<Path>) -> Result<String>
@@ -182,10 +213,17 @@ where
     T: Into<std::ffi::OsString> + Clone,
 {
     let cli = Cli::parse_from(args);
-    run(cli, cwd.as_ref())
+    run_text_command(cli, cwd.as_ref())
 }
 
-fn run(cli: Cli, cwd: &Path) -> Result<String> {
+fn run_cli(cli: Cli, cwd: &Path) -> Result<CliOutcome> {
+    match cli.command {
+        Command::Run(args) => run_application(args, cwd).map(CliOutcome::Exit),
+        command => run_text_command(Cli { command }, cwd).map(CliOutcome::Output),
+    }
+}
+
+fn run_text_command(cli: Cli, cwd: &Path) -> Result<String> {
     match cli.command {
         Command::New(args) => generate_new(args, cwd),
         Command::Generate(args) => match args.kind {
@@ -196,7 +234,191 @@ fn run(cli: Cli, cwd: &Path) -> Result<String> {
             GenerateKind::Module(args) => generate_module(&FeatureName::parse(args.name)?, cwd),
         },
         Command::Update => update_caelix_dependency(cwd),
+        Command::Run(args) => Ok(format_cargo_run_command(&args.app_args)),
     }
+}
+
+fn run_application(args: RunArgs, cwd: &Path) -> Result<i32> {
+    if args.watch {
+        run_application_watch(cwd, args.app_args)
+    } else {
+        run_application_once(cwd, &args.app_args)
+    }
+}
+
+fn run_application_once(cwd: &Path, app_args: &[OsString]) -> Result<i32> {
+    clear_screen()?;
+    let status = cargo_run_command(cwd, app_args)
+        .status()
+        .map_err(|source| CliError::Io {
+            path: cwd.to_path_buf(),
+            source,
+        })?;
+
+    Ok(status.code().unwrap_or(1))
+}
+
+fn run_application_watch(cwd: &Path, app_args: Vec<OsString>) -> Result<i32> {
+    let process = Arc::new(Mutex::new(RunningProcess::new(cwd.to_path_buf(), app_args)));
+
+    {
+        let process = Arc::clone(&process);
+        ctrlc::set_handler(move || {
+            if let Ok(mut process) = process.lock() {
+                process.kill();
+            }
+            std::process::exit(130);
+        })
+        .map_err(CliError::SignalHandler)?;
+    }
+
+    process.lock().expect("process mutex poisoned").start()?;
+
+    let (tx, rx) = mpsc::channel();
+    let mut debouncer = new_debouncer(Duration::from_millis(300), tx)
+        .map_err(|source| CliError::Watcher(format!("failed to start file watcher: {source}")))?;
+
+    let src = cwd.join("src");
+    if src.exists() {
+        debouncer
+            .watcher()
+            .watch(&src, RecursiveMode::Recursive)
+            .map_err(|source| {
+                CliError::Watcher(format!("failed to watch {}: {source}", src.display()))
+            })?;
+    }
+
+    let cargo_toml = cwd.join("Cargo.toml");
+    if cargo_toml.exists() {
+        debouncer
+            .watcher()
+            .watch(&cargo_toml, RecursiveMode::NonRecursive)
+            .map_err(|source| {
+                CliError::Watcher(format!(
+                    "failed to watch {}: {source}",
+                    cargo_toml.display()
+                ))
+            })?;
+    }
+
+    loop {
+        match rx.recv_timeout(Duration::from_millis(250)) {
+            Ok(Ok(events)) => {
+                if events.is_empty() {
+                    continue;
+                }
+                println!("Change detected. Restarting...");
+                process.lock().expect("process mutex poisoned").start()?;
+            }
+            Ok(Err(errors)) => {
+                return Err(CliError::Watcher(format!("file watcher failed: {errors}")));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                process
+                    .lock()
+                    .expect("process mutex poisoned")
+                    .reap_finished();
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(CliError::Watcher(
+                    "file watcher stopped unexpectedly".into(),
+                ));
+            }
+        }
+    }
+}
+
+struct RunningProcess {
+    cwd: PathBuf,
+    app_args: Vec<OsString>,
+    child: Option<Child>,
+}
+
+impl RunningProcess {
+    fn new(cwd: PathBuf, app_args: Vec<OsString>) -> Self {
+        Self {
+            cwd,
+            app_args,
+            child: None,
+        }
+    }
+
+    fn start(&mut self) -> Result<()> {
+        self.kill();
+        clear_screen()?;
+        self.child = Some(
+            cargo_run_command(&self.cwd, &self.app_args)
+                .spawn()
+                .map_err(|source| CliError::Io {
+                    path: self.cwd.clone(),
+                    source,
+                })?,
+        );
+        Ok(())
+    }
+
+    fn kill(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    fn reap_finished(&mut self) {
+        let finished = self
+            .child
+            .as_mut()
+            .and_then(|child| child.try_wait().ok())
+            .flatten()
+            .is_some();
+
+        if finished {
+            self.child = None;
+        }
+    }
+}
+
+impl Drop for RunningProcess {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+fn cargo_run_command(cwd: &Path, app_args: &[OsString]) -> ProcessCommand {
+    let mut command = ProcessCommand::new("cargo");
+    command.arg("run").current_dir(cwd);
+    if !app_args.is_empty() {
+        command.arg("--").args(app_args);
+    }
+    command
+}
+
+fn clear_screen() -> Result<()> {
+    let mut stdout = io::stdout();
+    stdout
+        .write_all(b"\x1B[2J\x1B[H")
+        .map_err(|source| CliError::Io {
+            path: PathBuf::from("<stdout>"),
+            source,
+        })?;
+    stdout.flush().map_err(|source| CliError::Io {
+        path: PathBuf::from("<stdout>"),
+        source,
+    })
+}
+
+fn format_cargo_run_command(app_args: &[OsString]) -> String {
+    let mut parts = vec!["cargo".to_string(), "run".to_string()];
+    if !app_args.is_empty() {
+        parts.push("--".to_string());
+        parts.extend(
+            app_args
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned()),
+        );
+    }
+
+    format!("{}\n", parts.join(" "))
 }
 
 fn update_caelix_dependency(cwd: &Path) -> Result<String> {
@@ -394,7 +616,7 @@ fn generate_new(args: NewArgs, cwd: &Path) -> Result<String> {
     create_file(target_dir.join("src/app.rs"), render_app_rs())?;
 
     Ok(format!(
-        "Created Caelix application `{}` in {}\n\nNext steps:\n- cd {}\n- cargo run\n",
+        "Created Caelix application `{}` in {}\n\nNext steps:\n- cd {}\n- caelix run\n",
         package_name,
         target_dir.display(),
         target_dir.display()
@@ -942,6 +1164,41 @@ mod tests {
         assert!(rendered.contains("pub struct UsersModule;"));
         assert!(rendered.contains(".provider::<UsersService>()"));
         assert!(rendered.contains(".controller::<UsersController>()"));
+    }
+
+    #[test]
+    fn run_command_passes_app_args_after_separator() {
+        let output = run_from(
+            [
+                "caelix",
+                "run",
+                "--watch",
+                "--",
+                "--rubbish-tes",
+                "true",
+                "--hshsh",
+                "jsj",
+                "--shshs",
+                "q",
+                "-h",
+                "nnsjs",
+                "dyg?",
+            ],
+            ".",
+        )
+        .unwrap();
+
+        assert_eq!(
+            output,
+            "cargo run -- --rubbish-tes true --hshsh jsj --shshs q -h nnsjs dyg?\n"
+        );
+    }
+
+    #[test]
+    fn run_command_without_app_args_delegates_to_cargo_run() {
+        let output = run_from(["caelix", "run"], ".").unwrap();
+
+        assert_eq!(output, "cargo run\n");
     }
 
     #[test]
