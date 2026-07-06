@@ -58,7 +58,7 @@ Shutdown hook errors are converted into `std::io::Error` after the server stops.
 The adapter installs:
 
 - Shared `Arc<Container>` application data.
-- A JSON extractor config with the Caelix body limit and JSON error mapping.
+- A JSON extractor config with the Caelix body limit, JSON error mapping, and body parsing for `#[body]` routes even when the client omits the `Content-Type` header.
 - Generated controller routes from module metadata.
 - A request logging wrapper.
 

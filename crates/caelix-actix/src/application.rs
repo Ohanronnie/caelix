@@ -35,6 +35,7 @@ pub struct Application {
 fn json_config(body_limit: usize) -> web::JsonConfig {
     web::JsonConfig::default()
         .limit(body_limit)
+        .content_type_required(false)
         .error_handler(move |err, _req| {
             let exception = if matches!(
                 &err,
@@ -318,6 +319,31 @@ mod tests {
                 "message": "request body exceeds the configured limit of 8 bytes"
             })
         );
+    }
+
+    #[actix_web::test]
+    async fn json_config_accepts_json_without_content_type_header() {
+        async fn accept_json(_payload: web::Json<Value>) -> HttpResponse {
+            HttpResponse::Ok().finish()
+        }
+
+        let app = actix_test::init_service(
+            App::new()
+                .app_data(json_config(DEFAULT_BODY_LIMIT_BYTES))
+                .route("/json", web::post().to(accept_json)),
+        )
+        .await;
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/json")
+                .set_payload("{}")
+                .to_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[actix_web::test]

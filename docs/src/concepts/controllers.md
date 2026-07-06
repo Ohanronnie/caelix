@@ -107,11 +107,11 @@ pub async fn create(&self, #[body] input: CreateUserDto) -> Result<Response<User
 }
 ```
 
-Invalid JSON returns `400 Bad Request`. JSON bodies over the configured body limit return `413 Payload Too Large`.
+Invalid JSON returns `400 Bad Request`. JSON bodies over the configured body limit return `413 Payload Too Large`. Caelix parses `#[body]` requests as JSON even when the client omits the `Content-Type` header.
 
 ## Validation
 
-With the default `validator` support enabled on `caelix`, `#[validate]` calls `validator::Validate::validate(&value)` after extraction and before the controller method is invoked.
+With the default `validator` support enabled on `caelix`, `#[validate]` calls `validator::Validate::validate(&value)` after extraction and before the controller method is invoked. If body, query, or path deserialization fails first, Caelix returns the extractor error instead because there is no typed value to validate.
 
 ```rust
 use validator::Validate;
