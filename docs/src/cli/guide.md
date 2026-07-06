@@ -57,6 +57,22 @@ impl Module for AppModule {
 }
 ```
 
+## Update Caelix
+
+```sh
+caelix update
+```
+
+This command reads the current `caelix` dependency from `Cargo.toml`, fetches the latest published `caelix` version from crates.io, and updates only that dependency when a newer version exists. It preserves existing `Cargo.toml` comments, formatting, dependency order, and feature settings.
+
+After editing `Cargo.toml`, the CLI runs:
+
+```sh
+cargo update -p caelix
+```
+
+`caelix update` does not regenerate or re-sync scaffolded source files.
+
 ## Generate A Feature Module
 
 ```sh

@@ -1,18 +1,32 @@
 use std::{
     env, fmt, fs, io,
     path::{Path, PathBuf},
+    process::Command as ProcessCommand,
 };
 
 use clap::{Args, Parser, Subcommand};
 use heck::{ToKebabCase, ToPascalCase, ToSnakeCase};
+use toml_edit::{DocumentMut, Item, Value};
 
 pub type Result<T> = std::result::Result<T, CliError>;
 
 #[derive(Debug)]
 pub enum CliError {
-    Io { path: PathBuf, source: io::Error },
+    Io {
+        path: PathBuf,
+        source: io::Error,
+    },
     AlreadyExists(PathBuf),
     InvalidName(String),
+    TomlParse {
+        path: PathBuf,
+        source: toml_edit::TomlError,
+    },
+    MissingDependency(String),
+    UnsupportedDependencyFormat(String),
+    CratesIo(reqwest::Error),
+    CratesIoResponse,
+    CargoUpdateFailed(Option<i32>),
 }
 
 impl fmt::Display for CliError {
@@ -27,6 +41,22 @@ impl fmt::Display for CliError {
                 )
             }
             Self::InvalidName(name) => write!(f, "invalid project or feature name `{name}`"),
+            Self::TomlParse { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::MissingDependency(name) => {
+                write!(f, "`{name}` dependency was not found in Cargo.toml")
+            }
+            Self::UnsupportedDependencyFormat(name) => {
+                write!(
+                    f,
+                    "`{name}` dependency uses an unsupported Cargo.toml format"
+                )
+            }
+            Self::CratesIo(source) => write!(f, "failed to fetch latest caelix version: {source}"),
+            Self::CratesIoResponse => write!(f, "crates.io response did not include max_version"),
+            Self::CargoUpdateFailed(code) => match code {
+                Some(code) => write!(f, "`cargo update -p caelix` failed with exit code {code}"),
+                None => write!(f, "`cargo update -p caelix` was terminated by a signal"),
+            },
         }
     }
 }
@@ -46,9 +76,13 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Create a new Caelix application
     New(NewArgs),
+    /// Generate a Caelix service, controller, or module
     #[command(alias = "g")]
     Generate(GenerateArgs),
+    /// Update the caelix dependency in the current Cargo.toml
+    Update,
 }
 
 #[derive(Args, Debug)]
@@ -161,7 +195,183 @@ fn run(cli: Cli, cwd: &Path) -> Result<String> {
             }
             GenerateKind::Module(args) => generate_module(&FeatureName::parse(args.name)?, cwd),
         },
+        Command::Update => update_caelix_dependency(cwd),
     }
+}
+
+fn update_caelix_dependency(cwd: &Path) -> Result<String> {
+    let cargo_toml_path = cwd.join("Cargo.toml");
+    let latest = fetch_latest_caelix_version()?;
+    let outcome = update_caelix_version(&cargo_toml_path, &latest)?;
+
+    match outcome {
+        UpdateOutcome::AlreadyLatest { current } => {
+            Ok(format!("Already on the latest version ({current}).\n"))
+        }
+        UpdateOutcome::Updated { previous, latest } => {
+            run_cargo_update(cwd)?;
+            Ok(format!(
+                "caelix {previous} -> {latest}\nUpdated Cargo.toml. Ran `cargo update -p caelix`.\n"
+            ))
+        }
+    }
+}
+
+fn fetch_latest_caelix_version() -> Result<String> {
+    let response = reqwest::blocking::Client::new()
+        .get("https://crates.io/api/v1/crates/caelix")
+        .header(reqwest::header::USER_AGENT, "caelix-cli")
+        .send()
+        .map_err(CliError::CratesIo)?
+        .error_for_status()
+        .map_err(CliError::CratesIo)?;
+    let json: serde_json::Value = response.json().map_err(CliError::CratesIo)?;
+
+    json["crate"]["max_version"]
+        .as_str()
+        .map(ToOwned::to_owned)
+        .ok_or(CliError::CratesIoResponse)
+}
+
+fn run_cargo_update(cwd: &Path) -> Result<()> {
+    let status = ProcessCommand::new("cargo")
+        .args(["update", "-p", "caelix"])
+        .current_dir(cwd)
+        .status()
+        .map_err(|source| CliError::Io {
+            path: cwd.join("Cargo.toml"),
+            source,
+        })?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(CliError::CargoUpdateFailed(status.code()))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UpdateOutcome {
+    AlreadyLatest { current: String },
+    Updated { previous: String, latest: String },
+}
+
+fn update_caelix_version(cargo_toml_path: &Path, latest: &str) -> Result<UpdateOutcome> {
+    let content = fs::read_to_string(cargo_toml_path).map_err(|source| CliError::Io {
+        path: cargo_toml_path.to_path_buf(),
+        source,
+    })?;
+    let mut doc = content
+        .parse::<DocumentMut>()
+        .map_err(|source| CliError::TomlParse {
+            path: cargo_toml_path.to_path_buf(),
+            source,
+        })?;
+
+    let current = read_caelix_version(&doc)?;
+    if current == latest {
+        return Ok(UpdateOutcome::AlreadyLatest { current });
+    }
+
+    write_caelix_version(&mut doc, latest)?;
+    fs::write(cargo_toml_path, doc.to_string()).map_err(|source| CliError::Io {
+        path: cargo_toml_path.to_path_buf(),
+        source,
+    })?;
+
+    Ok(UpdateOutcome::Updated {
+        previous: current,
+        latest: latest.to_string(),
+    })
+}
+
+fn read_caelix_version(doc: &DocumentMut) -> Result<String> {
+    let dependency =
+        find_caelix_dependency(doc).ok_or_else(|| CliError::MissingDependency("caelix".into()))?;
+
+    if let Some(version) = dependency.as_str() {
+        return Ok(version.to_string());
+    }
+
+    if let Item::Value(Value::InlineTable(table)) = dependency {
+        return table
+            .get("version")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| CliError::UnsupportedDependencyFormat("caelix".into()));
+    }
+
+    dependency["version"]
+        .as_str()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| CliError::UnsupportedDependencyFormat("caelix".into()))
+}
+
+fn write_caelix_version(doc: &mut DocumentMut, latest: &str) -> Result<()> {
+    let dependency = find_caelix_dependency_mut(doc)
+        .ok_or_else(|| CliError::MissingDependency("caelix".into()))?;
+
+    if dependency.as_str().is_some() {
+        replace_string_value_preserving_decor(dependency, latest)?;
+        return Ok(());
+    }
+
+    if let Item::Value(Value::InlineTable(table)) = dependency {
+        if table.get("version").is_some() {
+            table.insert("version", Value::from(latest));
+            return Ok(());
+        }
+    }
+
+    if dependency["version"].as_str().is_some() {
+        replace_string_value_preserving_decor(&mut dependency["version"], latest)?;
+        return Ok(());
+    }
+
+    Err(CliError::UnsupportedDependencyFormat("caelix".into()))
+}
+
+fn replace_string_value_preserving_decor(item: &mut Item, value: &str) -> Result<()> {
+    let Some(current) = item.as_value_mut() else {
+        return Err(CliError::UnsupportedDependencyFormat("caelix".into()));
+    };
+
+    if !current.is_str() {
+        return Err(CliError::UnsupportedDependencyFormat("caelix".into()));
+    }
+
+    let decor = current.decor().clone();
+    let mut replacement = Value::from(value);
+    *replacement.decor_mut() = decor;
+    *current = replacement;
+    Ok(())
+}
+
+fn find_caelix_dependency(doc: &DocumentMut) -> Option<&Item> {
+    doc.get("dependencies")
+        .and_then(|dependencies| dependencies.get("caelix"))
+        .or_else(|| {
+            doc.get("workspace")
+                .and_then(|workspace| workspace.get("dependencies"))
+                .and_then(|dependencies| dependencies.get("caelix"))
+        })
+}
+
+fn find_caelix_dependency_mut(doc: &mut DocumentMut) -> Option<&mut Item> {
+    let has_normal_dependency = doc
+        .get("dependencies")
+        .and_then(|dependencies| dependencies.get("caelix"))
+        .is_some();
+
+    if has_normal_dependency {
+        return doc
+            .get_mut("dependencies")
+            .and_then(|dependencies| dependencies.get_mut("caelix"));
+    }
+
+    doc.get_mut("workspace")
+        .and_then(|workspace| workspace.get_mut("dependencies"))
+        .and_then(|dependencies| dependencies.get_mut("caelix"))
 }
 
 fn generate_new(args: NewArgs, cwd: &Path) -> Result<String> {
@@ -692,6 +902,7 @@ fn create_file(path: impl AsRef<Path>, contents: impl AsRef<str>) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn feature_name_converts_to_rust_and_route_names() {
@@ -731,5 +942,83 @@ mod tests {
         assert!(rendered.contains("pub struct UsersModule;"));
         assert!(rendered.contains(".provider::<UsersService>()"));
         assert!(rendered.contains(".controller::<UsersController>()"));
+    }
+
+    #[test]
+    fn update_caelix_version_preserves_cargo_toml_comments_and_other_dependencies() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("Cargo.toml");
+        fs::write(
+            &path,
+            r#"[package]
+name = "demo"
+version = "0.0.1"
+
+# Keep this dependency comment.
+[dependencies]
+actix-web = "4.14.0"
+caelix = "0.0.2" # framework
+serde = { version = "1.0", features = ["derive"] }
+"#,
+        )
+        .unwrap();
+
+        let outcome = update_caelix_version(&path, "0.0.3").unwrap();
+        let updated = fs::read_to_string(path).unwrap();
+
+        assert_eq!(
+            outcome,
+            UpdateOutcome::Updated {
+                previous: "0.0.2".into(),
+                latest: "0.0.3".into()
+            }
+        );
+        assert!(updated.contains("# Keep this dependency comment."));
+        assert!(updated.contains(r#"caelix = "0.0.3" # framework"#));
+        assert!(updated.contains(r#"serde = { version = "1.0", features = ["derive"] }"#));
+    }
+
+    #[test]
+    fn update_caelix_version_preserves_inline_table_features() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("Cargo.toml");
+        fs::write(
+            &path,
+            r#"[package]
+name = "demo"
+version = "0.0.1"
+
+[dependencies]
+caelix = { version = "0.0.2", default-features = false, features = ["actix"] }
+"#,
+        )
+        .unwrap();
+
+        update_caelix_version(&path, "0.0.3").unwrap();
+        let updated = fs::read_to_string(path).unwrap();
+
+        assert!(updated.contains(
+            r#"caelix = { version = "0.0.3", default-features = false, features = ["actix"] }"#
+        ));
+    }
+
+    #[test]
+    fn update_caelix_version_reports_already_latest_without_writing() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("Cargo.toml");
+        let content = r#"[dependencies]
+caelix = "0.0.3"
+"#;
+        fs::write(&path, content).unwrap();
+
+        let outcome = update_caelix_version(&path, "0.0.3").unwrap();
+
+        assert_eq!(
+            outcome,
+            UpdateOutcome::AlreadyLatest {
+                current: "0.0.3".into()
+            }
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), content);
     }
 }
