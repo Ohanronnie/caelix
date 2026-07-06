@@ -387,7 +387,7 @@ dependencies = [
 
 [[package]]
 name = "caelix"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "actix-web",
  "caelix-actix",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-actix"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "actix-web",
  "caelix-core",
@@ -411,7 +411,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-cli"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "clap",
  "ctrlc",

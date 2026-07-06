@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use actix_web::{
     App, HttpRequest, HttpResponse, HttpServer,
@@ -7,7 +7,7 @@ use actix_web::{
     web,
 };
 use caelix_core::{
-    BadRequestException, BoxFuture, Container, HttpResponse as CaelixHttpResponse,
+    BadRequestException, BoxFuture, Container, HttpException, HttpResponse as CaelixHttpResponse,
     IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException,
     log_application_started, log_http_request, log_listening, log_module_routes,
     register_module_controllers, try_build_container, try_shutdown_module,
@@ -37,25 +37,37 @@ fn json_config(body_limit: usize) -> web::JsonConfig {
         .limit(body_limit)
         .content_type_required(false)
         .error_handler(move |err, _req| {
-            let exception = if matches!(
-                &err,
-                JsonPayloadError::Overflow { .. } | JsonPayloadError::OverflowKnownLength { .. }
-            ) {
-                PayloadTooLargeException::new(format!(
-                    "request body exceeds the configured limit of {body_limit} bytes"
-                ))
-            } else {
-                BadRequestException::new("invalid JSON request body")
-            };
+            let exception = json_exception(&err, body_limit);
             let response = to_actix_response(exception.into_response());
 
             actix_web::error::InternalError::from_response(err, response).into()
         })
 }
 
+fn json_exception(err: &JsonPayloadError, body_limit: usize) -> HttpException {
+    if matches!(
+        err,
+        JsonPayloadError::Overflow { .. } | JsonPayloadError::OverflowKnownLength { .. }
+    ) {
+        return PayloadTooLargeException::new(format!(
+            "request body exceeds the configured limit of {body_limit} bytes"
+        ));
+    }
+
+    if let JsonPayloadError::Deserialize(source) = err {
+        if let Some(exception) = missing_field_exception(&source.to_string()) {
+            return exception;
+        }
+    }
+
+    BadRequestException::new("invalid JSON request body")
+}
+
 fn path_config() -> web::PathConfig {
     web::PathConfig::default().error_handler(|err: PathError, _req| {
-        let response = to_actix_response(BadRequestException::new(err.to_string()).into_response());
+        let exception = missing_field_exception(&err.to_string())
+            .unwrap_or_else(|| BadRequestException::new(err.to_string()));
+        let response = to_actix_response(exception.into_response());
 
         actix_web::error::InternalError::from_response(err, response).into()
     })
@@ -63,10 +75,33 @@ fn path_config() -> web::PathConfig {
 
 fn query_config() -> web::QueryConfig {
     web::QueryConfig::default().error_handler(|err: QueryPayloadError, _req| {
-        let response = to_actix_response(BadRequestException::new(err.to_string()).into_response());
+        let exception = missing_field_exception(&err.to_string())
+            .unwrap_or_else(|| BadRequestException::new(err.to_string()));
+        let response = to_actix_response(exception.into_response());
 
         actix_web::error::InternalError::from_response(err, response).into()
     })
+}
+
+fn missing_field_exception(message: &str) -> Option<HttpException> {
+    let field = missing_field_name(message)?;
+    let mut errors = BTreeMap::new();
+    errors.insert(field, vec!["is required".to_string()]);
+
+    Some(BadRequestException::new("Validation failed").with_errors(errors))
+}
+
+fn missing_field_name(message: &str) -> Option<String> {
+    let start = message.find("missing field `")? + "missing field `".len();
+    let rest = &message[start..];
+    let end = rest.find('`')?;
+    let field = &rest[..end];
+
+    if field.is_empty() {
+        None
+    } else {
+        Some(field.to_string())
+    }
 }
 
 async fn not_found(req: HttpRequest) -> HttpResponse {
@@ -243,13 +278,50 @@ mod tests {
         limit: usize,
     }
 
+    #[derive(Deserialize)]
+    struct RequiredBody {
+        name: String,
+    }
+
+    #[derive(Deserialize)]
+    struct RequiredQuery {
+        q: String,
+    }
+
+    #[derive(Deserialize)]
+    struct RequiredPath {
+        org_id: Uuid,
+        user_id: Uuid,
+    }
+
     async fn accept_uuid(_id: web::Path<Uuid>) -> HttpResponse {
+        HttpResponse::Ok().finish()
+    }
+
+    async fn accept_required_body(body: web::Json<RequiredBody>) -> HttpResponse {
+        let body = body.into_inner();
+        let _ = body.name;
+
         HttpResponse::Ok().finish()
     }
 
     async fn accept_query(query: web::Query<SearchQuery>) -> HttpResponse {
         let query = query.into_inner();
         let _ = query.limit;
+
+        HttpResponse::Ok().finish()
+    }
+
+    async fn accept_required_query(query: web::Query<RequiredQuery>) -> HttpResponse {
+        let query = query.into_inner();
+        let _ = query.q;
+
+        HttpResponse::Ok().finish()
+    }
+
+    async fn accept_required_path(path: web::Path<RequiredPath>) -> HttpResponse {
+        let path = path.into_inner();
+        let _ = (path.org_id, path.user_id);
 
         HttpResponse::Ok().finish()
     }
@@ -347,6 +419,40 @@ mod tests {
     }
 
     #[actix_web::test]
+    async fn json_missing_field_errors_are_validation_shaped() {
+        let app = actix_test::init_service(
+            App::new()
+                .app_data(json_config(DEFAULT_BODY_LIMIT_BYTES))
+                .route("/json", web::patch().to(accept_required_body)),
+        )
+        .await;
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::patch()
+                .uri("/json")
+                .insert_header(("content-type", "application/json"))
+                .set_payload("{}")
+                .to_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: Value = actix_test::read_body_json(response).await;
+        assert_eq!(
+            body,
+            json!({
+                "status": 400,
+                "error": "Bad Request",
+                "message": "Validation failed",
+                "errors": {
+                    "name": ["is required"]
+                }
+            })
+        );
+    }
+
+    #[actix_web::test]
     async fn application_enforces_configured_body_limit() {
         let application = Application::new::<JsonModule>().await.body_limit(8);
         let app = actix_test::init_service(
@@ -405,6 +511,37 @@ mod tests {
     }
 
     #[actix_web::test]
+    async fn path_missing_field_errors_are_validation_shaped() {
+        let app = actix_test::init_service(App::new().app_data(path_config()).route(
+            "/orgs/{org_id}/users/{user}",
+            web::get().to(accept_required_path),
+        ))
+        .await;
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/orgs/550e8400-e29b-41d4-a716-446655440000/users/550e8400-e29b-41d4-a716-446655440000")
+                .to_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: Value = actix_test::read_body_json(response).await;
+        assert_eq!(
+            body,
+            json!({
+                "status": 400,
+                "error": "Bad Request",
+                "message": "Validation failed",
+                "errors": {
+                    "user_id": ["is required"]
+                }
+            })
+        );
+    }
+
+    #[actix_web::test]
     async fn query_extractor_errors_are_caelix_json_errors() {
         let app = actix_test::init_service(
             App::new()
@@ -429,6 +566,36 @@ mod tests {
             body["message"]
                 .as_str()
                 .is_some_and(|message| message.contains("invalid digit"))
+        );
+    }
+
+    #[actix_web::test]
+    async fn query_missing_field_errors_are_validation_shaped() {
+        let app = actix_test::init_service(
+            App::new()
+                .app_data(query_config())
+                .route("/users", web::get().to(accept_required_query)),
+        )
+        .await;
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get().uri("/users").to_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: Value = actix_test::read_body_json(response).await;
+        assert_eq!(
+            body,
+            json!({
+                "status": 400,
+                "error": "Bad Request",
+                "message": "Validation failed",
+                "errors": {
+                    "q": ["is required"]
+                }
+            })
         );
     }
 

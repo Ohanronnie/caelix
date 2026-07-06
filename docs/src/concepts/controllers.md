@@ -111,7 +111,7 @@ Invalid JSON returns `400 Bad Request`. JSON bodies over the configured body lim
 
 ## Validation
 
-With the default `validator` support enabled on `caelix`, `#[validate]` calls `validator::Validate::validate(&value)` after extraction and before the controller method is invoked. If body, query, or path deserialization fails first, Caelix returns the extractor error instead because there is no typed value to validate.
+With the default `validator` support enabled on `caelix`, `#[validate]` calls `validator::Validate::validate(&value)` after extraction and before the controller method is invoked. Missing required body, query, or path fields are returned in the same validation error shape. Other deserialization failures, such as invalid JSON syntax or invalid field types, return the extractor error because there is no typed value to validate.
 
 ```rust
 use validator::Validate;

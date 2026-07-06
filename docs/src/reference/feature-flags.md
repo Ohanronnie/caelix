@@ -3,7 +3,7 @@
 `caelix` enables its current integrations by default:
 
 ```toml
-caelix = "0.0.4"
+caelix = "0.0.5"
 ```
 
 The default features include:
@@ -19,6 +19,6 @@ Example generated dependencies:
 ```toml
 [dependencies]
 actix-web = "4.14.0"
-caelix = "0.0.4"
+caelix = "0.0.5"
 serde = { version = "1.0.228", features = ["derive"] }
 ```

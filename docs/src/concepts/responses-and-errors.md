@@ -47,7 +47,7 @@ pub async fn create(&self, #[body] input: CreateUserDto) -> Result<Response<User
 
 If JSON serialization fails, Caelix returns a generic `500 Internal Server Error` JSON body.
 
-Actix adapter errors for supported controller extractors are also returned in the Caelix JSON error shape. Invalid route params, such as a malformed `Uuid` passed to a `#[param]` argument, invalid `#[query]` values, and invalid JSON bodies return `400 Bad Request` JSON responses. Requests that do not match any registered route return a `404 Not Found` JSON response.
+Actix adapter errors for supported controller extractors are also returned in the Caelix JSON error shape. Invalid route params, such as a malformed `Uuid` passed to a `#[param]` argument, invalid `#[query]` values, and invalid JSON bodies return `400 Bad Request` JSON responses. Missing required body, query, or path fields use the validation error shape with an `errors` object. Requests that do not match any registered route return a `404 Not Found` JSON response.
 
 ## Empty, Text, Bytes, And Raw
 
