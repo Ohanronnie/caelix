@@ -20,7 +20,7 @@ cd demo-api
 cargo run
 ```
 
-The generated application uses `caelix = "0.0.2"` from crates.io:
+The generated application uses `caelix = "0.0.3"` from crates.io:
 
 ```text
 demo-api/

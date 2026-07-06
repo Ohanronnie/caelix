@@ -1,11 +1,16 @@
 use std::{sync::Arc, time::Instant};
 
-use actix_web::{App, HttpResponse, HttpServer, dev::Service, error::JsonPayloadError, web};
+use actix_web::{
+    App, HttpRequest, HttpResponse, HttpServer,
+    dev::Service,
+    error::{JsonPayloadError, PathError, QueryPayloadError},
+    web,
+};
 use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpResponse as CaelixHttpResponse,
-    IntoCaelixResponse, Module, PayloadTooLargeException, log_application_started,
-    log_http_request, log_listening, log_module_routes, register_module_controllers,
-    try_build_container, try_shutdown_module,
+    IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException,
+    log_application_started, log_http_request, log_listening, log_module_routes,
+    register_module_controllers, try_build_container, try_shutdown_module,
 };
 
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
@@ -47,13 +52,38 @@ fn json_config(body_limit: usize) -> web::JsonConfig {
         })
 }
 
+fn path_config() -> web::PathConfig {
+    web::PathConfig::default().error_handler(|err: PathError, _req| {
+        let response = to_actix_response(BadRequestException::new(err.to_string()).into_response());
+
+        actix_web::error::InternalError::from_response(err, response).into()
+    })
+}
+
+fn query_config() -> web::QueryConfig {
+    web::QueryConfig::default().error_handler(|err: QueryPayloadError, _req| {
+        let response = to_actix_response(BadRequestException::new(err.to_string()).into_response());
+
+        actix_web::error::InternalError::from_response(err, response).into()
+    })
+}
+
+async fn not_found(req: HttpRequest) -> HttpResponse {
+    to_actix_response(
+        NotFoundException::new(format!("Cannot {} {}", req.method(), req.path())).into_response(),
+    )
+}
+
 fn configure_caelix_services(
     cfg: &mut web::ServiceConfig,
     body_limit: usize,
     configure_fn: fn(&mut web::ServiceConfig),
 ) {
     cfg.app_data(json_config(body_limit));
+    cfg.app_data(path_config());
+    cfg.app_data(query_config());
     configure_fn(cfg);
+    cfg.default_service(web::route().to(not_found));
 }
 
 impl Application {
@@ -143,11 +173,13 @@ mod tests {
     use super::*;
     use actix_web::{http::StatusCode, test as actix_test};
     use caelix_core::{Controller, Injectable, ModuleMetadata};
+    use serde::Deserialize;
     use serde_json::{Value, json};
     use std::{
         any::Any,
         sync::atomic::{AtomicUsize, Ordering},
     };
+    use uuid::Uuid;
 
     static SHUTDOWN_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -203,6 +235,22 @@ mod tests {
         fn register() -> ModuleMetadata {
             ModuleMetadata::new().controller::<JsonController>()
         }
+    }
+
+    #[derive(Deserialize)]
+    struct SearchQuery {
+        limit: usize,
+    }
+
+    async fn accept_uuid(_id: web::Path<Uuid>) -> HttpResponse {
+        HttpResponse::Ok().finish()
+    }
+
+    async fn accept_query(query: web::Query<SearchQuery>) -> HttpResponse {
+        let query = query.into_inner();
+        let _ = query.limit;
+
+        HttpResponse::Ok().finish()
     }
 
     struct ShutdownService;
@@ -300,6 +348,86 @@ mod tests {
                 "status": 413,
                 "error": "Payload Too Large",
                 "message": "request body exceeds the configured limit of 8 bytes"
+            })
+        );
+    }
+
+    #[actix_web::test]
+    async fn path_extractor_errors_are_caelix_json_errors() {
+        let app = actix_test::init_service(
+            App::new()
+                .app_data(path_config())
+                .route("/users/{id}", web::get().to(accept_uuid)),
+        )
+        .await;
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get().uri("/users/1").to_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: Value = actix_test::read_body_json(response).await;
+        assert_eq!(body["status"], 400);
+        assert_eq!(body["error"], "Bad Request");
+        assert!(
+            body["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("UUID parsing failed"))
+        );
+    }
+
+    #[actix_web::test]
+    async fn query_extractor_errors_are_caelix_json_errors() {
+        let app = actix_test::init_service(
+            App::new()
+                .app_data(query_config())
+                .route("/users", web::get().to(accept_query)),
+        )
+        .await;
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/users?limit=abc")
+                .to_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: Value = actix_test::read_body_json(response).await;
+        assert_eq!(body["status"], 400);
+        assert_eq!(body["error"], "Bad Request");
+        assert!(
+            body["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("invalid digit"))
+        );
+    }
+
+    #[actix_web::test]
+    async fn unmatched_routes_are_caelix_json_errors() {
+        let app = actix_test::init_service(
+            App::new()
+                .configure(|cfg| configure_caelix_services(cfg, DEFAULT_BODY_LIMIT_BYTES, |_| {})),
+        )
+        .await;
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get().uri("/missing").to_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body: Value = actix_test::read_body_json(response).await;
+        assert_eq!(
+            body,
+            json!({
+                "status": 404,
+                "error": "Not Found",
+                "message": "Cannot GET /missing"
             })
         );
     }

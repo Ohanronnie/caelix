@@ -312,7 +312,7 @@ edition = "2024"
 
 [dependencies]
 actix-web = "4.14.0"
-caelix = "0.0.2"
+caelix = "0.0.3"
 serde = {{ version = "1.0.228", features = ["derive"] }}
 "#
     )
