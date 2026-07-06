@@ -4,6 +4,7 @@ members = [
     "crates/caelix",
     "crates/caelix-actix",
     "crates/caelix-macros",
+    "examples/events",
     "examples/hello-world",
     "examples/sqlx-crud",
 ]

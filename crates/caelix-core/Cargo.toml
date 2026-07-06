@@ -23,3 +23,6 @@ sqlx = { version = "0.8.6", optional = true, default-features = false }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 validator = { version = "0.18", optional = true }
+
+[dev-dependencies]
+trybuild = "1.0.114"

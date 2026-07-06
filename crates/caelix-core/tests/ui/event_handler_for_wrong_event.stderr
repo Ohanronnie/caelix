@@ -1,0 +1,24 @@
+error[E0277]: `SendWelcomeEmail` is not an event handler for `OrderPlaced`
+  --> tests/ui/event_handler_for_wrong_event.rs:29:47
+   |
+29 |             .event_handler_for::<OrderPlaced, SendWelcomeEmail>()
+   |              -----------------                ^^^^^^^^^^^^^^^^ missing `impl EventHandler<OrderPlaced> for SendWelcomeEmail`
+   |              |
+   |              required by a bound introduced by this call
+   |
+   = note: add `impl EventHandler<OrderPlaced> for SendWelcomeEmail` or use the correct event type in `.event_handler_for::<Event, Handler>()`
+help: the trait `EventHandler<OrderPlaced>` is not implemented for `SendWelcomeEmail`
+      but trait `EventHandler<UserCreated>` is implemented for it
+  --> tests/ui/event_handler_for_wrong_event.rs:17:1
+   |
+17 | impl EventHandler<UserCreated> for SendWelcomeEmail {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `UserCreated`, found `OrderPlaced`
+note: required by a bound in `caelix_core::ModuleMetadata::event_handler_for`
+  --> src/module.rs
+   |
+   |     pub fn event_handler_for<E, H>(mut self) -> Self
+   |            ----------------- required by a bound in this associated function
+...
+   |         H: Injectable + EventHandler<E>,
+   |                         ^^^^^^^^^^^^^^^ required by this bound in `ModuleMetadata::event_handler_for`

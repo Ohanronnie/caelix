@@ -367,6 +367,7 @@ dependencies = [
  "sqlx",
  "tracing",
  "tracing-subscriber",
+ "trybuild",
  "validator",
 ]
 
@@ -716,6 +717,14 @@ dependencies = [
  "concurrent-queue",
  "parking",
  "pin-project-lite",
+]
+
+[[package]]
+name = "events"
+version = "0.1.0"
+dependencies = [
+ "caelix",
+ "caelix-core",
 ]
 
 [[package]]

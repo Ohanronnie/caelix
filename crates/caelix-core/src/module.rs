@@ -1,4 +1,7 @@
-use crate::{BoxFuture, Container, Controller, Injectable};
+use crate::{
+    BoxFuture, Container, Controller, EventHandler, EventHandlerDef, Injectable,
+    RegisterableEventHandler,
+};
 use std::{
     any::{Any, TypeId},
     fmt::Debug,
@@ -180,6 +183,7 @@ pub struct ModuleMetadata {
     pub imports: Vec<ModuleDef>,
     pub providers: Vec<ProviderDef>,
     pub controllers: Vec<ControllerDef>,
+    pub event_handlers: Vec<EventHandlerDef>,
 }
 
 impl ModuleMetadata {
@@ -188,6 +192,7 @@ impl ModuleMetadata {
             imports: vec![],
             providers: vec![],
             controllers: vec![],
+            event_handlers: vec![],
         }
     }
 
@@ -219,6 +224,24 @@ impl ModuleMetadata {
         self.controllers.push(ControllerDef::of::<C>());
         self
     }
+
+    pub fn event_handler<H>(mut self) -> Self
+    where
+        H: RegisterableEventHandler + EventHandler<H::Event>,
+    {
+        self.event_handlers.push(EventHandlerDef::of::<H>());
+        self
+    }
+
+    pub fn event_handler_for<E, H>(mut self) -> Self
+    where
+        E: Clone + Send + Sync + 'static,
+        H: Injectable + EventHandler<E>,
+    {
+        self.event_handlers
+            .push(EventHandlerDef::for_event::<E, H>());
+        self
+    }
 }
 
 pub async fn register_module<M: Module>(container: &mut Container) {
@@ -248,6 +271,11 @@ pub async fn register_module<M: Module>(container: &mut Container) {
             .run_lifecycle(&value, "on_module_init", &controller.provider.init_fn)
             .await;
         crate::log_provider_initialized(controller.provider.type_name, provider_start.elapsed());
+    }
+
+    for handler in &metadata.event_handlers {
+        handler.assert_registered(container);
+        handler.register(container);
     }
 
     crate::log_module_initialized(std::any::type_name::<M>(), module_start.elapsed());
@@ -325,6 +353,10 @@ pub fn validate_module_providers<M: Module>(container: &Container) {
 
     for controller in &metadata.controllers {
         controller.provider.assert_registered(container);
+    }
+
+    for handler in &metadata.event_handlers {
+        handler.assert_registered(container);
     }
 }
 

@@ -40,6 +40,10 @@ impl Container {
             TypeId::of::<crate::Logger>(),
             Arc::new(crate::Logger::new("Application")),
         );
+        services.insert(
+            TypeId::of::<crate::EventBus>(),
+            Arc::new(crate::EventBus::new()),
+        );
 
         Self { services }
     }

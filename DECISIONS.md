@@ -14,3 +14,10 @@
 - Normal providers still register with `.provider::<T>()`; no separate lifecycle registration path is needed.
 - Async factory providers keep their existing construction-only behavior and receive no-op lifecycle callbacks. Providers that need lifecycle logic should implement `Injectable` directly and use `.provider::<T>()`.
 - `register_module` runs `on_module_init`, `build_container` runs `on_bootstrap` after provider validation, and `shutdown_module::<M>(&container)` runs `on_shutdown` in reverse startup order.
+
+## Events
+
+- `EventBus` is a framework service registered by `Container::new()`, alongside the default application logger.
+- Event handlers are normal injectable providers. A module must register the handler as a provider before adding it with `.event_handler::<H>()` or `.event_handler_for::<E, H>()`.
+- Rust cannot infer an event type out of a generic `impl EventHandler<E> for H` in a blanket `RegisterableEventHandler` impl, so `.event_handler::<H>()` uses an associated `RegisterableEventHandler::Event` type. `.event_handler_for::<E, H>()` is available when explicit event registration is clearer.
+- `EventBus::emit` clones the matching handler list before awaiting handlers, so the registry lock is not held across async work.

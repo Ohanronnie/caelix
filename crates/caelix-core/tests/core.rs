@@ -62,6 +62,15 @@ fn container_provides_framework_logger_by_default() {
     assert_eq!(logger.context(), "Application");
 }
 
+#[test]
+fn container_provides_event_bus_by_default() {
+    let container = Container::new();
+
+    let bus = container.resolve::<EventBus>();
+
+    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>(), 0);
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AuthenticatedUser {
     id: i64,
@@ -353,6 +362,171 @@ fn modules_register_imported_controllers_before_local_controllers() {
     register_module_controllers::<RootModule>(&mut routes);
 
     assert_eq!(routes, vec!["imported", "root"]);
+}
+
+#[derive(Clone)]
+struct CoreUserCreatedEvent {
+    user_id: i64,
+    email: String,
+}
+
+struct EventAuditLog {
+    entries: Mutex<Vec<String>>,
+}
+
+impl EventAuditLog {
+    fn push(&self, entry: String) {
+        self.entries.lock().unwrap().push(entry);
+    }
+
+    fn entries(&self) -> Vec<String> {
+        self.entries.lock().unwrap().clone()
+    }
+}
+
+impl Injectable for EventAuditLog {
+    fn create(_container: &Container) -> BoxFuture<'_, Self> {
+        Box::pin(async move {
+            Self {
+                entries: Mutex::new(Vec::new()),
+            }
+        })
+    }
+}
+
+struct WelcomeEmailHandler {
+    log: Arc<EventAuditLog>,
+}
+
+impl Injectable for WelcomeEmailHandler {
+    fn create(container: &Container) -> BoxFuture<'_, Self> {
+        Box::pin(async move {
+            Self {
+                log: container.resolve::<EventAuditLog>(),
+            }
+        })
+    }
+}
+
+impl EventHandler<CoreUserCreatedEvent> for WelcomeEmailHandler {
+    fn handle(&self, event: CoreUserCreatedEvent) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move {
+            self.log.push(format!("welcome:{}", event.email));
+            Ok(())
+        })
+    }
+}
+
+impl RegisterableEventHandler for WelcomeEmailHandler {
+    type Event = CoreUserCreatedEvent;
+}
+
+struct AuditUserHandler {
+    log: Arc<EventAuditLog>,
+}
+
+impl Injectable for AuditUserHandler {
+    fn create(container: &Container) -> BoxFuture<'_, Self> {
+        Box::pin(async move {
+            Self {
+                log: container.resolve::<EventAuditLog>(),
+            }
+        })
+    }
+}
+
+impl EventHandler<CoreUserCreatedEvent> for AuditUserHandler {
+    fn handle(&self, event: CoreUserCreatedEvent) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move {
+            self.log.push(format!("audit:{}", event.user_id));
+            Ok(())
+        })
+    }
+}
+
+struct EventModule;
+impl Module for EventModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new()
+            .provider::<EventAuditLog>()
+            .provider::<WelcomeEmailHandler>()
+            .provider::<AuditUserHandler>()
+            .event_handler::<WelcomeEmailHandler>()
+            .event_handler_for::<CoreUserCreatedEvent, AuditUserHandler>()
+    }
+}
+
+#[test]
+fn module_event_handlers_fan_out_for_the_same_event() {
+    let container = block_on(build_container::<EventModule>());
+    let bus = container.resolve::<EventBus>();
+
+    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>(), 2);
+
+    block_on(bus.emit(CoreUserCreatedEvent {
+        user_id: 1,
+        email: "a@b.com".to_string(),
+    }))
+    .unwrap();
+
+    let log = container.resolve::<EventAuditLog>();
+    assert_eq!(log.entries(), vec!["welcome:a@b.com", "audit:1"]);
+}
+
+struct ForgotEventHandlerRegistrationModule;
+
+impl Module for ForgotEventHandlerRegistrationModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new()
+            .provider::<EventAuditLog>()
+            .provider::<WelcomeEmailHandler>()
+    }
+}
+
+#[test]
+fn event_handler_provider_does_not_fire_until_registered_as_an_event_handler() {
+    let container = block_on(build_container::<ForgotEventHandlerRegistrationModule>());
+    let bus = container.resolve::<EventBus>();
+
+    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>(), 0);
+
+    block_on(bus.emit(CoreUserCreatedEvent {
+        user_id: 1,
+        email: "a@b.com".to_string(),
+    }))
+    .unwrap();
+
+    assert!(container.resolve::<EventAuditLog>().entries().is_empty());
+}
+
+struct MissingEventHandler;
+
+impl Injectable for MissingEventHandler {
+    fn create(_container: &Container) -> BoxFuture<'_, Self> {
+        Box::pin(async move { Self })
+    }
+}
+
+impl EventHandler<CoreUserCreatedEvent> for MissingEventHandler {
+    fn handle(&self, _event: CoreUserCreatedEvent) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+struct MissingEventHandlerModule;
+
+impl Module for MissingEventHandlerModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().event_handler_for::<CoreUserCreatedEvent, MissingEventHandler>()
+    }
+}
+
+#[test]
+#[should_panic(expected = "missing event handler provider at startup:")]
+fn event_handler_registration_requires_a_registered_provider() {
+    let mut container = Container::new();
+
+    block_on(register_module::<MissingEventHandlerModule>(&mut container));
 }
 
 #[derive(Serialize)]
