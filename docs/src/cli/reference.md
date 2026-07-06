@@ -3,12 +3,10 @@
 ## `caelix new`
 
 ```sh
-caelix new <name> [--caelix-path <PATH>]
+caelix new <name>
 ```
 
 Creates a new Caelix application directory named `<name>`.
-
-`--caelix-path` must point to a Caelix workspace root containing `crates/caelix`, `crates/caelix-core`, and `crates/caelix-actix`. If omitted, the CLI searches parent directories from the current working directory and falls back to the workspace used to build the CLI.
 
 The command creates `Cargo.toml`, `src/main.rs`, `src/lib.rs`, and `src/app.rs`. The package name comes from the target directory and is converted to kebab case.
 
@@ -61,8 +59,6 @@ The CLI refuses to overwrite files. Typical errors:
 
 ```text
 src/users/service.rs already exists; refusing to overwrite
-could not find a Caelix workspace; pass --caelix-path <path>
-/tmp/not-caelix is not a Caelix workspace root with crates/caelix, crates/caelix-core, and crates/caelix-actix
 ```
 
 ## Registration

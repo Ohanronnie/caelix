@@ -4,6 +4,11 @@ use caelix_core::{
 use caelix_macros::{controller, guard, injectable};
 use serde::Deserialize;
 
+mod caelix {
+    pub use caelix_actix::to_actix_response;
+    pub use caelix_core::*;
+}
+
 #[derive(Deserialize)]
 struct SearchQuery {
     term: String,

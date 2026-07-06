@@ -1,6 +1,6 @@
 [package]
 name = "caelix-core"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 description = "Core primitives for the Caelix framework."
 license = "MIT"
@@ -9,7 +9,7 @@ license = "MIT"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["sqlx", "validator"]
 sqlx = ["dep:sqlx"]
 validator = ["dep:validator"]
 

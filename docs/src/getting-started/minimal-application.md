@@ -15,7 +15,7 @@ impl Module for AppModule {
 ```
 
 ```rust
-use caelix_actix::Application;
+use caelix::Application;
 use demo_api::AppModule;
 
 #[caelix::main]

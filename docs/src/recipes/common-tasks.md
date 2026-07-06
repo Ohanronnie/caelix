@@ -3,7 +3,8 @@
 ## Create A Project
 
 ```sh
-cargo run -p caelix-cli -- new demo-api --caelix-path .
+cargo install caelix-cli
+caelix new demo-api
 ```
 
 ## Generate A Feature
@@ -48,7 +49,7 @@ For 5xx errors, the client response message stays generic.
 
 ## Validate A Request Body
 
-Enable the `validator` feature on `caelix-core`, derive `Validate`, and mark the extractor:
+Derive `Validate` and mark the extractor:
 
 ```rust
 #[post("")]

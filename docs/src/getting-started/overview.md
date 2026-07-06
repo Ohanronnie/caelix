@@ -2,34 +2,25 @@
 
 Caelix applications are built from a root module. Modules describe imported modules, injectable providers, controllers, and event handlers. The Actix adapter reads that metadata, builds a dependency container, registers controller routes, runs lifecycle hooks, and starts the HTTP server.
 
-The public crates are:
-
-| Crate | Role |
-| --- | --- |
-| `caelix` | Main framework crate. Re-exports core traits and macros. |
-| `caelix-core` | Framework-neutral container, modules, responses, guards, interceptors, events, cache, and errors. |
-| `caelix-actix` | Actix Web adapter and `Application`. |
-| `caelix-macros` | `#[injectable]`, `#[guard]`, and `#[controller]`. |
-| `caelix-cli` | Project and feature generator. |
+The public package is `caelix`. It exports the runtime, framework traits, controller and provider macros, responses, guards, interceptors, events, cache types, and Actix application entry point.
 
 ## Start A Project
 
-From the Caelix workspace, run the CLI through Cargo:
+Install the CLI from crates.io:
 
 ```sh
-cargo run -p caelix-cli -- new demo-api --caelix-path .
+cargo install caelix-cli
+```
+
+Create and run an application:
+
+```sh
+caelix new demo-api
 cd demo-api
 cargo run
 ```
 
-Or install the CLI first:
-
-```sh
-cargo install --path crates/caelix-cli
-caelix new demo-api --caelix-path /path/to/caelix
-```
-
-When the command runs inside a Caelix workspace, `--caelix-path` can be omitted. The generated application uses path dependencies back to the local framework checkout:
+The generated application uses `caelix = "0.0.1"` from crates.io:
 
 ```text
 demo-api/

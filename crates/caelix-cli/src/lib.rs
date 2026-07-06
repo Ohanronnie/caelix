@@ -13,8 +13,6 @@ pub enum CliError {
     Io { path: PathBuf, source: io::Error },
     AlreadyExists(PathBuf),
     InvalidName(String),
-    MissingCaelixPath,
-    InvalidCaelixPath(PathBuf),
 }
 
 impl fmt::Display for CliError {
@@ -29,15 +27,6 @@ impl fmt::Display for CliError {
                 )
             }
             Self::InvalidName(name) => write!(f, "invalid project or feature name `{name}`"),
-            Self::MissingCaelixPath => write!(
-                f,
-                "could not find a Caelix workspace; pass --caelix-path <path>"
-            ),
-            Self::InvalidCaelixPath(path) => write!(
-                f,
-                "{} is not a Caelix workspace root with crates/caelix, crates/caelix-core, and crates/caelix-actix",
-                path.display()
-            ),
         }
     }
 }
@@ -65,8 +54,6 @@ enum Command {
 #[derive(Args, Debug)]
 struct NewArgs {
     name: String,
-    #[arg(long, value_name = "PATH")]
-    caelix_path: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -183,14 +170,13 @@ fn generate_new(args: NewArgs, cwd: &Path) -> Result<String> {
 
     let package_name = package_name_for_path(&target_dir, &args.name)?;
     let crate_name = package_name.to_snake_case();
-    let caelix_root = resolve_caelix_root(args.caelix_path.as_deref(), cwd)?;
 
     fs::create_dir_all(target_dir.join("src")).map_err(|source| CliError::Io {
         path: target_dir.join("src"),
         source,
     })?;
 
-    let cargo_toml = render_app_cargo_toml(&package_name, &target_dir, &caelix_root);
+    let cargo_toml = render_app_cargo_toml(&package_name);
     create_file(target_dir.join("Cargo.toml"), &cargo_toml)?;
     create_file(target_dir.join("src/main.rs"), &render_main_rs(&crate_name))?;
     create_file(target_dir.join("src/lib.rs"), render_lib_rs())?;
@@ -316,83 +302,16 @@ fn package_name_for_path(path: &Path, fallback: &str) -> Result<String> {
     Ok(name.to_kebab_case())
 }
 
-fn resolve_caelix_root(explicit: Option<&Path>, cwd: &Path) -> Result<PathBuf> {
-    if let Some(path) = explicit {
-        let path = absolutize(path, cwd);
-        return validate_caelix_root(path);
-    }
-
-    if let Some(path) = find_caelix_root(cwd) {
-        return Ok(path);
-    }
-
-    let build_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf);
-
-    if let Some(path) = build_root {
-        if is_caelix_root(&path) {
-            return Ok(path);
-        }
-    }
-
-    Err(CliError::MissingCaelixPath)
-}
-
-fn absolutize(path: &Path, cwd: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    }
-}
-
-fn validate_caelix_root(path: PathBuf) -> Result<PathBuf> {
-    if is_caelix_root(&path) {
-        Ok(path)
-    } else {
-        Err(CliError::InvalidCaelixPath(path))
-    }
-}
-
-fn find_caelix_root(start: &Path) -> Option<PathBuf> {
-    start
-        .ancestors()
-        .find(|path| is_caelix_root(path))
-        .map(Path::to_path_buf)
-}
-
-fn is_caelix_root(path: &Path) -> bool {
-    path.join("crates/caelix/Cargo.toml").is_file()
-        && path.join("crates/caelix-core/Cargo.toml").is_file()
-        && path.join("crates/caelix-actix/Cargo.toml").is_file()
-}
-
-fn dependency_path(app_dir: &Path, caelix_root: &Path, crate_dir: &str) -> String {
-    let target = caelix_root.join("crates").join(crate_dir);
-    let relative = pathdiff::diff_paths(&target, app_dir).unwrap_or(target);
-    relative.to_string_lossy().replace('\\', "/")
-}
-
-pub fn render_app_cargo_toml(package_name: &str, app_dir: &Path, caelix_root: &Path) -> String {
-    let caelix = dependency_path(app_dir, caelix_root, "caelix");
-    let caelix_core = dependency_path(app_dir, caelix_root, "caelix-core");
-    let caelix_actix = dependency_path(app_dir, caelix_root, "caelix-actix");
-
+pub fn render_app_cargo_toml(package_name: &str) -> String {
     format!(
         r#"[package]
 name = "{package_name}"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
-
-[workspace]
 
 [dependencies]
 actix-web = "4.14.0"
-caelix = {{ path = "{caelix}", features = ["actix"] }}
-caelix-core = {{ path = "{caelix_core}" }}
-caelix-actix = {{ path = "{caelix_actix}" }}
+caelix = "0.0.1"
 serde = {{ version = "1.0.228", features = ["derive"] }}
 "#
     )
@@ -400,7 +319,7 @@ serde = {{ version = "1.0.228", features = ["derive"] }}
 
 fn render_main_rs(crate_name: &str) -> String {
     format!(
-        r#"use caelix_actix::Application;
+        r#"use caelix::Application;
 use {crate_name}::AppModule;
 
 #[caelix::main]

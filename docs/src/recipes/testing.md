@@ -17,23 +17,18 @@ async fn service_returns_user() {
 
 For controller behavior, prefer adapter-level tests that initialize an Actix app with the same module metadata used in production.
 
-CLI output can be tested through `caelix_cli::run_from` with a temporary directory:
+CLI-generated projects can be checked with normal Cargo commands after generation:
 
-```rust
-let output = caelix_cli::run_from(
-    ["caelix", "g", "module", "users"],
-    tempdir.path(),
-)?;
-
-assert!(output.contains("Created"));
+```sh
+caelix new demo-api
+cd demo-api
+cargo test
 ```
 
-Useful workspace checks:
+Useful application checks:
 
 ```sh
 cargo metadata --no-deps --format-version 1
-cargo test --workspace
-cargo test -p caelix-cli
-cargo check --workspace --all-features
-mdbook build
+cargo test
+cargo check
 ```

@@ -152,7 +152,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             Extractor::User => quote! {
                             request_context.get::<#ty>()
                                 .map(|value| (*value).clone())
-                                .ok_or_else(|| caelix_core::UnauthorizedException::new("Not authenticated"))?
+                                .ok_or_else(|| caelix::UnauthorizedException::new("Not authenticated"))?
                             },
                         };
 
@@ -160,7 +160,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             quote! {
                                 {
                                     let value = #base;
-                                    caelix_core::validator::Validate::validate(&value)?;
+                                    caelix::validator::Validate::validate(&value)?;
                                     value
                                 }
                             }
@@ -180,8 +180,8 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         quote! {
                             let #interceptor_name = container.resolve::<#interceptor_type>();
                             let #interceptor_ref_name = &#interceptor_name;
-                            let next = caelix_core::Next::new(move || {
-                                caelix_core::Interceptor::intercept(&**#interceptor_ref_name, request_context, next)
+                            let next = caelix::Next::new(move || {
+                                caelix::Interceptor::intercept(&**#interceptor_ref_name, request_context, next)
                             });
                         }
                     })
@@ -189,7 +189,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
                 wrappers.push(quote! {
                     async fn #wrapper_name(
-                        container: actix_web::web::Data<std::sync::Arc<caelix_core::Container>>,
+                        container: actix_web::web::Data<std::sync::Arc<caelix::Container>>,
                         req: actix_web::HttpRequest,
                         #(#wrapper_params),*
                     ) -> actix_web::HttpResponse {
@@ -198,9 +198,9 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             let value = match value.to_str() {
                                 Ok(value) => value,
                                 Err(_) => {
-                                    return caelix_actix::to_actix_response(
-                                        caelix_core::IntoCaelixResponse::into_response(
-                                            caelix_core::BadRequestException::new("invalid request header value"),
+                                    return caelix::to_actix_response(
+                                        caelix::IntoCaelixResponse::into_response(
+                                            caelix::BadRequestException::new("invalid request header value"),
                                         ),
                                     );
                                 }
@@ -208,7 +208,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
                             headers.insert(name.to_string(), value.to_string());
                         }
-                        let ctx = caelix_core::RequestContext::new(
+                        let ctx = caelix::RequestContext::new(
                             req.method().to_string(),
                             req.path().to_string(),
                             headers,
@@ -216,18 +216,18 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
                         #(
                             let guard = container.resolve::<#guard_types>();
-                            match caelix_core::Guard::can_activate(&*guard, &ctx).await {
+                            match caelix::Guard::can_activate(&*guard, &ctx).await {
                                 Ok(true) => {}
                                 Ok(false) => {
-                                    return caelix_actix::to_actix_response(
-                                        caelix_core::IntoCaelixResponse::into_response(
-                                            caelix_core::ForbiddenException::new("Access denied"),
+                                    return caelix::to_actix_response(
+                                        caelix::IntoCaelixResponse::into_response(
+                                            caelix::ForbiddenException::new("Access denied"),
                                         ),
                                     );
                                 }
                                 Err(err) => {
-                                    return caelix_actix::to_actix_response(
-                                        caelix_core::IntoCaelixResponse::into_response(err),
+                                    return caelix::to_actix_response(
+                                        caelix::IntoCaelixResponse::into_response(err),
                                     );
                                 }
                             }
@@ -235,20 +235,20 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
                         let request_context = &ctx;
                         let controller = container.resolve::<#struct_type>();
-                        let next = caelix_core::Next::new(move || {
+                        let next = caelix::Next::new(move || {
                             Box::pin(async move {
                                 let value = controller.#method_name(#(#call_args),*).await?;
 
-                                Ok(caelix_core::IntoCaelixResponse::into_response(value))
+                                Ok(caelix::IntoCaelixResponse::into_response(value))
                             })
                         });
                         #(#interceptor_chain)*
                         let result = next.run().await;
 
                         match result {
-                            Ok(value) => caelix_actix::to_actix_response(value),
-                            Err(err) => caelix_actix::to_actix_response(
-                                caelix_core::IntoCaelixResponse::into_response(err),
+                            Ok(value) => caelix::to_actix_response(value),
+                            Err(err) => caelix::to_actix_response(
+                                caelix::IntoCaelixResponse::into_response(err),
                             ),
                         }
                     }
@@ -262,7 +262,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     cfg.route(#full_path, actix_web::web::#actix_verb().to(#struct_type::#wrapper_name));
                 });
                 routes.push(quote! {
-                    caelix_core::RouteDef {
+                    caelix::RouteDef {
                         method: #verb,
                         path: #display_path,
                         handler: #handler_name,
@@ -275,10 +275,10 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #impl_block
 
-        impl caelix_core::Controller for #struct_type {
+        impl caelix::Controller for #struct_type {
             fn base_path() -> &'static str { #base_path }
 
-            fn routes() -> &'static [caelix_core::RouteDef] {
+            fn routes() -> &'static [caelix::RouteDef] {
                 &[
                     #(#routes),*
                 ]

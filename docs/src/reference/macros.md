@@ -18,7 +18,7 @@ pub struct UsersController {
 
 Expansion behavior:
 
-- Implements `caelix_core::Injectable`.
+- Implements `caelix::Injectable`.
 - Resolves each `Arc<T>` field with `container.resolve::<T>()`.
 - Uses `container.resolve_logger(stringify!(TypeName))` for `Arc<Logger>`.
 - Leaves lifecycle hooks as default no-ops.

@@ -1,6 +1,6 @@
 [package]
 name = "caelix-cli"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 description = "Command line generator for Caelix applications."
 license = "MIT"
@@ -12,7 +12,6 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
 heck = "0.5.0"
-pathdiff = "0.2.3"
 
 [dev-dependencies]
 tempfile = "3.27.0"

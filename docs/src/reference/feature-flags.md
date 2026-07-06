@@ -1,25 +1,24 @@
 # Feature Flags
 
-The top-level `caelix` crate exposes the `actix` feature to re-export the Actix runtime macro:
+`caelix` enables its current integrations by default:
 
 ```toml
-caelix = { path = "../crates/caelix", features = ["actix"] }
+caelix = "0.0.1"
 ```
 
-`caelix-core` exposes optional integration features:
+The default features include:
 
+- `actix`: enables `Application`, `#[caelix::main]`, and Actix Web runtime support.
 - `sqlx`: enables SQLx-related error conversion support when available.
 - `validator`: enables request validation support used by `#[validate]`.
 
-Generated applications depend on `caelix` with `features = ["actix"]`, plus direct path dependencies on `caelix-core` and `caelix-actix`.
+Generated applications depend directly on `caelix`; they do not need additional Caelix package dependencies.
 
 Example generated dependencies:
 
 ```toml
 [dependencies]
 actix-web = "4.14.0"
-caelix = { path = "../crates/caelix", features = ["actix"] }
-caelix-core = { path = "../crates/caelix-core" }
-caelix-actix = { path = "../crates/caelix-actix" }
+caelix = "0.0.1"
 serde = { version = "1.0.228", features = ["derive"] }
 ```

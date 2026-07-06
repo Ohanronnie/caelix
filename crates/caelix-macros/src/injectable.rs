@@ -44,8 +44,8 @@ pub(crate) fn expand(_args: TokenStream, input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #input
 
-        impl caelix_core::Injectable for #struct_name {
-            fn create(container: &caelix_core::Container) -> caelix_core::BoxFuture<'_, Self> {
+        impl caelix::Injectable for #struct_name {
+            fn create(container: &caelix::Container) -> caelix::BoxFuture<'_, Self> {
                 Box::pin(async move {
                     #create_body
                 })

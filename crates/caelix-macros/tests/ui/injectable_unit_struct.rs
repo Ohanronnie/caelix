@@ -1,3 +1,4 @@
+use caelix_core as caelix;
 use caelix_core::Container;
 use caelix_macros::injectable;
 

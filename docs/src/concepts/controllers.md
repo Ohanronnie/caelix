@@ -111,7 +111,7 @@ Invalid JSON returns `400 Bad Request`. JSON bodies over the configured body lim
 
 ## Validation
 
-With the `validator` feature enabled on `caelix-core`, `#[validate]` calls `validator::Validate::validate(&value)` after extraction and before the controller method is invoked.
+With the default `validator` support enabled on `caelix`, `#[validate]` calls `validator::Validate::validate(&value)` after extraction and before the controller method is invoked.
 
 ```rust
 use validator::Validate;

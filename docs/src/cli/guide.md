@@ -2,37 +2,33 @@
 
 The CLI binary is named `caelix`.
 
-Install it from a checkout:
+Install it from crates.io:
 
 ```sh
-cargo install --path crates/caelix-cli
+cargo install caelix-cli
 ```
 
-Or run it without installing:
-
-```sh
-cargo run -p caelix-cli -- <command>
-```
+After installation, run commands with the `caelix` binary.
 
 ## Create An Application
 
 ```sh
-caelix new demo-api --caelix-path /path/to/caelix
+caelix new demo-api
 ```
 
-When run inside a Caelix workspace, `--caelix-path` can be omitted. The command creates:
+The command creates:
 
 - `Cargo.toml`
 - `src/main.rs`
 - `src/lib.rs`
 - `src/app.rs`
 
-The generated `Cargo.toml` uses path dependencies for `caelix`, `caelix-core`, and `caelix-actix`.
+The generated `Cargo.toml` uses `caelix = "0.0.1"` from crates.io.
 
 Generated `src/main.rs` starts the Actix adapter:
 
 ```rust
-use caelix_actix::Application;
+use caelix::Application;
 use demo_api::AppModule;
 
 #[caelix::main]

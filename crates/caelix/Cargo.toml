@@ -1,18 +1,20 @@
 [package]
 name = "caelix"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 description = "Public Caelix framework crate."
 license = "MIT"
 
 [features]
-default = []
+default = ["actix", "sqlx", "validator"]
 actix = ["dep:caelix-actix"]
+sqlx = ["caelix-core/sqlx"]
+validator = ["caelix-core/validator"]
 
 [dependencies]
-caelix-actix = { path = "../caelix-actix", version = "0.1.0", optional = true }
-caelix-core = { path = "../caelix-core", version = "0.1.0" }
-caelix-macros = { path = "../caelix-macros", version = "0.1.0" }
+caelix-actix = { path = "../caelix-actix", version = "0.0.1", optional = true }
+caelix-core = { path = "../caelix-core", version = "0.0.1" }
+caelix-macros = { path = "../caelix-macros", version = "0.0.1" }
 
 [lib]
 path = "src/lib.rs"

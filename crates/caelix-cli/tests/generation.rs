@@ -1,31 +1,12 @@
-use std::{fs, path::PathBuf};
+use std::fs;
 
 use tempfile::tempdir;
 
-fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .unwrap()
-        .to_path_buf()
-}
-
 #[test]
-fn new_creates_application_structure_with_local_paths() {
+fn new_creates_application_structure_with_crates_io_dependency() {
     let tmp = tempdir().unwrap();
-    let root = workspace_root();
 
-    let output = caelix_cli::run_from(
-        [
-            "caelix",
-            "new",
-            "demo-api",
-            "--caelix-path",
-            root.to_str().unwrap(),
-        ],
-        tmp.path(),
-    )
-    .unwrap();
+    let output = caelix_cli::run_from(["caelix", "new", "demo-api"], tmp.path()).unwrap();
 
     let app_dir = tmp.path().join("demo-api");
     let cargo_toml = fs::read_to_string(app_dir.join("Cargo.toml")).unwrap();
@@ -35,11 +16,12 @@ fn new_creates_application_structure_with_local_paths() {
 
     assert!(output.contains("Created Caelix application `demo-api`"));
     assert!(cargo_toml.contains("edition = \"2024\""));
-    assert!(cargo_toml.contains("[workspace]"));
-    assert!(cargo_toml.contains("caelix = { path = "));
-    assert!(cargo_toml.contains("features = [\"actix\"]"));
-    assert!(cargo_toml.contains("caelix-core = { path = "));
-    assert!(cargo_toml.contains("caelix-actix = { path = "));
+    assert!(!cargo_toml.contains("[workspace]"));
+    assert!(cargo_toml.contains("caelix = \"0.0.1\""));
+    assert!(!cargo_toml.contains("path = "));
+    assert!(!cargo_toml.contains("caelix-core"));
+    assert!(!cargo_toml.contains("caelix-actix"));
+    assert!(main_rs.contains("use caelix::Application;"));
     assert!(main_rs.contains("use demo_api::AppModule;"));
     assert!(main_rs.contains("#[caelix::main]"));
     assert!(main_rs.contains("Application::new::<AppModule>()"));

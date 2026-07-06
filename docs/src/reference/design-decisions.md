@@ -1,6 +1,6 @@
 # Design Decisions
 
-Caelix keeps framework-neutral concepts in `caelix-core` and adapter-specific HTTP server behavior in `caelix-actix`.
+Caelix keeps framework-neutral concepts separate from adapter-specific HTTP server behavior internally, while the public `caelix` package exports the application-facing API.
 
 Interceptors are framework-neutral. They receive `RequestContext`, `Next`, and the already converted `HttpResponse`, so they can inspect or transform responses without depending on a handler's original return type.
 

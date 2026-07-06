@@ -1,5 +1,6 @@
 use std::{future::Future, sync::Arc};
 
+use caelix_core as caelix;
 use caelix_core::{Container, Logger};
 use caelix_macros::injectable;
 
