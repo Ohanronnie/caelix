@@ -42,7 +42,7 @@ The command creates:
 - `src/lib.rs`
 - `src/app.rs`
 
-The generated `Cargo.toml` uses `caelix = "0.0.5"` from crates.io.
+The generated `Cargo.toml` uses `caelix = "0.0.6"` from crates.io.
 
 The generated `AGENTS.md` gives AI coding agents the app-level Caelix conventions: explicit module registration, provider/controller registration, injectable field shape, service-level cache behavior, and the usual `cargo test` check.
 
