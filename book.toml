@@ -1,0 +1,12 @@
+[book]
+title = "Caelix"
+authors = ["Caelix contributors"]
+language = "en"
+src = "docs/src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/caelix-rs/caelix"
+edit-url-template = "https://github.com/caelix-rs/caelix/edit/main/{path}"

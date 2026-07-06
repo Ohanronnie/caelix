@@ -1,3 +1,4 @@
 /target/
+/book/
 PLAN.md
 examples/sqlx-crud/users.db

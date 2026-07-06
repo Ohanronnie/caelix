@@ -44,6 +44,7 @@ fn new_creates_application_structure_with_local_paths() {
     assert!(main_rs.contains("#[caelix::main]"));
     assert!(main_rs.contains("Application::new::<AppModule>()"));
     assert_eq!(lib_rs, "pub mod app;\n\npub use app::AppModule;\n");
+    assert!(app_rs.contains("use caelix::{Module, ModuleMetadata};"));
     assert!(app_rs.contains("ModuleMetadata::new()"));
 }
 
@@ -58,6 +59,7 @@ fn generate_service_creates_service_and_refuses_overwrite() {
     let module = fs::read_to_string(&mod_path).unwrap();
 
     assert!(output.contains("Manual registration:"));
+    assert!(service.contains("use caelix::injectable;"));
     assert!(service.contains("#[injectable]\npub struct UsersService;"));
     assert!(module.contains("pub mod service;"));
     assert!(module.contains("pub use service::UsersService;"));
@@ -78,6 +80,7 @@ fn generate_controller_uses_service_when_present_and_prints_instructions() {
     let controller = fs::read_to_string(tmp.path().join("src/users/controller.rs")).unwrap();
 
     assert!(controller.contains("service: Arc<UsersService>"));
+    assert!(controller.contains("use caelix::{controller, get, injectable, Result};"));
     assert!(controller.contains("#[controller(\"/users\")]"));
     assert!(controller.contains("Ok(self.service.hello())"));
     assert!(output.contains("Add `.controller::<UsersController>()`"));
@@ -92,6 +95,7 @@ fn generate_controller_without_service_prints_note() {
     let controller = fs::read_to_string(tmp.path().join("src/users/controller.rs")).unwrap();
 
     assert!(controller.contains("pub struct UsersController;"));
+    assert!(controller.contains("use caelix::{controller, get, injectable, Result};"));
     assert!(!controller.contains("Arc<UsersService>"));
     assert!(output.contains("generated without a UsersService dependency"));
 }
@@ -107,9 +111,12 @@ fn generate_module_creates_complete_feature_folder() {
     let controller = fs::read_to_string(tmp.path().join("src/auth_session/controller.rs")).unwrap();
 
     assert!(module.contains("pub struct AuthSessionModule;"));
+    assert!(module.contains("use caelix::{Module, ModuleMetadata};"));
     assert!(module.contains(".provider::<AuthSessionService>()"));
     assert!(module.contains(".controller::<AuthSessionController>()"));
+    assert!(service.contains("use caelix::injectable;"));
     assert!(service.contains("pub struct AuthSessionService;"));
+    assert!(controller.contains("use caelix::{controller, get, injectable, Result};"));
     assert!(controller.contains("#[controller(\"/auth-session\")]"));
     assert!(output.contains("Add `.import::<AuthSessionModule>()`"));
 }

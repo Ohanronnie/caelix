@@ -420,7 +420,7 @@ fn render_lib_rs() -> &'static str {
 }
 
 fn render_app_rs() -> &'static str {
-    r#"use caelix::prelude::*;
+    r#"use caelix::{Module, ModuleMetadata};
 
 pub struct AppModule;
 
@@ -435,7 +435,7 @@ impl Module for AppModule {
 pub fn render_service(feature: &FeatureName) -> String {
     let service = feature.service_type();
     format!(
-        r#"use caelix::prelude::*;
+        r#"use caelix::injectable;
 
 #[injectable]
 pub struct {service};
@@ -458,7 +458,7 @@ pub fn render_controller(feature: &FeatureName, has_service: bool) -> String {
         format!(
             r#"use std::sync::Arc;
 
-use caelix::prelude::*;
+use caelix::{{controller, get, injectable, Result}};
 
 use super::{service};
 
@@ -478,7 +478,7 @@ impl {controller} {{
         )
     } else {
         format!(
-            r#"use caelix::prelude::*;
+            r#"use caelix::{{controller, get, injectable, Result}};
 
 #[injectable]
 pub struct {controller};
@@ -542,7 +542,7 @@ pub mod service;
 pub use controller::{controller};
 pub use service::{service};
 
-use caelix::prelude::*;
+use caelix::{{Module, ModuleMetadata}};
 
 pub struct {module};
 
