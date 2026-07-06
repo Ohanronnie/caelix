@@ -330,7 +330,7 @@ fn collect_validation_errors(
     field_errors: &mut BTreeMap<String, Vec<String>>,
 ) {
     let mut fields = err.errors().iter().collect::<Vec<_>>();
-    fields.sort_by_key(|(field, _)| **field);
+    fields.sort_by(|(left, _), (right, _)| left.as_ref().cmp(right.as_ref()));
 
     for (field, kind) in fields {
         let path = if prefix.is_empty() {
