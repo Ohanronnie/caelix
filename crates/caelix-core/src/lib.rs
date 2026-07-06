@@ -2,6 +2,7 @@
 
 extern crate self as caelix_core;
 
+mod cache;
 mod container;
 mod context;
 mod controller;
@@ -14,6 +15,7 @@ mod module;
 mod response;
 mod result;
 
+pub use cache::*;
 pub use container::*;
 pub use context::*;
 pub use controller::*;

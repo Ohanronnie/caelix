@@ -2,10 +2,11 @@ use std::{
     any::Any,
     future::Future,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use caelix_core::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -253,6 +254,70 @@ fn module_can_register_async_factory_provider() {
     let provider = container.resolve::<FactoryBuiltProvider>();
 
     assert_eq!(provider.greeting, "factory");
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+struct CachedUser {
+    id: i64,
+    email: String,
+}
+
+#[test]
+fn cache_sets_gets_deletes_and_clears_serializable_values_by_string_key() {
+    let cache = Cache::new(Arc::new(MemoryCacheStore::new()));
+
+    block_on(cache.set(
+        "user:1",
+        CachedUser {
+            id: 1,
+            email: "ronnie@example.com".to_string(),
+        },
+    ))
+    .unwrap();
+
+    assert_eq!(
+        block_on(cache.get::<CachedUser>("user:1")).unwrap(),
+        Some(CachedUser {
+            id: 1,
+            email: "ronnie@example.com".to_string(),
+        })
+    );
+
+    block_on(cache.delete("user:1")).unwrap();
+    assert_eq!(block_on(cache.get::<CachedUser>("user:1")).unwrap(), None);
+
+    block_on(cache.set("a", "one")).unwrap();
+    block_on(cache.set("b", 2_i64)).unwrap();
+    block_on(cache.clear()).unwrap();
+    assert_eq!(block_on(cache.get::<String>("a")).unwrap(), None);
+    assert_eq!(block_on(cache.get::<i64>("b")).unwrap(), None);
+}
+
+#[test]
+fn cache_expires_entries_with_ttl_when_read() {
+    let store = Arc::new(MemoryCacheStore::new());
+    let cache = Cache::new(store.clone());
+
+    block_on(cache.set_with_ttl("short", "alive", Duration::from_millis(5))).unwrap();
+    assert_eq!(
+        block_on(cache.get::<String>("short")).unwrap(),
+        Some("alive".to_string())
+    );
+
+    std::thread::sleep(Duration::from_millis(20));
+
+    assert_eq!(block_on(cache.get::<String>("short")).unwrap(), None);
+    assert!(store.is_empty());
+}
+
+#[test]
+fn cache_module_registers_default_memory_cache() {
+    let container = block_on(build_container::<CacheModule>());
+    let cache = container.resolve::<Cache>();
+
+    block_on(cache.set("answer", 42_i64)).unwrap();
+
+    assert_eq!(block_on(cache.get::<i64>("answer")).unwrap(), Some(42));
 }
 
 #[test]

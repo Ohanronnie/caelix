@@ -96,6 +96,38 @@ async fn mounts_imported_controller_routes_with_extractors() {
 }
 
 #[actix_web::test]
+async fn cache_time_route_sets_then_returns_cached_value_on_next_request() {
+    let container = Arc::new(build_container::<AppModule>().await);
+    let app = actix_test::init_service(
+        App::new()
+            .app_data(web::Data::new(container))
+            .configure(|cfg| register_module_controllers::<AppModule>(cfg)),
+    )
+    .await;
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/cache/time/set")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let cached_time = actix_test::read_body(response).await;
+    assert!(!cached_time.is_empty());
+
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/cache/time")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(actix_test::read_body(response).await, cached_time);
+}
+
+#[actix_web::test]
 async fn guarded_route_threads_context_into_user_extractor() {
     let container = Arc::new(build_container::<AppModule>().await);
     let app = actix_test::init_service(

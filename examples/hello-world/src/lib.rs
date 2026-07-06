@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use caelix::prelude::*;
 use serde::Deserialize;
@@ -57,6 +60,7 @@ pub struct Service {
     repo: Arc<Repo>,
     async_greeting: Arc<AsyncGreetingProvider>,
     expensive_startup: Arc<ExpensiveStartupProvider>,
+    cache: Arc<Cache>,
     logger: Arc<Logger>,
 }
 
@@ -86,6 +90,25 @@ impl Service {
 
     pub fn create_user(&self, name: &str, email: &str) -> String {
         format!("{}: created {name} <{email}>", self.repo.greet())
+    }
+
+    pub async fn set_cached_time(&self) -> Result<String> {
+        let value = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is before Unix epoch")
+            .as_millis()
+            .to_string();
+
+        self.cache.set("hello-world:time", value.clone()).await?;
+
+        Ok(value)
+    }
+
+    pub async fn get_cached_time(&self) -> Result<String> {
+        self.cache
+            .get::<String>("hello-world:time")
+            .await?
+            .ok_or_else(|| NotFoundException::new("No cached time has been set"))
     }
 }
 
@@ -208,6 +231,24 @@ impl ProfileController {
     }
 }
 
+#[injectable]
+pub struct CacheController {
+    service: Arc<Service>,
+}
+
+#[controller("/cache")]
+impl CacheController {
+    #[get("/time/set")]
+    pub async fn set_time(&self) -> Result<String> {
+        self.service.set_cached_time().await
+    }
+
+    #[get("/time")]
+    pub async fn get_time(&self) -> Result<String> {
+        self.service.get_cached_time().await
+    }
+}
+
 pub struct UserModule;
 
 impl Module for UserModule {
@@ -224,6 +265,7 @@ impl Module for UserModule {
             .provider::<Service>()
             .controller::<UserController>()
             .controller::<ProfileController>()
+            .controller::<CacheController>()
     }
 }
 
@@ -231,6 +273,8 @@ pub struct AppModule;
 
 impl Module for AppModule {
     fn register() -> ModuleMetadata {
-        ModuleMetadata::new().import::<UserModule>()
+        ModuleMetadata::new()
+            .import::<CacheModule>()
+            .import::<UserModule>()
     }
 }
