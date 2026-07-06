@@ -71,7 +71,7 @@ fn on_bootstrap(&self) -> BoxFuture<'_, Result<()>> {
 }
 ```
 
-For 5xx exceptions, the client response body is sanitized, but startup logs and returned errors still carry the internal message.
+For 5xx exceptions, the client response body is sanitized. Startup errors are returned to the caller, and generated controller routes log returned 5xx exceptions server-side before sending the sanitized response.
 
 ## Async Factory Limitation
 

@@ -829,6 +829,25 @@ fn server_error_responses_do_not_serialize_source_or_internal_messages() {
 }
 
 #[test]
+fn logging_http_exceptions_preserves_sanitized_server_error_responses() {
+    let exception = InternalServerErrorException::new(anyhow::anyhow!("database down"));
+    log_http_exception(&exception);
+    let response = exception.into_response();
+
+    assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        json!({
+            "status": 500,
+            "error": "Internal Server Error",
+            "message": "Internal Server Error"
+        })
+    );
+
+    log_http_exception(&BadRequestException::new("bad input"));
+}
+
+#[test]
 fn client_exception_constructors_use_expected_status_and_error_labels() {
     macro_rules! assert_exception {
         ($ctor:ident, $status:expr, $error:expr) => {{

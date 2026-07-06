@@ -89,7 +89,7 @@ errors.insert("email".to_string(), vec!["must be a valid email".to_string()]);
 return Err(BadRequestException::new("Validation failed").with_errors(errors));
 ```
 
-Server error responses are production-safe: if an `HttpException` has a 5xx status, the response body message is `Internal Server Error` rather than the internal error text.
+Server error responses are production-safe: if an `HttpException` has a 5xx status, the response body message is `Internal Server Error` rather than the internal error text. Generated controller routes log returned 5xx exceptions through the `ExceptionHandler` logger, including the internal `source` when one is attached.
 
 ```rust
 let user = repository

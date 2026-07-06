@@ -17,7 +17,7 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
-use crate::{Controller, Module, RouteDef};
+use crate::{Controller, HttpException, Module, RouteDef};
 
 const RESET: &str = "\x1b[0m";
 const BRAND: &str = "\x1b[38;5;45m";
@@ -194,6 +194,29 @@ impl crate::Injectable for Logger {
 
 pub fn log(context: &str, level: LogLevel, message: impl AsRef<str>, elapsed: Option<Duration>) {
     Logger::new(context).write(level, message, elapsed);
+}
+
+pub fn log_http_exception(exception: &HttpException) {
+    if !exception.status.is_server_error() {
+        return;
+    }
+
+    let message = match &exception.source {
+        Some(source) => format!(
+            "{} {}: {} | source: {source:#}",
+            exception.status.as_u16(),
+            exception.error,
+            exception.message
+        ),
+        None => format!(
+            "{} {}: {}",
+            exception.status.as_u16(),
+            exception.error,
+            exception.message
+        ),
+    };
+
+    Logger::new("ExceptionHandler").error(message);
 }
 
 pub(crate) fn init_logging() {

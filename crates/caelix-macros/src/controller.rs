@@ -226,6 +226,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                                     );
                                 }
                                 Err(err) => {
+                                    caelix::log_http_exception(&err);
                                     return caelix::to_actix_response(
                                         caelix::IntoCaelixResponse::into_response(err),
                                     );
@@ -247,9 +248,12 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
                         match result {
                             Ok(value) => caelix::to_actix_response(value),
-                            Err(err) => caelix::to_actix_response(
-                                caelix::IntoCaelixResponse::into_response(err),
-                            ),
+                            Err(err) => {
+                                caelix::log_http_exception(&err);
+                                caelix::to_actix_response(
+                                    caelix::IntoCaelixResponse::into_response(err),
+                                )
+                            }
                         }
                     }
                 });
