@@ -1,13 +1,13 @@
 [package]
 name = "caelix-actix"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2024"
 description = "Actix Web runtime adapter for Caelix."
 license = "MIT"
 
 [dependencies]
 actix-web = "4.14.0"
-caelix-core = { path = "../caelix-core", version = "0.0.3" }
+caelix-core = { path = "../caelix-core", version = "0.0.4" }
 futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
 
 [dev-dependencies]
