@@ -81,7 +81,10 @@ Handlers should return values implementing `IntoCaelixResponse`, usually:
 - `Response::WithStatus(status, value)` for JSON with a custom status.
 - `Response::json`, `Response::text`, or `Response::bytes` for raw payloads.
 - `Response::no_content()` for `204`.
+- `Response::stream` / `Response::sse` / `Response::file` for streaming (`Result<HttpResponse>`).
 - `HttpException` types for errors.
+
+`HttpResponse.body` is a `ResponseBody` (`Buffered` or `Streaming`) — breaking vs `Vec<u8>`; use `body_bytes()` / `as_buffered_mut()`. `HttpResponse.headers` is `Vec<(String, String)>` via `with_header` (dynamic values ok; not a full HeaderMap). Actix maps streaming via `.streaming(...)` and applies headers. `EventBus::subscribe::<E>()` creates a live stream; `emit` runs handlers first, then fans out only on success. `StreamExt` is re-exported from `caelix` for stream adapters. Interceptors can rewrite buffered bodies only.
 
 Server errors intentionally hide their internal message and serialize as a generic `Internal Server Error`. Client errors may include validation `errors`.
 

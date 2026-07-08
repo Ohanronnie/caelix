@@ -8,10 +8,11 @@ use actix_web::{
 };
 use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpException, HttpResponse as CaelixHttpResponse,
-    IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException,
+    IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException, ResponseBody,
     log_application_started, log_http_request, log_listening, log_module_routes,
     register_module_controllers, try_build_container, try_shutdown_module,
 };
+use futures_util::StreamExt;
 
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
 
@@ -20,9 +21,25 @@ pub fn to_actix_response(response: CaelixHttpResponse) -> HttpResponse {
     let status = actix_web::http::StatusCode::from_u16(response.status.as_u16())
         .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
 
-    HttpResponse::build(status)
-        .content_type(response.content_type)
-        .body(response.body)
+    let mut builder = HttpResponse::build(status);
+    builder.content_type(response.content_type);
+    for (name, value) in response.headers {
+        builder.insert_header((name, value));
+    }
+
+    match response.body {
+        ResponseBody::Buffered(bytes) => builder.body(bytes),
+        ResponseBody::Streaming(stream) => {
+            // Mid-stream errors cannot rewrite an already-sent status line.
+            let stream = stream.map(|chunk| {
+                chunk.map_err(|err| {
+                    caelix_core::log_http_exception(&err);
+                    actix_web::error::ErrorInternalServerError("Internal Server Error")
+                })
+            });
+            builder.streaming(stream)
+        }
+    }
 }
 
 pub struct Application {
@@ -633,5 +650,56 @@ mod tests {
         application.shutdown().await.unwrap();
 
         assert_eq!(SHUTDOWN_COUNT.load(Ordering::SeqCst), 1);
+    }
+
+    #[actix_web::test]
+    async fn to_actix_response_streams_chunked_body() {
+        use actix_web::body::to_bytes;
+        use caelix_core::{Bytes, Response};
+
+        let stream = futures_util::stream::iter(vec![
+            Ok::<_, caelix_core::HttpException>(Bytes::from_static(b"chunk-a-")),
+            Ok(Bytes::from_static(b"chunk-b")),
+        ]);
+        let caelix = Response::stream("text/plain", stream);
+        let actix_response = to_actix_response(caelix);
+
+        assert_eq!(actix_response.status(), StatusCode::OK);
+        assert_eq!(
+            actix_response
+                .headers()
+                .get(actix_web::http::header::CONTENT_TYPE)
+                .unwrap(),
+            "text/plain"
+        );
+
+        let body = to_bytes(actix_response.into_body()).await.unwrap();
+        assert_eq!(&body[..], b"chunk-a-chunk-b");
+    }
+
+    #[actix_web::test]
+    async fn to_actix_response_applies_sse_headers() {
+        use caelix_core::Response;
+
+        let stream = futures_util::stream::iter(Vec::<
+            std::result::Result<serde_json::Value, caelix_core::HttpException>,
+        >::new());
+        let actix_response = to_actix_response(Response::sse(stream));
+
+        assert_eq!(
+            actix_response
+                .headers()
+                .get(actix_web::http::header::CONTENT_TYPE)
+                .unwrap(),
+            "text/event-stream"
+        );
+        assert_eq!(
+            actix_response.headers().get("cache-control").unwrap(),
+            "no-cache"
+        );
+        assert_eq!(
+            actix_response.headers().get("x-accel-buffering").unwrap(),
+            "no"
+        );
     }
 }

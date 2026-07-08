@@ -1,10 +1,17 @@
 use crate::{BoxFuture, Container, Injectable, Module, ModuleMetadata, Result};
+use futures_util::StreamExt;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
     marker::PhantomData,
     sync::{Arc, RwLock},
 };
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+
+/// Default capacity for per-event-type broadcast channels used by [`EventBus::subscribe`].
+const EVENT_BROADCAST_CAPACITY: usize = 256;
 
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not an event handler for `{E}`",
@@ -56,14 +63,20 @@ where
     }
 }
 
+struct EventChannel<E> {
+    tx: broadcast::Sender<E>,
+}
+
 pub struct EventBus {
     handlers: RwLock<HashMap<TypeId, Vec<Arc<dyn ErasedHandler>>>>,
+    broadcasts: RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
 }
 
 impl EventBus {
     pub fn new() -> Self {
         Self {
             handlers: RwLock::new(HashMap::new()),
+            broadcasts: RwLock::new(HashMap::new()),
         }
     }
 
@@ -85,6 +98,88 @@ impl EventBus {
             .push(wrapped);
     }
 
+    /// Create the per-type broadcast channel if missing; used only by [`Self::subscribe`].
+    fn ensure_sender<E>(&self) -> broadcast::Sender<E>
+    where
+        E: Clone + Send + Sync + 'static,
+    {
+        let type_id = TypeId::of::<E>();
+
+        {
+            let broadcasts = self
+                .broadcasts
+                .read()
+                .expect("event broadcast registry lock poisoned");
+            if let Some(channel) = broadcasts.get(&type_id) {
+                return channel
+                    .downcast_ref::<EventChannel<E>>()
+                    .expect("event broadcast type mismatch")
+                    .tx
+                    .clone();
+            }
+        }
+
+        let mut broadcasts = self
+            .broadcasts
+            .write()
+            .expect("event broadcast registry lock poisoned");
+        let channel = broadcasts.entry(type_id).or_insert_with(|| {
+            let (tx, _rx) = broadcast::channel::<E>(EVENT_BROADCAST_CAPACITY);
+            Box::new(EventChannel { tx })
+        });
+
+        channel
+            .downcast_ref::<EventChannel<E>>()
+            .expect("event broadcast type mismatch")
+            .tx
+            .clone()
+    }
+
+    /// Existing channel only — does not allocate. Used by [`Self::emit`].
+    fn existing_sender<E>(&self) -> Option<broadcast::Sender<E>>
+    where
+        E: Clone + Send + Sync + 'static,
+    {
+        self.broadcasts
+            .read()
+            .expect("event broadcast registry lock poisoned")
+            .get(&TypeId::of::<E>())
+            .map(|channel| {
+                channel
+                    .downcast_ref::<EventChannel<E>>()
+                    .expect("event broadcast type mismatch")
+                    .tx
+                    .clone()
+            })
+    }
+
+    /// Live stream of events of type `E`. Receives events after subscription;
+    /// earlier events are not replayed. Slow consumers may lag and drop events
+    /// (see broadcast capacity).
+    ///
+    /// Creates the broadcast channel for `E` on first subscribe. [`Self::emit`]
+    /// only fans out when a channel already exists (i.e. someone has subscribed).
+    pub fn subscribe<E>(&self) -> impl futures_core::Stream<Item = Result<E>> + Send + 'static
+    where
+        E: Clone + Send + Sync + 'static,
+    {
+        let rx = self.ensure_sender::<E>().subscribe();
+        BroadcastStream::new(rx).filter_map(|item| async move {
+            match item {
+                Ok(event) => Some(Ok(event)),
+                Err(BroadcastStreamRecvError::Lagged(_)) => {
+                    tracing::warn!("event bus subscriber lagged; dropped events");
+                    None
+                }
+            }
+        })
+    }
+
+    /// Run registered handlers in order, then fan out to live subscribers.
+    ///
+    /// Handlers run first so a failed handler aborts `emit` and does **not**
+    /// publish to stream subscribers. Broadcast channels are only used when
+    /// created by a prior [`Self::subscribe`] — emit alone never allocates one.
     pub async fn emit<E>(&self, event: E) -> Result<()>
     where
         E: Clone + Send + Sync + 'static,
@@ -100,6 +195,10 @@ impl EventBus {
             for handler in handlers {
                 handler.handle_erased(&event).await?;
             }
+        }
+
+        if let Some(tx) = self.existing_sender::<E>() {
+            let _ = tx.send(event);
         }
 
         Ok(())

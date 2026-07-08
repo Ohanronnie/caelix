@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 actix-web = "4.14.0"
 caelix-core = { path = "../caelix-core", version = "0.0.3" }
+futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 serde = { version = "1.0.228", features = ["derive"] }

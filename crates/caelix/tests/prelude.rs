@@ -6,5 +6,5 @@ fn public_prelude_reexports_core_response_types() {
 
     assert_eq!(response.status, StatusCode::CREATED);
     assert_eq!(response.content_type, "text/plain");
-    assert_eq!(response.body, b"made");
+    assert_eq!(response.body_bytes().unwrap(), b"made");
 }

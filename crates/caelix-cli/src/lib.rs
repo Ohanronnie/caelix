@@ -896,6 +896,7 @@ Handlers should return values that implement `IntoCaelixResponse`.
 - `Response::Body(value)` returns `200` JSON.
 - `Response::WithStatus(status, value)` returns JSON with a custom status.
 - `Response::json`, `Response::text`, and `Response::bytes` return explicit raw payloads.
+- `Response::stream`, `Response::sse`, and `Response::file` return streaming `HttpResponse` values.
 - `Response::no_content()` returns `204`.
 - Use Caelix exception types such as `BadRequestException`, `UnauthorizedException`, `ForbiddenException`, `NotFoundException`, and `InternalServerErrorException` for errors.
 - Server error messages are intentionally hidden from HTTP responses.

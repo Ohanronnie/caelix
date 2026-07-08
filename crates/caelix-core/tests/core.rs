@@ -108,8 +108,12 @@ impl Interceptor for PrefixInterceptor {
     ) -> BoxFuture<'a, Result<HttpResponse>> {
         Box::pin(async move {
             let mut response = next.run().await?;
-            let body = String::from_utf8(response.body).expect("expected UTF-8 text response");
-            response.body = format!("prefix:{body}").into_bytes();
+            let bytes = response
+                .body
+                .as_buffered_mut()
+                .expect("expected buffered response body");
+            let body = String::from_utf8(std::mem::take(bytes)).expect("expected UTF-8 text response");
+            *bytes = format!("prefix:{body}").into_bytes();
             Ok(response)
         })
     }
@@ -129,7 +133,7 @@ fn interceptor_wraps_next_and_can_transform_response() {
     let response = block_on(PrefixInterceptor.intercept(&ctx, next)).unwrap();
 
     assert_eq!(response.status, StatusCode::OK);
-    assert_eq!(response.body, b"prefix:handler response");
+    assert_eq!(response.body_bytes().unwrap(), b"prefix:handler response");
 }
 
 struct AwaitingProvider {
@@ -690,17 +694,17 @@ fn http_response_helpers_preserve_status_body_and_content_type() {
     let json_response = HttpResponse::json(StatusCode::CREATED, Payload { name: "caelix" });
     assert_eq!(json_response.status, StatusCode::CREATED);
     assert_eq!(json_response.content_type, "application/json");
-    assert_eq!(json_response.body, br#"{"name":"caelix"}"#);
+    assert_eq!(json_response.body_bytes().unwrap(), br#"{"name":"caelix"}"#);
 
     let text_response = HttpResponse::text(StatusCode::ACCEPTED, "queued");
     assert_eq!(text_response.status, StatusCode::ACCEPTED);
     assert_eq!(text_response.content_type, "text/plain");
-    assert_eq!(text_response.body, b"queued");
+    assert_eq!(text_response.body_bytes().unwrap(), b"queued");
 
     let bytes_response = HttpResponse::bytes(StatusCode::OK, [1_u8, 2, 3]);
     assert_eq!(bytes_response.status, StatusCode::OK);
     assert_eq!(bytes_response.content_type, "application/octet-stream");
-    assert_eq!(bytes_response.body, vec![1, 2, 3]);
+    assert_eq!(bytes_response.body_bytes().unwrap(), vec![1, 2, 3]);
 }
 
 #[test]
@@ -708,18 +712,18 @@ fn into_caelix_response_covers_strings_structured_values_raw_values_and_empty() 
     let response = "hello".into_response();
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(response.content_type, "text/plain");
-    assert_eq!(response.body, b"hello");
+    assert_eq!(response.body_bytes().unwrap(), b"hello");
 
     let response = String::from("owned").into_response();
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(response.content_type, "text/plain");
-    assert_eq!(response.body, b"owned");
+    assert_eq!(response.body_bytes().unwrap(), b"owned");
 
     let response = Response::Body(Payload { name: "body" }).into_response();
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(response.content_type, "application/json");
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(response.body_bytes().unwrap()).unwrap(),
         json!({"name": "body"})
     );
 
@@ -728,25 +732,25 @@ fn into_caelix_response_covers_strings_structured_values_raw_values_and_empty() 
     assert_eq!(response.status, StatusCode::CREATED);
     assert_eq!(response.content_type, "application/json");
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(response.body_bytes().unwrap()).unwrap(),
         json!({"name": "created"})
     );
 
     let response = Response::text(StatusCode::ACCEPTED, "accepted").into_response();
     assert_eq!(response.status, StatusCode::ACCEPTED);
     assert_eq!(response.content_type, "text/plain");
-    assert_eq!(response.body, b"accepted");
+    assert_eq!(response.body_bytes().unwrap(), b"accepted");
 
     let response = Response::bytes(StatusCode::OK, vec![4, 5, 6]).into_response();
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(response.content_type, "application/octet-stream");
-    assert_eq!(response.body, vec![4, 5, 6]);
+    assert_eq!(response.body_bytes().unwrap(), vec![4, 5, 6]);
 
     let response = Response::json(StatusCode::ACCEPTED, json!({"raw": true})).into_response();
     assert_eq!(response.status, StatusCode::ACCEPTED);
     assert_eq!(response.content_type, "application/json");
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(response.body_bytes().unwrap()).unwrap(),
         json!({"raw": true})
     );
 
@@ -773,7 +777,7 @@ fn json_response_helpers_do_not_panic_on_serialization_failure() {
 
     assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(response.body_bytes().unwrap()).unwrap(),
         json!({
             "status": 500,
             "error": "Internal Server Error",
@@ -785,7 +789,7 @@ fn json_response_helpers_do_not_panic_on_serialization_failure() {
 
     assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(response.body_bytes().unwrap()).unwrap(),
         json!({
             "status": 500,
             "error": "Internal Server Error",
@@ -801,7 +805,7 @@ fn http_exception_into_response_serializes_error_body() {
     assert_eq!(response.status, StatusCode::NOT_FOUND);
     assert_eq!(response.content_type, "application/json");
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(response.body_bytes().unwrap()).unwrap(),
         json!({
             "status": 404,
             "error": "Not Found",
@@ -819,7 +823,7 @@ fn server_error_responses_do_not_serialize_source_or_internal_messages() {
     assert_eq!(response.status, StatusCode::BAD_GATEWAY);
     assert_eq!(response.content_type, "application/json");
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(response.body_bytes().unwrap()).unwrap(),
         json!({
             "status": 502,
             "error": "Bad Gateway",
@@ -836,7 +840,7 @@ fn logging_http_exceptions_preserves_sanitized_server_error_responses() {
 
     assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(response.body_bytes().unwrap()).unwrap(),
         json!({
             "status": 500,
             "error": "Internal Server Error",
@@ -1038,4 +1042,224 @@ fn server_exception_constructors_use_expected_status_and_error_labels() {
     assert_eq!(internal.error, "Internal Server Error");
     assert_eq!(internal.message, "Internal Server Error");
     assert!(internal.source.is_some());
+}
+
+async fn collect_body(response: HttpResponse) -> Vec<u8> {
+    match response.body {
+        ResponseBody::Buffered(bytes) => bytes,
+        ResponseBody::Streaming(mut stream) => {
+            use futures_util::StreamExt;
+            let mut out = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                out.extend_from_slice(&chunk.expect("stream chunk"));
+            }
+            out
+        }
+    }
+}
+
+#[tokio::test]
+async fn response_stream_yields_chunks() {
+    let stream = futures_util::stream::iter(vec![
+        Ok(Bytes::from_static(b"hello ")),
+        Ok(Bytes::from_static(b"world")),
+    ]);
+    let response = Response::stream("text/plain", stream);
+
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.content_type, "text/plain");
+    assert!(response.body.is_streaming());
+    assert_eq!(collect_body(response).await, b"hello world");
+}
+
+#[tokio::test]
+async fn response_sse_frames_json_events() {
+    #[derive(Serialize)]
+    struct Event {
+        id: u32,
+    }
+
+    let stream = futures_util::stream::iter(vec![
+        Ok(Event { id: 1 }),
+        Ok(Event { id: 2 }),
+    ]);
+    let response = Response::sse(stream);
+
+    assert_eq!(response.content_type, "text/event-stream");
+    assert!(
+        response
+            .headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("Cache-Control") && v == "no-cache")
+    );
+    assert!(
+        response
+            .headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("X-Accel-Buffering") && v == "no")
+    );
+    assert_eq!(
+        collect_body(response).await,
+        b"data: {\"id\":1}\n\ndata: {\"id\":2}\n\n"
+    );
+}
+
+#[tokio::test]
+async fn response_sse_surfaces_serialization_errors() {
+    let stream = futures_util::stream::iter(vec![Ok(FailingSerialize)]);
+    let response = Response::sse(stream);
+
+    match response.body {
+        ResponseBody::Streaming(mut stream) => {
+            use futures_util::StreamExt;
+            let err = stream.next().await.unwrap().unwrap_err();
+            assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        }
+        ResponseBody::Buffered(_) => panic!("expected streaming body"),
+    }
+}
+
+#[tokio::test]
+async fn response_file_streams_disk_contents() {
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!(
+        "caelix-stream-test-{}.txt",
+        std::process::id()
+    ));
+    std::fs::write(&path, b"file-bytes-from-disk").unwrap();
+
+    let response = Response::file(&path, "text/plain")
+        .await
+        .expect("file open");
+    assert_eq!(response.content_type, "text/plain");
+    assert!(response.body.is_streaming());
+    assert_eq!(collect_body(response).await, b"file-bytes-from-disk");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[tokio::test]
+async fn response_file_missing_path_is_not_found() {
+    let result = Response::file("/tmp/caelix-definitely-missing-file-xyz", "text/plain").await;
+    match result {
+        Err(err) => assert_eq!(err.status, StatusCode::NOT_FOUND),
+        Ok(_) => panic!("expected missing file to return NotFound"),
+    }
+}
+
+#[tokio::test]
+async fn event_bus_subscribe_receives_emitted_events() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct Ping {
+        n: u32,
+    }
+
+    let bus = EventBus::new();
+    let mut stream = std::pin::pin!(bus.subscribe::<Ping>());
+
+    use futures_util::StreamExt;
+    bus.emit(Ping { n: 7 }).await.unwrap();
+    let event = stream.next().await.unwrap().unwrap();
+    assert_eq!(event, Ping { n: 7 });
+}
+
+#[tokio::test]
+async fn event_bus_emit_still_runs_handlers_with_subscribers() {
+    #[derive(Clone)]
+    struct Ping {
+        n: u32,
+    }
+
+    struct CountingHandler {
+        seen: Arc<Mutex<Vec<u32>>>,
+    }
+
+    impl EventHandler<Ping> for CountingHandler {
+        fn handle(&self, event: Ping) -> BoxFuture<'_, Result<()>> {
+            let seen = self.seen.clone();
+            Box::pin(async move {
+                seen.lock().unwrap().push(event.n);
+                Ok(())
+            })
+        }
+    }
+
+    let bus = EventBus::new();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    bus.register(Arc::new(CountingHandler {
+        seen: seen.clone(),
+    }));
+
+    let mut stream = std::pin::pin!(bus.subscribe::<Ping>());
+    use futures_util::StreamExt;
+
+    bus.emit(Ping { n: 3 }).await.unwrap();
+    assert_eq!(stream.next().await.unwrap().unwrap().n, 3);
+    assert_eq!(*seen.lock().unwrap(), vec![3]);
+}
+
+#[tokio::test]
+async fn event_bus_does_not_broadcast_when_a_handler_fails() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct Ping {
+        n: u32,
+    }
+
+    struct FailingHandler;
+
+    impl EventHandler<Ping> for FailingHandler {
+        fn handle(&self, _event: Ping) -> BoxFuture<'_, Result<()>> {
+            Box::pin(async {
+                Err(InternalServerErrorException::new(anyhow::anyhow!(
+                    "handler failed"
+                )))
+            })
+        }
+    }
+
+    let bus = EventBus::new();
+    bus.register(Arc::new(FailingHandler));
+    let mut stream = std::pin::pin!(bus.subscribe::<Ping>());
+    use futures_util::StreamExt;
+
+    let err = bus.emit(Ping { n: 9 }).await.unwrap_err();
+    assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    let next = tokio::time::timeout(Duration::from_millis(50), stream.next()).await;
+    assert!(
+        next.is_err(),
+        "failed emit must not publish to live subscribers"
+    );
+}
+
+#[tokio::test]
+async fn event_bus_emit_without_subscribers_still_runs_handlers() {
+    #[derive(Clone)]
+    struct Ping {
+        n: u32,
+    }
+
+    struct CountingHandler {
+        seen: Arc<Mutex<Vec<u32>>>,
+    }
+
+    impl EventHandler<Ping> for CountingHandler {
+        fn handle(&self, event: Ping) -> BoxFuture<'_, Result<()>> {
+            let seen = self.seen.clone();
+            Box::pin(async move {
+                seen.lock().unwrap().push(event.n);
+                Ok(())
+            })
+        }
+    }
+
+    let bus = EventBus::new();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    bus.register(Arc::new(CountingHandler {
+        seen: seen.clone(),
+    }));
+
+    // No subscribe() — emit must not need a broadcast channel.
+    bus.emit(Ping { n: 1 }).await.unwrap();
+    assert_eq!(*seen.lock().unwrap(), vec![1]);
 }

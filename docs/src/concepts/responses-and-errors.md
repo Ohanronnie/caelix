@@ -68,6 +68,54 @@ pub async fn health(&self) -> Result<Response<()>> {
 
 `Response::bytes` uses `application/octet-stream`. `HttpResponse::new`, `HttpResponse::json`, `HttpResponse::text`, and `HttpResponse::bytes` are available when you need the fully materialized response type.
 
+## Streaming Responses
+
+`HttpResponse` holds a `ResponseBody` that is either fully buffered (`Vec<u8>`) or a streaming async sequence of `Bytes` chunks. Use streaming when the body is not ready as one blob — large exports, live feeds, or files on disk.
+
+**Migration note (breaking in 0.0.x):** `HttpResponse.body` is no longer `Vec<u8>`. Use `response.body_bytes()` / `response.body.as_buffered()` / `as_buffered_mut()` for buffered bodies. Direct `response.body.extend(...)` or `== b"..."` comparisons need updating. Optional response headers live in `response.headers` as owned `(String, String)` pairs (`with_header(name, value)` accepts dynamic values) and are applied by the Actix adapter.
+
+Streaming helpers return `HttpResponse` directly. Handlers typically return `Result<HttpResponse>` (which already implements `IntoCaelixResponse` as identity):
+
+```rust
+use caelix::{Bytes, HttpResponse, Response, Result, StreamExt};
+
+#[get("/export")]
+async fn export_csv(&self) -> Result<HttpResponse> {
+    let rows = self.repo.stream_all_users();
+    let bytes_stream = rows.map(|row| {
+        row.map(|r| Bytes::from(format!("{},{}\n", r.id, r.name)))
+    });
+    Ok(Response::stream("text/csv", bytes_stream))
+}
+```
+
+`StreamExt` (for `.map` / `.filter` on streams) is re-exported from `caelix` so you do not need a direct `futures-util` dependency for the common helpers.
+
+### Server-Sent Events
+
+`Response::sse` frames each stream item as JSON in SSE wire format (`data: …\n\n`) with content type `text/event-stream`, and sets `Cache-Control: no-cache` plus `X-Accel-Buffering: no`. It does not yet implement the full SSE protocol (`id:`, `event:`, `retry:`, Last-Event-ID resume):
+
+```rust
+#[get("/live-orders")]
+async fn live_orders(&self) -> Result<HttpResponse> {
+    let stream = self.events.subscribe::<OrderPlacedEvent>();
+    Ok(Response::sse(stream))
+}
+```
+
+### File streaming
+
+`Response::file` opens a path asynchronously and streams disk chunks (not the whole file in memory). Open errors are mapped by kind: missing path → `404 Not Found`, permission denied → `403 Forbidden`, other IO failures → `500 Internal Server Error`.
+
+```rust
+#[get("/report.pdf")]
+async fn report(&self) -> Result<HttpResponse> {
+    Response::file("/var/data/report.pdf", "application/pdf").await
+}
+```
+
+The Actix adapter maps buffered bodies with `.body(...)` and streaming bodies with `.streaming(...)` (chunked transfer encoding), and applies `HttpResponse.headers`. Mid-stream errors cannot change the already-sent status line; they close the stream after logging.
+
 ## Exceptions
 
 Use typed exception constructors for client errors:

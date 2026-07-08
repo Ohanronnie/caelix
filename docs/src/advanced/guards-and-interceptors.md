@@ -113,7 +113,9 @@ impl Interceptor for HeaderInterceptor {
         Box::pin(async move {
             let mut response = next.run().await?;
             if response.content_type == "application/json" {
-                response.body.extend_from_slice(b"\n");
+                if let Some(body) = response.body.as_buffered_mut() {
+                    body.extend_from_slice(b"\n");
+                }
             }
             Ok(response)
         })
@@ -121,7 +123,15 @@ impl Interceptor for HeaderInterceptor {
 }
 ```
 
-Because `HttpResponse` currently stores status, body bytes, and content type, header mutation is adapter-specific. Use native Actix middleware if you need full header-level response rewriting.
+Body transforms apply only to buffered responses. Streaming bodies (`ResponseBody::Streaming`) are opaque after the handler returns — interceptors can still change status or content type, but should not assume `body_bytes()` is present.
+
+`HttpResponse` stores status, body, content type, and a simple list of owned header name/value pairs (`headers: Vec<(String, String)>`). Use `with_header` when chaining builders, or `insert_header` to mutate an existing response (typical in interceptors). That is enough for dynamic values such as `Content-Disposition` filenames or `X-Request-Id`. It is not a full typed `HeaderMap` (no multi-value merge helpers, no typed header enums). Use native Actix middleware when you need richer header-level response rewriting.
+
+```rust
+let mut response = next.run().await?;
+response.insert_header("X-Request-Id", request_id);
+Ok(response)
+```
 
 ## Execution Order
 
