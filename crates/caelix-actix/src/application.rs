@@ -127,7 +127,7 @@ async fn not_found(req: HttpRequest) -> HttpResponse {
     )
 }
 
-fn configure_caelix_services(
+pub(crate) fn configure_caelix_services(
     cfg: &mut web::ServiceConfig,
     body_limit: usize,
     configure_fn: fn(&mut web::ServiceConfig),

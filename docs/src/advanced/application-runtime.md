@@ -1,6 +1,6 @@
 # Application Runtime
 
-`caelix` provides `Application`.
+`caelix` provides `Application` for production and `TestApplication` for in-process HTTP tests (see [Testing](../recipes/testing.md)).
 
 ```rust
 use caelix::Application;

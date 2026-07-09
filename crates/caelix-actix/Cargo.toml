@@ -6,11 +6,13 @@ description = "Actix Web runtime adapter for Caelix."
 license = "MIT"
 
 [dependencies]
+actix-http = "3.11.0"
 actix-web = "4.14.0"
+bytes = "1.10.1"
 caelix-core = { path = "../caelix-core", version = "0.0.4" }
 futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
-
-[dev-dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+
+[dev-dependencies]
 uuid = { version = "1.19.0", features = ["serde"] }

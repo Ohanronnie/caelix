@@ -5,7 +5,7 @@ use caelix_macros::{controller, guard, injectable};
 use serde::Deserialize;
 
 mod caelix {
-    pub use caelix_actix::to_actix_response;
+    pub use caelix_actix::{__actix_web, to_actix_response};
     pub use caelix_core::*;
 }
 

@@ -4,6 +4,7 @@ use crate::{
 };
 use std::{
     any::{Any, TypeId},
+    collections::HashMap,
     fmt::Debug,
     future::Future,
     sync::Arc,
@@ -51,6 +52,24 @@ impl ProviderDef {
         }
     }
 
+    /// Pre-built provider value for tests and other manual registration paths.
+    ///
+    /// Lifecycle hooks are no-ops (NestJS `useValue` semantics).
+    pub fn instance<T: Send + Sync + 'static>(value: T) -> Self {
+        let value = Arc::new(value) as Arc<dyn Any + Send + Sync>;
+        Self {
+            type_id: TypeId::of::<T>(),
+            type_name: std::any::type_name::<T>(),
+            build: Box::new(move |_container| {
+                let value = value.clone();
+                Box::pin(async move { Ok(value) })
+            }),
+            init_fn: noop_lifecycle(),
+            bootstrap_fn: noop_lifecycle(),
+            shutdown_fn: noop_lifecycle(),
+        }
+    }
+
     pub fn async_factory<T, Fut, E>(
         factory: impl Fn(Arc<Container>) -> Fut + Send + Sync + 'static,
     ) -> Self
@@ -82,6 +101,14 @@ impl ProviderDef {
             bootstrap_fn: noop_lifecycle(),
             shutdown_fn: noop_lifecycle(),
         }
+    }
+
+    pub fn type_id(&self) -> TypeId {
+        self.type_id
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        self.type_name
     }
 
     fn try_assert_registered(&self, container: &Container) -> crate::Result<()> {
@@ -120,11 +147,63 @@ impl ProviderDef {
                 "missing provider during {hook_name}: {} was declared by module metadata but was not registered",
                 self.type_name
             ))
-        });
-        let value = value?;
+        })?;
 
         self.try_run_lifecycle(&value, hook_name, lifecycle_fn)
             .await
+    }
+}
+
+/// Provider replacements applied while building a container (primarily for tests).
+///
+/// Overrides match by [`TypeId`]: the replacement must be the same concrete type
+/// that modules register and inject via `Arc<T>`.
+pub struct ProviderOverrides {
+    defs: HashMap<TypeId, ProviderDef>,
+}
+
+impl ProviderOverrides {
+    pub fn new() -> Self {
+        Self {
+            defs: HashMap::new(),
+        }
+    }
+
+    pub fn insert_instance<T: Send + Sync + 'static>(mut self, value: T) -> Self {
+        self.defs
+            .insert(TypeId::of::<T>(), ProviderDef::instance(value));
+        self
+    }
+
+    pub fn insert_factory<T, Fut, E>(
+        mut self,
+        factory: impl Fn(Arc<Container>) -> Fut + Send + Sync + 'static,
+    ) -> Self
+    where
+        T: Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<T, E>> + Send + 'static,
+        E: Debug + Send + 'static,
+    {
+        self.defs.insert(
+            TypeId::of::<T>(),
+            ProviderDef::async_factory::<T, Fut, E>(factory),
+        );
+        self
+    }
+
+    pub fn insert(mut self, def: ProviderDef) -> Self {
+        self.defs.insert(def.type_id, def);
+        self
+    }
+
+    pub(crate) fn into_inner(self) -> HashMap<TypeId, ProviderDef> {
+        self.defs
+    }
+}
+
+impl Default for ProviderOverrides {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -274,24 +353,11 @@ pub async fn try_register_module<M: Module>(container: &mut Container) -> crate:
     }
 
     for provider in &metadata.providers {
-        let provider_start = Instant::now();
-        let value = (provider.build)(container).await?;
-        container.register_erased(provider.type_id, value.clone());
-        provider
-            .try_run_lifecycle(&value, "on_module_init", &provider.init_fn)
-            .await?;
-        crate::log_provider_initialized(provider.type_name, provider_start.elapsed());
+        try_register_provider_def(container, provider).await?;
     }
 
     for controller in &metadata.controllers {
-        let provider_start = Instant::now();
-        let value = (controller.provider.build)(container).await?;
-        container.register_erased(controller.provider.type_id, value.clone());
-        controller
-            .provider
-            .try_run_lifecycle(&value, "on_module_init", &controller.provider.init_fn)
-            .await?;
-        crate::log_provider_initialized(controller.provider.type_name, provider_start.elapsed());
+        try_register_provider_def(container, &controller.provider).await?;
     }
 
     for handler in &metadata.event_handlers {
@@ -300,6 +366,33 @@ pub async fn try_register_module<M: Module>(container: &mut Container) -> crate:
     }
 
     crate::log_module_initialized(std::any::type_name::<M>(), module_start.elapsed());
+    Ok(())
+}
+
+async fn try_register_provider_def(
+    container: &mut Container,
+    declared: &ProviderDef,
+) -> crate::Result<()> {
+    // Once a type has been satisfied by an override, ignore later declarations
+    // of the same TypeId so production registrations cannot replace the test
+    // double (registration overwrites by TypeId).
+    if container.was_overridden(declared.type_id) {
+        return Ok(());
+    }
+
+    let provider_start = Instant::now();
+    let override_def = container.take_pending_override(declared.type_id);
+    if override_def.is_some() {
+        container.mark_override_applied(declared.type_id);
+    }
+    let effective = override_def.as_ref().unwrap_or(declared);
+
+    let value = (effective.build)(container).await?;
+    container.register_erased(effective.type_id, value.clone());
+    effective
+        .try_run_lifecycle(&value, "on_module_init", &effective.init_fn)
+        .await?;
+    crate::log_provider_initialized(effective.type_name, provider_start.elapsed());
     Ok(())
 }
 
@@ -317,12 +410,18 @@ pub async fn try_bootstrap_module<M: Module>(container: &Container) -> crate::Re
     }
 
     for provider in &metadata.providers {
+        if container.was_overridden(provider.type_id) {
+            continue;
+        }
         provider
             .try_run_lifecycle_from_container(container, "on_bootstrap", &provider.bootstrap_fn)
             .await?;
     }
 
     for controller in &metadata.controllers {
+        if container.was_overridden(controller.provider.type_id) {
+            continue;
+        }
         controller
             .provider
             .try_run_lifecycle_from_container(
@@ -346,6 +445,9 @@ pub async fn try_shutdown_module<M: Module>(container: &Container) -> crate::Res
     let metadata = M::register();
 
     for controller in metadata.controllers.iter().rev() {
+        if container.was_overridden(controller.provider.type_id) {
+            continue;
+        }
         controller
             .provider
             .try_run_lifecycle_from_container(
@@ -357,6 +459,9 @@ pub async fn try_shutdown_module<M: Module>(container: &Container) -> crate::Res
     }
 
     for provider in metadata.providers.iter().rev() {
+        if container.was_overridden(provider.type_id) {
+            continue;
+        }
         provider
             .try_run_lifecycle_from_container(container, "on_shutdown", &provider.shutdown_fn)
             .await?;
@@ -376,9 +481,25 @@ pub async fn build_container<M: Module>() -> Container {
 }
 
 pub async fn try_build_container<M: Module>() -> crate::Result<Container> {
+    try_build_container_with_overrides::<M>(ProviderOverrides::new()).await
+}
+
+pub async fn build_container_with_overrides<M: Module>(
+    overrides: ProviderOverrides,
+) -> Container {
+    try_build_container_with_overrides::<M>(overrides)
+        .await
+        .unwrap_or_else(|err| panic!("{}", err.message))
+}
+
+pub async fn try_build_container_with_overrides<M: Module>(
+    overrides: ProviderOverrides,
+) -> crate::Result<Container> {
     crate::log_application_starting();
     let mut container = Container::new();
+    container.seed_overrides(overrides);
     try_register_module::<M>(&mut container).await?;
+    container.try_assert_no_unused_overrides()?;
     try_validate_module_providers::<M>(&container)?;
     try_bootstrap_module::<M>(&container).await?;
     Ok(container)

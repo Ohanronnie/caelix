@@ -402,7 +402,9 @@ dependencies = [
 name = "caelix-actix"
 version = "0.0.7"
 dependencies = [
+ "actix-http",
  "actix-web",
+ "bytes",
  "caelix-core",
  "futures-util",
  "serde",

@@ -1,6 +1,6 @@
 use std::{
     any::{Any, TypeId},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -26,9 +26,23 @@ pub trait Injectable: Send + Sync + 'static {
     }
 }
 
-#[derive(Clone)]
 pub struct Container {
     services: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
+    /// Pending provider overrides consumed while registering the module tree.
+    pub(crate) pending_overrides: HashMap<TypeId, crate::ProviderDef>,
+    /// TypeIds that were satisfied by an override (skip declared lifecycle hooks).
+    pub(crate) applied_overrides: HashSet<TypeId>,
+}
+
+impl Clone for Container {
+    fn clone(&self) -> Self {
+        Self {
+            services: self.services.clone(),
+            // Overrides are build-time only; clones used by factories do not need them.
+            pending_overrides: HashMap::new(),
+            applied_overrides: self.applied_overrides.clone(),
+        }
+    }
 }
 
 impl Container {
@@ -41,7 +55,11 @@ impl Container {
             Arc::new(crate::Logger::new("Application")),
         );
 
-        Self { services }
+        Self {
+            services,
+            pending_overrides: HashMap::new(),
+            applied_overrides: HashSet::new(),
+        }
     }
 
     pub fn register_instance<T: Send + Sync + 'static>(&mut self, value: T) {
@@ -79,6 +97,43 @@ impl Container {
 
     pub(crate) fn contains_type_id(&self, type_id: TypeId) -> bool {
         self.services.contains_key(&type_id)
+    }
+
+    pub(crate) fn take_pending_override(
+        &mut self,
+        type_id: TypeId,
+    ) -> Option<crate::ProviderDef> {
+        self.pending_overrides.remove(&type_id)
+    }
+
+    pub(crate) fn mark_override_applied(&mut self, type_id: TypeId) {
+        self.applied_overrides.insert(type_id);
+    }
+
+    pub(crate) fn was_overridden(&self, type_id: TypeId) -> bool {
+        self.applied_overrides.contains(&type_id)
+    }
+
+    pub(crate) fn seed_overrides(&mut self, overrides: crate::ProviderOverrides) {
+        self.pending_overrides = overrides.into_inner();
+    }
+
+    pub(crate) fn try_assert_no_unused_overrides(&self) -> crate::Result<()> {
+        if self.pending_overrides.is_empty() {
+            return Ok(());
+        }
+
+        let mut names: Vec<&'static str> = self
+            .pending_overrides
+            .values()
+            .map(|provider| provider.type_name())
+            .collect();
+        names.sort_unstable();
+
+        Err(crate::exception::startup_error(format!(
+            "provider override was never applied: {}; is it registered in the module tree?",
+            names.join(", ")
+        )))
     }
 
     pub fn resolve<T: Send + Sync + 'static>(&self) -> Arc<T> {

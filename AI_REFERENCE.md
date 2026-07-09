@@ -99,12 +99,28 @@ Do not add automatic HTTP response caching. Users can implement response caching
 Most users should depend on `caelix`:
 
 - `caelix` re-exports `caelix_core::*` and `caelix_macros::*`.
-- With feature `actix`, it also exports `Application`, `main`, and `to_actix_response`.
-- `caelix::prelude::*` exports core and macros.
+- With feature `actix`, it also exports `Application`, `TestApplication`, `main`, and `to_actix_response`.
+- `#[caelix::main]` / `#[caelix::test]` expand through a hidden `caelix::__actix_web` re-export so apps need only a `caelix` dependency (not a direct `actix-web` dep) for runtime macros and generated controller code.
+- `caelix::prelude::*` exports core and macros (not `test`/`main`, so Rust’s `#[test]` is not shadowed).
 
 Inside generated macro code, paths intentionally use `caelix::...`; keep that facade stable.
 
 ## Tests And Checks
+
+App authors integration-test modules with `TestApplication` (Actix feature):
+
+```rust
+#[caelix::test]
+async fn should_create_user() {
+    let app = TestApplication::new::<AppModule>()
+        .override_provider(UserRepository::in_memory())
+        .await;
+
+    app.post("/users").json(dto).send().await.assert_status(StatusCode::CREATED);
+}
+```
+
+Overrides are type-id based (`ProviderOverrides` / `try_build_container_with_overrides` in core). The replacement must be the same concrete type `T` that production injects. Nested imports are covered because overrides live on the container during registration.
 
 Useful commands:
 

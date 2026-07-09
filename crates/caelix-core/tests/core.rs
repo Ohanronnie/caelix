@@ -222,6 +222,139 @@ fn injectable_lifecycle_hooks_run_without_special_provider_registration() {
     );
 }
 
+struct NestedRepo {
+    label: &'static str,
+}
+
+impl Injectable for NestedRepo {
+    fn create(_container: &Container) -> BoxFuture<'_, Self> {
+        Box::pin(async move { Self { label: "production" } })
+    }
+
+    fn on_module_init(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async {
+            LIFECYCLE_EVENTS.lock().unwrap().push("repo_init");
+            Ok(())
+        })
+    }
+
+    fn on_bootstrap(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async {
+            LIFECYCLE_EVENTS.lock().unwrap().push("repo_bootstrap");
+            Ok(())
+        })
+    }
+
+    fn on_shutdown(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async {
+            LIFECYCLE_EVENTS.lock().unwrap().push("repo_shutdown");
+            Ok(())
+        })
+    }
+}
+
+struct NestedModule;
+impl Module for NestedModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().provider::<NestedRepo>()
+    }
+}
+
+struct RootWithNestedModule;
+impl Module for RootWithNestedModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().import::<NestedModule>()
+    }
+}
+
+#[test]
+fn provider_override_replaces_nested_module_provider() {
+    LIFECYCLE_EVENTS.lock().unwrap().clear();
+
+    let overrides = ProviderOverrides::new().insert_instance(NestedRepo { label: "test" });
+    let container = block_on(try_build_container_with_overrides::<RootWithNestedModule>(
+        overrides,
+    ))
+    .unwrap();
+
+    assert_eq!(container.resolve::<NestedRepo>().label, "test");
+    // Instance overrides skip declared lifecycle hooks.
+    assert!(LIFECYCLE_EVENTS.lock().unwrap().is_empty());
+}
+
+#[test]
+fn unused_provider_override_returns_startup_error() {
+    struct Unused;
+    let overrides = ProviderOverrides::new().insert_instance(Unused);
+    let err = match block_on(try_build_container_with_overrides::<LifecycleModule>(
+        overrides,
+    )) {
+        Ok(_) => panic!("expected unused override error"),
+        Err(err) => err,
+    };
+
+    assert!(err.message.contains("provider override was never applied"));
+    assert!(err.message.contains("Unused"));
+}
+
+#[test]
+fn provider_override_skips_declared_lifecycle_hooks() {
+    LIFECYCLE_EVENTS.lock().unwrap().clear();
+
+    let overrides = ProviderOverrides::new().insert_instance(LifecycleProvider);
+    let container =
+        block_on(try_build_container_with_overrides::<LifecycleModule>(overrides)).unwrap();
+    block_on(shutdown_module::<LifecycleModule>(&container));
+
+    assert!(LIFECYCLE_EVENTS.lock().unwrap().is_empty());
+}
+
+struct DuplicateRepo {
+    label: &'static str,
+}
+
+impl Injectable for DuplicateRepo {
+    fn create(_container: &Container) -> BoxFuture<'_, Self> {
+        Box::pin(async move { Self { label: "production" } })
+    }
+}
+
+struct FirstDuplicateModule;
+impl Module for FirstDuplicateModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().provider::<DuplicateRepo>()
+    }
+}
+
+struct SecondDuplicateModule;
+impl Module for SecondDuplicateModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().provider::<DuplicateRepo>()
+    }
+}
+
+struct DuplicateRootModule;
+impl Module for DuplicateRootModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new()
+            .import::<FirstDuplicateModule>()
+            .import::<SecondDuplicateModule>()
+    }
+}
+
+#[test]
+fn provider_override_survives_duplicate_type_declarations() {
+    let overrides = ProviderOverrides::new().insert_instance(DuplicateRepo { label: "test" });
+    let container = block_on(try_build_container_with_overrides::<DuplicateRootModule>(
+        overrides,
+    ))
+    .unwrap();
+
+    // Second module also declares DuplicateRepo; without the guard, production
+    // would overwrite the override.
+    assert_eq!(container.resolve::<DuplicateRepo>().label, "test");
+}
+
 struct FactoryBuiltProvider {
     greeting: &'static str,
 }

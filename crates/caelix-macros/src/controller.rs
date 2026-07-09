@@ -135,9 +135,9 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 let wrapper_params = extractor_args
                     .iter()
                     .filter_map(|(extractor, name, ty, _needs_validation)| match extractor {
-                        Extractor::Param => Some(quote! { #name: actix_web::web::Path<#ty> }),
-                        Extractor::Body => Some(quote! { #name: actix_web::web::Json<#ty> }),
-                        Extractor::Query => Some(quote! { #name: actix_web::web::Query<#ty> }),
+                        Extractor::Param => Some(quote! { #name: caelix::__actix_web::web::Path<#ty> }),
+                        Extractor::Body => Some(quote! { #name: caelix::__actix_web::web::Json<#ty> }),
+                        Extractor::Query => Some(quote! { #name: caelix::__actix_web::web::Query<#ty> }),
                         Extractor::User => None,
                     })
                     .collect::<Vec<_>>();
@@ -189,10 +189,10 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
                 wrappers.push(quote! {
                     async fn #wrapper_name(
-                        container: actix_web::web::Data<std::sync::Arc<caelix::Container>>,
-                        req: actix_web::HttpRequest,
+                        container: caelix::__actix_web::web::Data<std::sync::Arc<caelix::Container>>,
+                        req: caelix::__actix_web::HttpRequest,
                         #(#wrapper_params),*
-                    ) -> actix_web::HttpResponse {
+                    ) -> caelix::__actix_web::HttpResponse {
                         let mut headers = std::collections::HashMap::new();
                         for (name, value) in req.headers().iter() {
                             let value = match value.to_str() {
@@ -263,7 +263,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 let handler_name = method_name.to_string();
 
                 registrations.push(quote! {
-                    cfg.route(#full_path, actix_web::web::#actix_verb().to(#struct_type::#wrapper_name));
+                    cfg.route(#full_path, caelix::__actix_web::web::#actix_verb().to(#struct_type::#wrapper_name));
                 });
                 routes.push(quote! {
                     caelix::RouteDef {
@@ -290,7 +290,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
             fn register_routes(cfg_any: &mut dyn std::any::Any) {
                 let cfg = cfg_any
-                    .downcast_mut::<actix_web::web::ServiceConfig>()
+                    .downcast_mut::<caelix::__actix_web::web::ServiceConfig>()
                     .expect("expected actix ServiceConfig");
                 #(#registrations)*
             }
