@@ -30,7 +30,7 @@ struct AuthGuard;
 impl Guard for AuthGuard {
     fn can_activate<'a>(&'a self, ctx: &'a RequestContext) -> BoxFuture<'a, Result<bool>> {
         Box::pin(async move {
-            ctx.set(CurrentUser { id: 42 });
+            ctx.set(CurrentUser { id: 42 })?;
             Ok(true)
         })
     }
@@ -79,11 +79,11 @@ impl UserController {
 
 async fn exercise() {
     let mut container = Container::new();
-    container.register::<AuthGuard>().await;
-    container.register::<AuditInterceptor>().await;
-    container.register::<UserController>().await;
+    container.register::<AuthGuard>().await.unwrap();
+    container.register::<AuditInterceptor>().await.unwrap();
+    container.register::<UserController>().await.unwrap();
 
-    let _controller = container.resolve::<UserController>();
+    let _controller = container.resolve::<UserController>().unwrap();
 }
 
 fn main() {

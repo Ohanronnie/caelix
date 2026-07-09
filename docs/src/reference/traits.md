@@ -12,7 +12,7 @@ pub trait Module {
 
 ```rust
 pub trait Injectable: Send + Sync + 'static {
-    fn create(container: &Container) -> BoxFuture<'_, Self>
+    fn create(container: &Container) -> BoxFuture<'_, Result<Self>>
     where
         Self: Sized;
 

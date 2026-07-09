@@ -14,10 +14,10 @@ struct Service {
 
 async fn exercise() {
     let mut container = Container::new();
-    container.register::<Repo>().await;
-    container.register::<Service>().await;
+    container.register::<Repo>().await.unwrap();
+    container.register::<Service>().await.unwrap();
 
-    let service = container.resolve::<Service>();
+    let service = container.resolve::<Service>().unwrap();
     let _repo = service.repo.clone();
 }
 

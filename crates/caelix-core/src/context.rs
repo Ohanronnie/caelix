@@ -12,10 +12,14 @@ pub struct RequestContext {
 }
 
 impl RequestContext {
-    pub fn new(method: String, path: String, headers: HashMap<String, String>) -> Self {
+    pub fn new(
+        method: impl Into<String>,
+        path: impl Into<String>,
+        headers: HashMap<String, String>,
+    ) -> Self {
         Self {
-            method,
-            path,
+            method: method.into(),
+            path: path.into(),
             headers: headers
                 .into_iter()
                 .map(|(name, value)| (name.to_ascii_lowercase(), value))
@@ -42,20 +46,34 @@ impl RequestContext {
         self.header("authorization")?.strip_prefix("Bearer ")
     }
 
-    pub fn set<T: Send + Sync + 'static>(&self, value: T) {
+    pub fn set<T: Send + Sync + 'static>(&self, value: T) -> crate::Result<()> {
         self.extensions
             .write()
-            .expect("request context extensions lock poisoned")
+            .map_err(|_| {
+                crate::exception::startup_error("request context extensions lock poisoned")
+            })?
             .insert(TypeId::of::<T>(), Arc::new(value));
+        Ok(())
     }
 
-    pub fn get<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
-        self.extensions
+    pub fn get<T: Send + Sync + 'static>(&self) -> crate::Result<Option<Arc<T>>> {
+        let value = self
+            .extensions
             .read()
-            .expect("request context extensions lock poisoned")
-            .get(&TypeId::of::<T>())?
+            .map_err(|_| {
+                crate::exception::startup_error("request context extensions lock poisoned")
+            })?
+            .get(&TypeId::of::<T>())
+            .cloned();
+
+        let Some(value) = value else {
+            return Ok(None);
+        };
+
+        value
             .clone()
             .downcast::<T>()
-            .ok()
+            .map(Some)
+            .map_err(|_| crate::exception::startup_error("request context extension type mismatch"))
     }
 }

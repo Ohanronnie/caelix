@@ -42,7 +42,7 @@ The command creates:
 - `src/lib.rs`
 - `src/app.rs`
 
-The generated `Cargo.toml` uses `caelix = "0.0.8"` from crates.io.
+The generated `Cargo.toml` uses `caelix = "0.0.9"` from crates.io.
 
 The generated `AGENTS.md` gives AI coding agents the app-level Caelix conventions: explicit module registration, provider/controller registration, injectable field shape, service-level cache behavior, and the usual `cargo test` check.
 
@@ -56,6 +56,7 @@ use demo_api::AppModule;
 async fn main() -> std::io::Result<()> {
     Application::new::<AppModule>()
         .await
+        .map_err(|err| std::io::Error::other(err.message))?
         .listen("127.0.0.1:8080")
         .await
 }

@@ -34,11 +34,11 @@ struct Greeter {
 }
 
 impl Injectable for Greeter {
-    fn create(container: &Container) -> BoxFuture<'_, Self> {
+    fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
-            Self {
-                config: container.resolve::<Config>(),
-            }
+            Ok(Self {
+                config: container.resolve::<Config>()?,
+            })
         })
     }
 }
@@ -47,9 +47,9 @@ impl Injectable for Greeter {
 fn container_registers_instances_and_injectable_providers() {
     let mut container = Container::new();
     container.register_instance(Config { greeting: "hello" });
-    block_on(container.register::<Greeter>());
+    block_on(container.register::<Greeter>()).unwrap();
 
-    let greeter = container.resolve::<Greeter>();
+    let greeter = container.resolve::<Greeter>().unwrap();
 
     assert_eq!(greeter.config.greeting, "hello");
 }
@@ -58,17 +58,19 @@ fn container_registers_instances_and_injectable_providers() {
 fn container_provides_framework_logger_by_default() {
     let container = Container::new();
 
-    let logger = container.resolve::<Logger>();
+    let logger = container.resolve::<Logger>().unwrap();
 
     assert_eq!(logger.context(), "Application");
 }
 
 #[test]
-#[should_panic(expected = "no provider registered for")]
 fn container_does_not_provide_event_bus_by_default() {
     let container = Container::new();
 
-    let _ = container.resolve::<EventBus>();
+    let result = container.resolve::<EventBus>();
+    assert!(result.is_err());
+    let err = result.err().unwrap();
+    assert!(err.message.contains("no provider registered for"));
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,10 +94,10 @@ fn request_context_exposes_request_metadata_headers_and_typed_extensions() {
     assert_eq!(ctx.header("AUTHORIZATION"), Some("Bearer token-123"));
     assert_eq!(ctx.bearer_token(), Some("token-123"));
 
-    ctx.set(AuthenticatedUser { id: 42 });
+    ctx.set(AuthenticatedUser { id: 42 }).unwrap();
 
-    assert_eq!(ctx.get::<AuthenticatedUser>().unwrap().id, 42);
-    assert!(ctx.get::<String>().is_none());
+    assert_eq!(ctx.get::<AuthenticatedUser>().unwrap().unwrap().id, 42);
+    assert!(ctx.get::<String>().unwrap().is_none());
 }
 
 struct PrefixInterceptor;
@@ -112,7 +114,8 @@ impl Interceptor for PrefixInterceptor {
                 .body
                 .as_buffered_mut()
                 .expect("expected buffered response body");
-            let body = String::from_utf8(std::mem::take(bytes)).expect("expected UTF-8 text response");
+            let body =
+                String::from_utf8(std::mem::take(bytes)).expect("expected UTF-8 text response");
             *bytes = format!("prefix:{body}").into_bytes();
             Ok(response)
         })
@@ -141,14 +144,14 @@ struct AwaitingProvider {
 }
 
 impl Injectable for AwaitingProvider {
-    fn create(container: &Container) -> BoxFuture<'_, Self> {
+    fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
             std::future::ready(()).await;
-            let config = container.resolve::<Config>();
+            let config = container.resolve::<Config>()?;
 
-            Self {
+            Ok(Self {
                 greeting: config.greeting,
-            }
+            })
         })
     }
 }
@@ -159,9 +162,9 @@ fn hand_written_provider_can_await_during_creation() {
     container.register_instance(Config {
         greeting: "connected",
     });
-    block_on(container.register::<AwaitingProvider>());
+    block_on(container.register::<AwaitingProvider>()).unwrap();
 
-    let provider = container.resolve::<AwaitingProvider>();
+    let provider = container.resolve::<AwaitingProvider>().unwrap();
 
     assert_eq!(provider.greeting, "connected");
 }
@@ -171,8 +174,8 @@ static LIFECYCLE_EVENTS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 struct LifecycleProvider;
 
 impl Injectable for LifecycleProvider {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
-        Box::pin(async move { Self })
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async move { Ok(Self) })
     }
 
     fn on_module_init(&self) -> BoxFuture<'_, Result<()>> {
@@ -209,13 +212,13 @@ fn injectable_lifecycle_hooks_run_without_special_provider_registration() {
     LIFECYCLE_EVENTS.lock().unwrap().clear();
 
     let mut container = Container::new();
-    block_on(register_module::<LifecycleModule>(&mut container));
+    block_on(register_module::<LifecycleModule>(&mut container)).unwrap();
     assert_eq!(*LIFECYCLE_EVENTS.lock().unwrap(), vec!["init"]);
 
-    block_on(bootstrap_module::<LifecycleModule>(&container));
+    block_on(bootstrap_module::<LifecycleModule>(&container)).unwrap();
     assert_eq!(*LIFECYCLE_EVENTS.lock().unwrap(), vec!["init", "bootstrap"]);
 
-    block_on(shutdown_module::<LifecycleModule>(&container));
+    block_on(shutdown_module::<LifecycleModule>(&container)).unwrap();
     assert_eq!(
         *LIFECYCLE_EVENTS.lock().unwrap(),
         vec!["init", "bootstrap", "shutdown"]
@@ -227,8 +230,12 @@ struct NestedRepo {
 }
 
 impl Injectable for NestedRepo {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
-        Box::pin(async move { Self { label: "production" } })
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async move {
+            Ok(Self {
+                label: "production",
+            })
+        })
     }
 
     fn on_module_init(&self) -> BoxFuture<'_, Result<()>> {
@@ -272,12 +279,12 @@ fn provider_override_replaces_nested_module_provider() {
     LIFECYCLE_EVENTS.lock().unwrap().clear();
 
     let overrides = ProviderOverrides::new().insert_instance(NestedRepo { label: "test" });
-    let container = block_on(try_build_container_with_overrides::<RootWithNestedModule>(
+    let container = block_on(build_container_with_overrides::<RootWithNestedModule>(
         overrides,
     ))
     .unwrap();
 
-    assert_eq!(container.resolve::<NestedRepo>().label, "test");
+    assert_eq!(container.resolve::<NestedRepo>().unwrap().label, "test");
     // Instance overrides skip declared lifecycle hooks.
     assert!(LIFECYCLE_EVENTS.lock().unwrap().is_empty());
 }
@@ -286,12 +293,9 @@ fn provider_override_replaces_nested_module_provider() {
 fn unused_provider_override_returns_startup_error() {
     struct Unused;
     let overrides = ProviderOverrides::new().insert_instance(Unused);
-    let err = match block_on(try_build_container_with_overrides::<LifecycleModule>(
-        overrides,
-    )) {
-        Ok(_) => panic!("expected unused override error"),
-        Err(err) => err,
-    };
+    let result = block_on(build_container_with_overrides::<LifecycleModule>(overrides));
+    assert!(result.is_err(), "expected unused override error");
+    let err = result.err().unwrap();
 
     assert!(err.message.contains("provider override was never applied"));
     assert!(err.message.contains("Unused"));
@@ -302,9 +306,8 @@ fn provider_override_skips_declared_lifecycle_hooks() {
     LIFECYCLE_EVENTS.lock().unwrap().clear();
 
     let overrides = ProviderOverrides::new().insert_instance(LifecycleProvider);
-    let container =
-        block_on(try_build_container_with_overrides::<LifecycleModule>(overrides)).unwrap();
-    block_on(shutdown_module::<LifecycleModule>(&container));
+    let container = block_on(build_container_with_overrides::<LifecycleModule>(overrides)).unwrap();
+    block_on(shutdown_module::<LifecycleModule>(&container)).unwrap();
 
     assert!(LIFECYCLE_EVENTS.lock().unwrap().is_empty());
 }
@@ -314,8 +317,12 @@ struct DuplicateRepo {
 }
 
 impl Injectable for DuplicateRepo {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
-        Box::pin(async move { Self { label: "production" } })
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async move {
+            Ok(Self {
+                label: "production",
+            })
+        })
     }
 }
 
@@ -345,14 +352,14 @@ impl Module for DuplicateRootModule {
 #[test]
 fn provider_override_survives_duplicate_type_declarations() {
     let overrides = ProviderOverrides::new().insert_instance(DuplicateRepo { label: "test" });
-    let container = block_on(try_build_container_with_overrides::<DuplicateRootModule>(
+    let container = block_on(build_container_with_overrides::<DuplicateRootModule>(
         overrides,
     ))
     .unwrap();
 
     // Second module also declares DuplicateRepo; without the guard, production
     // would overwrite the override.
-    assert_eq!(container.resolve::<DuplicateRepo>().label, "test");
+    assert_eq!(container.resolve::<DuplicateRepo>().unwrap().label, "test");
 }
 
 struct FactoryBuiltProvider {
@@ -363,7 +370,7 @@ async fn build_factory_provider(
     container: Arc<Container>,
 ) -> std::result::Result<FactoryBuiltProvider, &'static str> {
     std::future::ready(()).await;
-    let config = container.resolve::<Config>();
+    let config = container.resolve::<Config>().unwrap();
 
     Ok(FactoryBuiltProvider {
         greeting: config.greeting,
@@ -385,9 +392,9 @@ fn module_can_register_async_factory_provider() {
     container.register_instance(Config {
         greeting: "factory",
     });
-    block_on(register_module::<FactoryModule>(&mut container));
+    block_on(register_module::<FactoryModule>(&mut container)).unwrap();
 
-    let provider = container.resolve::<FactoryBuiltProvider>();
+    let provider = container.resolve::<FactoryBuiltProvider>().unwrap();
 
     assert_eq!(provider.greeting, "factory");
 }
@@ -409,12 +416,10 @@ impl Module for FailingFactoryModule {
 }
 
 #[test]
-fn try_build_container_returns_startup_errors_without_panicking() {
-    let result = block_on(try_build_container::<FailingFactoryModule>());
-    let err = match result {
-        Ok(_) => panic!("expected factory failure"),
-        Err(err) => err,
-    };
+fn build_container_returns_startup_errors() {
+    let result = block_on(build_container::<FailingFactoryModule>());
+    assert!(result.is_err(), "expected factory failure");
+    let err = result.err().unwrap();
 
     assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert!(err.message.contains("async factory failed"));
@@ -504,8 +509,8 @@ fn memory_cache_enforces_configured_capacity_and_value_size() {
 
 #[test]
 fn cache_module_registers_default_memory_cache() {
-    let container = block_on(build_container::<CacheModule>());
-    let cache = container.resolve::<Cache>();
+    let container = block_on(build_container::<CacheModule>()).unwrap();
+    let cache = container.resolve::<Cache>().unwrap();
 
     block_on(cache.set("answer", 42_i64)).unwrap();
 
@@ -513,25 +518,30 @@ fn cache_module_registers_default_memory_cache() {
 }
 
 #[test]
-#[should_panic(expected = "missing provider at startup:")]
-fn startup_provider_validation_panics_for_unregistered_declared_provider() {
+fn startup_provider_validation_returns_error_for_unregistered_declared_provider() {
     let container = Container::new();
 
-    validate_module_providers::<FactoryModule>(&container);
+    let result = validate_module_providers::<FactoryModule>(&container);
+    assert!(result.is_err());
+    let err = result.err().unwrap();
+    assert!(err.message.contains("missing provider at startup:"));
 }
 
 #[test]
-#[should_panic(expected = "no provider registered for")]
-fn resolving_missing_provider_panics_with_type_name() {
+fn resolving_missing_provider_returns_error_with_type_name() {
     let container = Container::new();
 
-    let _ = container.resolve::<Greeter>();
+    let result = container.resolve::<Greeter>();
+    assert!(result.is_err());
+    let err = result.err().unwrap();
+    assert!(err.message.contains("no provider registered for"));
+    assert!(err.message.contains("Greeter"));
 }
 
 struct ImportedProvider;
 impl Injectable for ImportedProvider {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
-        Box::pin(async move { Self })
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async move { Ok(Self) })
     }
 }
 
@@ -539,19 +549,19 @@ struct RootProvider {
     imported: Arc<ImportedProvider>,
 }
 impl Injectable for RootProvider {
-    fn create(container: &Container) -> BoxFuture<'_, Self> {
+    fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
-            Self {
-                imported: container.resolve::<ImportedProvider>(),
-            }
+            Ok(Self {
+                imported: container.resolve::<ImportedProvider>()?,
+            })
         })
     }
 }
 
 struct ImportedController;
 impl Injectable for ImportedController {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
-        Box::pin(async move { Self })
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async move { Ok(Self) })
     }
 }
 impl Controller for ImportedController {
@@ -568,8 +578,8 @@ impl Controller for ImportedController {
 
 struct RootController;
 impl Injectable for RootController {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
-        Box::pin(async move { Self })
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async move { Ok(Self) })
     }
 }
 impl Controller for RootController {
@@ -605,9 +615,9 @@ impl Module for RootModule {
 
 #[test]
 fn modules_register_imported_providers_before_dependents() {
-    let container = block_on(build_container::<RootModule>());
+    let container = block_on(build_container::<RootModule>()).unwrap();
 
-    let provider = container.resolve::<RootProvider>();
+    let provider = container.resolve::<RootProvider>().unwrap();
 
     assert!(Arc::strong_count(&provider.imported) >= 2);
 }
@@ -642,11 +652,11 @@ impl EventAuditLog {
 }
 
 impl Injectable for EventAuditLog {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
-            Self {
+            Ok(Self {
                 entries: Mutex::new(Vec::new()),
-            }
+            })
         })
     }
 }
@@ -656,11 +666,11 @@ struct WelcomeEmailHandler {
 }
 
 impl Injectable for WelcomeEmailHandler {
-    fn create(container: &Container) -> BoxFuture<'_, Self> {
+    fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
-            Self {
-                log: container.resolve::<EventAuditLog>(),
-            }
+            Ok(Self {
+                log: container.resolve::<EventAuditLog>()?,
+            })
         })
     }
 }
@@ -683,11 +693,11 @@ struct AuditUserHandler {
 }
 
 impl Injectable for AuditUserHandler {
-    fn create(container: &Container) -> BoxFuture<'_, Self> {
+    fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
-            Self {
-                log: container.resolve::<EventAuditLog>(),
-            }
+            Ok(Self {
+                log: container.resolve::<EventAuditLog>()?,
+            })
         })
     }
 }
@@ -716,10 +726,10 @@ impl Module for UserEventsModule {
 
 #[test]
 fn module_event_handlers_fan_out_for_the_same_event() {
-    let container = block_on(build_container::<UserEventsModule>());
-    let bus = container.resolve::<EventBus>();
+    let container = block_on(build_container::<UserEventsModule>()).unwrap();
+    let bus = container.resolve::<EventBus>().unwrap();
 
-    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>(), 2);
+    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>().unwrap(), 2);
 
     block_on(bus.emit(CoreUserCreatedEvent {
         user_id: 1,
@@ -727,7 +737,7 @@ fn module_event_handlers_fan_out_for_the_same_event() {
     }))
     .unwrap();
 
-    let log = container.resolve::<EventAuditLog>();
+    let log = container.resolve::<EventAuditLog>().unwrap();
     assert_eq!(log.entries(), vec!["welcome:a@b.com", "audit:1"]);
 }
 
@@ -744,10 +754,10 @@ impl Module for ForgotEventHandlerRegistrationModule {
 
 #[test]
 fn event_handler_provider_does_not_fire_until_registered_as_an_event_handler() {
-    let container = block_on(build_container::<ForgotEventHandlerRegistrationModule>());
-    let bus = container.resolve::<EventBus>();
+    let container = block_on(build_container::<ForgotEventHandlerRegistrationModule>()).unwrap();
+    let bus = container.resolve::<EventBus>().unwrap();
 
-    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>(), 0);
+    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>().unwrap(), 0);
 
     block_on(bus.emit(CoreUserCreatedEvent {
         user_id: 1,
@@ -755,14 +765,20 @@ fn event_handler_provider_does_not_fire_until_registered_as_an_event_handler() {
     }))
     .unwrap();
 
-    assert!(container.resolve::<EventAuditLog>().entries().is_empty());
+    assert!(
+        container
+            .resolve::<EventAuditLog>()
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
 }
 
 struct MissingEventHandler;
 
 impl Injectable for MissingEventHandler {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
-        Box::pin(async move { Self })
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async move { Ok(Self) })
     }
 }
 
@@ -783,19 +799,24 @@ impl Module for MissingEventHandlerModule {
 }
 
 #[test]
-#[should_panic(expected = "missing event handler provider at startup:")]
 fn event_handler_registration_requires_a_registered_provider() {
     let mut container = Container::new();
 
-    block_on(register_module::<MissingEventHandlerModule>(&mut container));
+    let result = block_on(register_module::<MissingEventHandlerModule>(&mut container));
+    assert!(result.is_err());
+    let err = result.err().unwrap();
+    assert!(
+        err.message
+            .contains("missing event handler provider at startup:")
+    );
 }
 
 #[test]
 fn event_module_registers_event_bus() {
-    let container = block_on(build_container::<EventModule>());
-    let bus = container.resolve::<EventBus>();
+    let container = block_on(build_container::<EventModule>()).unwrap();
+    let bus = container.resolve::<EventBus>().unwrap();
 
-    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>(), 0);
+    assert_eq!(bus.handler_count::<CoreUserCreatedEvent>().unwrap(), 0);
 }
 
 struct MissingEventModule;
@@ -810,11 +831,13 @@ impl Module for MissingEventModule {
 }
 
 #[test]
-#[should_panic(expected = "no provider registered for")]
 fn event_using_module_without_event_module_fails_at_startup() {
     let mut container = Container::new();
 
-    block_on(register_module::<MissingEventModule>(&mut container));
+    let result = block_on(register_module::<MissingEventModule>(&mut container));
+    assert!(result.is_err());
+    let err = result.err().unwrap();
+    assert!(err.message.contains("no provider registered for"));
 }
 
 #[derive(Serialize)]
@@ -1212,10 +1235,7 @@ async fn response_sse_frames_json_events() {
         id: u32,
     }
 
-    let stream = futures_util::stream::iter(vec![
-        Ok(Event { id: 1 }),
-        Ok(Event { id: 2 }),
-    ]);
+    let stream = futures_util::stream::iter(vec![Ok(Event { id: 1 }), Ok(Event { id: 2 })]);
     let response = Response::sse(stream);
 
     assert_eq!(response.content_type, "text/event-stream");
@@ -1248,17 +1268,14 @@ async fn response_sse_surfaces_serialization_errors() {
             let err = stream.next().await.unwrap().unwrap_err();
             assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
         }
-        ResponseBody::Buffered(_) => panic!("expected streaming body"),
+        ResponseBody::Buffered(_) => unreachable!("expected streaming body"),
     }
 }
 
 #[tokio::test]
 async fn response_file_streams_disk_contents() {
     let dir = std::env::temp_dir();
-    let path = dir.join(format!(
-        "caelix-stream-test-{}.txt",
-        std::process::id()
-    ));
+    let path = dir.join(format!("caelix-stream-test-{}.txt", std::process::id()));
     std::fs::write(&path, b"file-bytes-from-disk").unwrap();
 
     let response = Response::file(&path, "text/plain")
@@ -1274,10 +1291,9 @@ async fn response_file_streams_disk_contents() {
 #[tokio::test]
 async fn response_file_missing_path_is_not_found() {
     let result = Response::file("/tmp/caelix-definitely-missing-file-xyz", "text/plain").await;
-    match result {
-        Err(err) => assert_eq!(err.status, StatusCode::NOT_FOUND),
-        Ok(_) => panic!("expected missing file to return NotFound"),
-    }
+    assert!(result.is_err(), "expected missing file to return NotFound");
+    let err = result.err().unwrap();
+    assert_eq!(err.status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -1319,9 +1335,8 @@ async fn event_bus_emit_still_runs_handlers_with_subscribers() {
 
     let bus = EventBus::new();
     let seen = Arc::new(Mutex::new(Vec::new()));
-    bus.register(Arc::new(CountingHandler {
-        seen: seen.clone(),
-    }));
+    bus.register(Arc::new(CountingHandler { seen: seen.clone() }))
+        .unwrap();
 
     let mut stream = std::pin::pin!(bus.subscribe::<Ping>());
     use futures_util::StreamExt;
@@ -1351,7 +1366,7 @@ async fn event_bus_does_not_broadcast_when_a_handler_fails() {
     }
 
     let bus = EventBus::new();
-    bus.register(Arc::new(FailingHandler));
+    bus.register(Arc::new(FailingHandler)).unwrap();
     let mut stream = std::pin::pin!(bus.subscribe::<Ping>());
     use futures_util::StreamExt;
 
@@ -1388,9 +1403,8 @@ async fn event_bus_emit_without_subscribers_still_runs_handlers() {
 
     let bus = EventBus::new();
     let seen = Arc::new(Mutex::new(Vec::new()));
-    bus.register(Arc::new(CountingHandler {
-        seen: seen.clone(),
-    }));
+    bus.register(Arc::new(CountingHandler { seen: seen.clone() }))
+        .unwrap();
 
     // No subscribe() — emit must not need a broadcast channel.
     bus.emit(Ping { n: 1 }).await.unwrap();

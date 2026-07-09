@@ -9,8 +9,8 @@ struct OrderPlaced;
 struct SendWelcomeEmail;
 
 impl Injectable for SendWelcomeEmail {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
-        Box::pin(async { Self })
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async { Ok(Self) })
     }
 }
 

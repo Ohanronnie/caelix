@@ -20,11 +20,11 @@ pub struct Worker {
 }
 
 impl Injectable for Worker {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async {
-            Self {
+            Ok(Self {
                 started: AtomicBool::new(false),
-            }
+            })
         })
     }
 
@@ -61,7 +61,7 @@ Controllers are providers, so controller types can define lifecycle hooks when t
 
 ## Failures
 
-Lifecycle failures are converted into startup or shutdown errors that include the hook name and provider type. `Application::new` panics on startup failures; `Application::try_new` returns them.
+Lifecycle failures are converted into startup or shutdown errors that include the hook name and provider type. `Application::new` returns startup failures as `caelix::Result<Application>`.
 
 ```rust
 fn on_bootstrap(&self) -> BoxFuture<'_, Result<()>> {

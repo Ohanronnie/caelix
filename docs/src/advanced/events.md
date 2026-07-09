@@ -73,7 +73,7 @@ ModuleMetadata::new()
 Emit events by resolving `EventBus` from a provider and calling `emit`.
 
 ```rust
-let events = container.resolve::<EventBus>();
+let events = container.resolve::<EventBus>()?;
 events.emit(UserCreated { id: 42 }).await?;
 ```
 

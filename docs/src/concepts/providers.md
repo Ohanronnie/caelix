@@ -49,11 +49,11 @@ pub struct UsersService {
 }
 
 impl Injectable for UsersService {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async {
-            Self {
+            Ok(Self {
                 users: Mutex::new(BTreeMap::new()),
-            }
+            })
         })
     }
 
@@ -67,12 +67,12 @@ Manual providers resolve dependencies through `Container`:
 
 ```rust
 impl Injectable for UsersService {
-    fn create(container: &Container) -> BoxFuture<'_, Self> {
+    fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
-            Self {
-                repository: container.resolve::<UsersRepository>(),
+            Ok(Self {
+                repository: container.resolve::<UsersRepository>()?,
                 logger: container.resolve_logger("UsersService"),
-            }
+            })
         })
     }
 }
@@ -107,7 +107,7 @@ The factory receives an `Arc<Container>`, so it can resolve providers registered
 ModuleMetadata::new()
     .provider::<Config>()
     .provider_async_factory::<DatabasePool, _, _>(|container: Arc<Container>| async move {
-        let config = container.resolve::<Config>();
+        let config = container.resolve::<Config>()?;
         DatabasePool::connect(&config.database_url).await
     })
 ```
@@ -127,10 +127,10 @@ pub struct AppConfig {
 
 When `AppConfig` is registered with `.provider::<AppConfig>()`, services can inject `Arc<AppConfig>` and use `config.pool`. This does not register `PgPool` as its own provider. Injecting `Arc<PgPool>` only works if `PgPool` itself is registered separately.
 
-Application crates usually cannot write `impl Injectable for PgPool` because Rust's orphan rules prevent implementing a foreign trait for a foreign type. For fallible startup errors instead of `expect` panics, keep using `.provider_async_factory::<PgPool, _, _>(...)` or wrap the pool in an application-owned newtype and implement `Injectable` for that wrapper.
+Application crates usually cannot write `impl Injectable for PgPool` because Rust's orphan rules prevent implementing a foreign trait for a foreign type. For fallible startup errors instead of `expect` failures, keep using `.provider_async_factory::<PgPool, _, _>(...)` or wrap the pool in an application-owned newtype and implement `Injectable` for that wrapper.
 
 ## Provider Visibility
 
 Providers are visible after registration. Imports are processed first, then the importing module's providers, then its controllers. This allows controllers to inject providers from the same module or any earlier imported module.
 
-If a dependency is missing, `container.resolve::<T>()` panics during provider construction. During `Application::try_new`, metadata validation also catches missing provider definitions and returns startup errors for declared-but-unregistered providers.
+If a dependency is missing, prefer `container.resolve::<T>()` in manual provider construction so startup can return an error. During `Application::new`, metadata validation also catches missing provider definitions and returns startup errors for declared-but-unregistered providers.

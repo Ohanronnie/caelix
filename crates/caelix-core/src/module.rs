@@ -33,21 +33,21 @@ impl ProviderDef {
             type_name: std::any::type_name::<T>(),
             build: Box::new(|container| {
                 Box::pin(async move {
-                    let value = T::create(container).await;
+                    let value = T::create(container).await?;
                     Ok(Arc::new(value) as Arc<dyn Any + Send + Sync>)
                 })
             }),
             init_fn: Box::new(|value| {
                 let value = downcast_provider::<T>(value);
-                Box::pin(async move { value.on_module_init().await })
+                Box::pin(async move { value?.on_module_init().await })
             }),
             bootstrap_fn: Box::new(|value| {
                 let value = downcast_provider::<T>(value);
-                Box::pin(async move { value.on_bootstrap().await })
+                Box::pin(async move { value?.on_bootstrap().await })
             }),
             shutdown_fn: Box::new(|value| {
                 let value = downcast_provider::<T>(value);
-                Box::pin(async move { value.on_shutdown().await })
+                Box::pin(async move { value?.on_shutdown().await })
             }),
         }
     }
@@ -111,7 +111,7 @@ impl ProviderDef {
         self.type_name
     }
 
-    fn try_assert_registered(&self, container: &Container) -> crate::Result<()> {
+    fn assert_registered(&self, container: &Container) -> crate::Result<()> {
         if container.contains_type_id(self.type_id) {
             return Ok(());
         }
@@ -122,7 +122,7 @@ impl ProviderDef {
         )))
     }
 
-    async fn try_run_lifecycle(
+    async fn run_lifecycle(
         &self,
         value: &ProviderValue,
         hook_name: &'static str,
@@ -136,7 +136,7 @@ impl ProviderDef {
         })
     }
 
-    async fn try_run_lifecycle_from_container(
+    async fn run_lifecycle_from_container(
         &self,
         container: &Container,
         hook_name: &'static str,
@@ -149,8 +149,7 @@ impl ProviderDef {
             ))
         })?;
 
-        self.try_run_lifecycle(&value, hook_name, lifecycle_fn)
-            .await
+        self.run_lifecycle(&value, hook_name, lifecycle_fn).await
     }
 }
 
@@ -207,14 +206,13 @@ impl Default for ProviderOverrides {
     }
 }
 
-fn downcast_provider<T: Send + Sync + 'static>(value: &ProviderValue) -> Arc<T> {
-    match value.clone().downcast::<T>() {
-        Ok(value) => value,
-        Err(_) => panic!(
+fn downcast_provider<T: Send + Sync + 'static>(value: &ProviderValue) -> crate::Result<Arc<T>> {
+    value.clone().downcast::<T>().map_err(|_| {
+        crate::exception::startup_error(format!(
             "type mismatch running lifecycle hook for {}",
             std::any::type_name::<T>()
-        ),
-    }
+        ))
+    })
 }
 
 fn noop_lifecycle() -> LifecycleFn {
@@ -248,18 +246,14 @@ pub struct ModuleDef {
 impl ModuleDef {
     pub fn of<M: Module + 'static>() -> Self {
         Self {
-            register_fn: |container| {
-                Box::pin(async move { try_register_module::<M>(container).await })
-            },
+            register_fn: |container| Box::pin(async move { register_module::<M>(container).await }),
             bootstrap_fn: |container| {
-                Box::pin(async move { try_bootstrap_module::<M>(container).await })
+                Box::pin(async move { bootstrap_module::<M>(container).await })
             },
-            shutdown_fn: |container| {
-                Box::pin(async move { try_shutdown_module::<M>(container).await })
-            },
+            shutdown_fn: |container| Box::pin(async move { shutdown_module::<M>(container).await }),
             controller_register_fn: |any| register_module_controllers::<M>(any),
             route_log_fn: || crate::log_module_routes::<M>(),
-            validate_fn: |container| try_validate_module_providers::<M>(container),
+            validate_fn: |container| validate_module_providers::<M>(container),
         }
     }
 }
@@ -338,13 +332,7 @@ impl Default for ModuleMetadata {
     }
 }
 
-pub async fn register_module<M: Module>(container: &mut Container) {
-    try_register_module::<M>(container)
-        .await
-        .unwrap_or_else(|err| panic!("{}", err.message));
-}
-
-pub async fn try_register_module<M: Module>(container: &mut Container) -> crate::Result<()> {
+pub async fn register_module<M: Module>(container: &mut Container) -> crate::Result<()> {
     let module_start = Instant::now();
     let metadata = M::register();
 
@@ -353,23 +341,23 @@ pub async fn try_register_module<M: Module>(container: &mut Container) -> crate:
     }
 
     for provider in &metadata.providers {
-        try_register_provider_def(container, provider).await?;
+        register_provider_def(container, provider).await?;
     }
 
     for controller in &metadata.controllers {
-        try_register_provider_def(container, &controller.provider).await?;
+        register_provider_def(container, &controller.provider).await?;
     }
 
     for handler in &metadata.event_handlers {
-        handler.try_assert_registered(container)?;
-        handler.register(container);
+        handler.assert_registered(container)?;
+        handler.register(container)?;
     }
 
     crate::log_module_initialized(std::any::type_name::<M>(), module_start.elapsed());
     Ok(())
 }
 
-async fn try_register_provider_def(
+async fn register_provider_def(
     container: &mut Container,
     declared: &ProviderDef,
 ) -> crate::Result<()> {
@@ -390,19 +378,13 @@ async fn try_register_provider_def(
     let value = (effective.build)(container).await?;
     container.register_erased(effective.type_id, value.clone());
     effective
-        .try_run_lifecycle(&value, "on_module_init", &effective.init_fn)
+        .run_lifecycle(&value, "on_module_init", &effective.init_fn)
         .await?;
     crate::log_provider_initialized(effective.type_name, provider_start.elapsed());
     Ok(())
 }
 
-pub async fn bootstrap_module<M: Module>(container: &Container) {
-    try_bootstrap_module::<M>(container)
-        .await
-        .unwrap_or_else(|err| panic!("{}", err.message));
-}
-
-pub async fn try_bootstrap_module<M: Module>(container: &Container) -> crate::Result<()> {
+pub async fn bootstrap_module<M: Module>(container: &Container) -> crate::Result<()> {
     let metadata = M::register();
 
     for import in &metadata.imports {
@@ -414,7 +396,7 @@ pub async fn try_bootstrap_module<M: Module>(container: &Container) -> crate::Re
             continue;
         }
         provider
-            .try_run_lifecycle_from_container(container, "on_bootstrap", &provider.bootstrap_fn)
+            .run_lifecycle_from_container(container, "on_bootstrap", &provider.bootstrap_fn)
             .await?;
     }
 
@@ -424,7 +406,7 @@ pub async fn try_bootstrap_module<M: Module>(container: &Container) -> crate::Re
         }
         controller
             .provider
-            .try_run_lifecycle_from_container(
+            .run_lifecycle_from_container(
                 container,
                 "on_bootstrap",
                 &controller.provider.bootstrap_fn,
@@ -435,13 +417,7 @@ pub async fn try_bootstrap_module<M: Module>(container: &Container) -> crate::Re
     Ok(())
 }
 
-pub async fn shutdown_module<M: Module>(container: &Container) {
-    try_shutdown_module::<M>(container)
-        .await
-        .unwrap_or_else(|err| panic!("{}", err.message));
-}
-
-pub async fn try_shutdown_module<M: Module>(container: &Container) -> crate::Result<()> {
+pub async fn shutdown_module<M: Module>(container: &Container) -> crate::Result<()> {
     let metadata = M::register();
 
     for controller in metadata.controllers.iter().rev() {
@@ -450,7 +426,7 @@ pub async fn try_shutdown_module<M: Module>(container: &Container) -> crate::Res
         }
         controller
             .provider
-            .try_run_lifecycle_from_container(
+            .run_lifecycle_from_container(
                 container,
                 "on_shutdown",
                 &controller.provider.shutdown_fn,
@@ -463,7 +439,7 @@ pub async fn try_shutdown_module<M: Module>(container: &Container) -> crate::Res
             continue;
         }
         provider
-            .try_run_lifecycle_from_container(container, "on_shutdown", &provider.shutdown_fn)
+            .run_lifecycle_from_container(container, "on_shutdown", &provider.shutdown_fn)
             .await?;
     }
 
@@ -474,42 +450,24 @@ pub async fn try_shutdown_module<M: Module>(container: &Container) -> crate::Res
     Ok(())
 }
 
-pub async fn build_container<M: Module>() -> Container {
-    try_build_container::<M>()
-        .await
-        .unwrap_or_else(|err| panic!("{}", err.message))
-}
-
-pub async fn try_build_container<M: Module>() -> crate::Result<Container> {
-    try_build_container_with_overrides::<M>(ProviderOverrides::new()).await
+pub async fn build_container<M: Module>() -> crate::Result<Container> {
+    build_container_with_overrides::<M>(ProviderOverrides::new()).await
 }
 
 pub async fn build_container_with_overrides<M: Module>(
-    overrides: ProviderOverrides,
-) -> Container {
-    try_build_container_with_overrides::<M>(overrides)
-        .await
-        .unwrap_or_else(|err| panic!("{}", err.message))
-}
-
-pub async fn try_build_container_with_overrides<M: Module>(
     overrides: ProviderOverrides,
 ) -> crate::Result<Container> {
     crate::log_application_starting();
     let mut container = Container::new();
     container.seed_overrides(overrides);
-    try_register_module::<M>(&mut container).await?;
-    container.try_assert_no_unused_overrides()?;
-    try_validate_module_providers::<M>(&container)?;
-    try_bootstrap_module::<M>(&container).await?;
+    register_module::<M>(&mut container).await?;
+    container.assert_no_unused_overrides()?;
+    validate_module_providers::<M>(&container)?;
+    bootstrap_module::<M>(&container).await?;
     Ok(container)
 }
 
-pub fn validate_module_providers<M: Module>(container: &Container) {
-    try_validate_module_providers::<M>(container).unwrap_or_else(|err| panic!("{}", err.message));
-}
-
-pub fn try_validate_module_providers<M: Module>(container: &Container) -> crate::Result<()> {
+pub fn validate_module_providers<M: Module>(container: &Container) -> crate::Result<()> {
     let metadata = M::register();
 
     for import in &metadata.imports {
@@ -517,15 +475,15 @@ pub fn try_validate_module_providers<M: Module>(container: &Container) -> crate:
     }
 
     for provider in &metadata.providers {
-        provider.try_assert_registered(container)?;
+        provider.assert_registered(container)?;
     }
 
     for controller in &metadata.controllers {
-        controller.provider.try_assert_registered(container)?;
+        controller.provider.assert_registered(container)?;
     }
 
     for handler in &metadata.event_handlers {
-        handler.try_assert_registered(container)?;
+        handler.assert_registered(container)?;
     }
 
     Ok(())

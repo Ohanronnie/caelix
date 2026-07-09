@@ -22,6 +22,7 @@ use demo_api::AppModule;
 async fn main() -> std::io::Result<()> {
     Application::new::<AppModule>()
         .await
+        .map_err(|err| std::io::Error::other(err.message))?
         .listen("127.0.0.1:8080")
         .await
 }
@@ -29,4 +30,4 @@ async fn main() -> std::io::Result<()> {
 
 `Application::new::<AppModule>()` builds the dependency container, validates module metadata, registers controller routes, runs startup lifecycle hooks, and logs the route table.
 
-Use `Application::try_new::<AppModule>()` when startup errors should be returned instead of panicking.
+Startup errors are returned from `Application::new`, so application code decides whether to propagate or handle them.

@@ -14,9 +14,8 @@ use actix_web::{
 };
 use bytes::Bytes;
 use caelix_core::{
-    BoxFuture, Container, Module, ProviderOverrides, StatusCode, log_application_started,
-    log_module_routes, register_module_controllers, try_build_container_with_overrides,
-    try_shutdown_module,
+    BoxFuture, Container, Module, ProviderOverrides, StatusCode, build_container_with_overrides,
+    log_application_started, log_module_routes, register_module_controllers, shutdown_module,
 };
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -84,7 +83,7 @@ impl TestApplication {
         &self.container
     }
 
-    pub fn resolve<T: Send + Sync + 'static>(&self) -> Arc<T> {
+    pub fn resolve<T: Send + Sync + 'static>(&self) -> caelix_core::Result<Arc<T>> {
         self.container.resolve::<T>()
     }
 
@@ -93,10 +92,12 @@ impl TestApplication {
         (self.shutdown_fn)(&self.container).await
     }
 
-    async fn call(&self, request: Request) -> ServiceResponse {
-        (self.call)(request)
-            .await
-            .unwrap_or_else(|err| panic!("test request failed: {err}"))
+    async fn call(&self, request: Request) -> caelix_core::Result<ServiceResponse> {
+        (self.call)(request).await.map_err(|err| {
+            caelix_core::InternalServerErrorException::new(std::io::Error::other(format!(
+                "test request failed: {err}"
+            )))
+        })
     }
 }
 
@@ -119,8 +120,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         Fut: Future<Output = std::result::Result<T, E>> + Send + 'static,
         E: std::fmt::Debug + Send + 'static,
     {
-        self.overrides = std::mem::take(&mut self.overrides)
-            .insert_factory::<T, Fut, E>(factory);
+        self.overrides = std::mem::take(&mut self.overrides).insert_factory::<T, Fut, E>(factory);
         self
     }
 
@@ -129,15 +129,9 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         self
     }
 
-    pub async fn compile(self) -> TestApplication {
-        self.try_compile()
-            .await
-            .unwrap_or_else(|err| panic!("{}", err.message))
-    }
-
-    pub async fn try_compile(self) -> caelix_core::Result<TestApplication> {
+    pub async fn compile(self) -> caelix_core::Result<TestApplication> {
         let start = std::time::Instant::now();
-        let container = try_build_container_with_overrides::<M>(self.overrides).await?;
+        let container = build_container_with_overrides::<M>(self.overrides).await?;
         log_module_routes::<M>();
         log_application_started(start.elapsed());
 
@@ -146,7 +140,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         let configure_fn: fn(&mut web::ServiceConfig) = |cfg| register_module_controllers::<M>(cfg);
 
         let app = App::new()
-            .app_data(web::Data::new(container.clone()))
+            .app_data(web::Data::from(container.clone()))
             .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn));
 
         let service = Rc::new(actix_test::init_service(app).await);
@@ -158,14 +152,14 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         Ok(TestApplication {
             container,
             call,
-            shutdown_fn: |container| Box::pin(async move { try_shutdown_module::<M>(container).await }),
+            shutdown_fn: |container| Box::pin(async move { shutdown_module::<M>(container).await }),
         })
     }
 }
 
 impl<M: Module + 'static> IntoFuture for TestApplicationBuilder<M> {
-    type Output = TestApplication;
-    type IntoFuture = Pin<Box<dyn Future<Output = TestApplication>>>;
+    type Output = caelix_core::Result<TestApplication>;
+    type IntoFuture = Pin<Box<dyn Future<Output = caelix_core::Result<TestApplication>>>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move { self.compile().await })
@@ -197,9 +191,9 @@ impl<'a> TestRequestBuilder<'a> {
         self
     }
 
-    pub async fn send(self) -> TestResponse {
-        let response = self.app.call(self.request.to_request()).await;
-        TestResponse { response }
+    pub async fn send(self) -> caelix_core::Result<TestResponse> {
+        let response = self.app.call(self.request.to_request()).await?;
+        Ok(TestResponse { response })
     }
 }
 
@@ -230,9 +224,11 @@ impl TestResponse {
         actix_test::read_body(self.response).await
     }
 
-    pub async fn text(self) -> String {
+    pub async fn text(self) -> caelix_core::Result<String> {
         let bytes = self.body().await;
-        String::from_utf8(bytes.to_vec()).expect("response body is not valid UTF-8")
+        String::from_utf8(bytes.to_vec()).map_err(|err| {
+            caelix_core::InternalServerErrorException::new(std::io::Error::other(err))
+        })
     }
 }
 
@@ -259,11 +255,11 @@ mod tests {
     }
 
     impl Injectable for GreetingService {
-        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, Self> {
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
             Box::pin(async move {
-                Self {
+                Ok(Self {
                     message: "hello from production",
-                }
+                })
             })
         }
     }
@@ -273,18 +269,18 @@ mod tests {
     }
 
     impl Injectable for GreetingController {
-        fn create(container: &Container) -> caelix_core::BoxFuture<'_, Self> {
+        fn create(container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
             Box::pin(async move {
-                Self {
-                    service: container.resolve::<GreetingService>(),
-                }
+                Ok(Self {
+                    service: container.resolve::<GreetingService>()?,
+                })
             })
         }
     }
 
     impl GreetingController {
-        async fn greet(service: web::Data<Arc<Container>>) -> HttpResponse {
-            let controller = service.resolve::<GreetingController>();
+        async fn greet(service: web::Data<Container>) -> HttpResponse {
+            let controller = service.resolve::<GreetingController>().unwrap();
             to_actix_response(
                 Response::Body(json!({ "message": controller.service.message })).into_response(),
             )
@@ -309,7 +305,7 @@ mod tests {
 
             cfg.route(
                 "/greet",
-                web::get().to(|container: web::Data<Arc<Container>>| async move {
+                web::get().to(|container: web::Data<Container>| async move {
                     GreetingController::greet(container).await
                 }),
             );
@@ -350,8 +346,8 @@ mod tests {
     struct ShutdownService;
 
     impl Injectable for ShutdownService {
-        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, Self> {
-            Box::pin(async move { Self })
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move { Ok(Self) })
         }
 
         fn on_shutdown(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
@@ -371,12 +367,13 @@ mod tests {
 
     #[actix_web::test]
     async fn test_application_get_json() {
-        let app = TestApplication::new::<GreetingModule>().await;
+        let app = TestApplication::new::<GreetingModule>().await.unwrap();
 
         let body: Value = app
             .get("/greet")
             .send()
             .await
+            .unwrap()
             .assert_status(CaelixStatus::OK)
             .json()
             .await;
@@ -385,7 +382,7 @@ mod tests {
 
     #[actix_web::test]
     async fn test_application_post_json_created() {
-        let app = TestApplication::new::<GreetingModule>().await;
+        let app = TestApplication::new::<GreetingModule>().await.unwrap();
 
         #[derive(Deserialize)]
         struct Echo {
@@ -397,6 +394,7 @@ mod tests {
             .json(json!({ "name": "Ronnie" }))
             .send()
             .await
+            .unwrap()
             .assert_status(CaelixStatus::CREATED);
 
         let body: Echo = response.json().await;
@@ -409,37 +407,44 @@ mod tests {
             .override_provider(GreetingService {
                 message: "hello from test",
             })
-            .await;
+            .await
+            .unwrap();
 
-        let body: Value = app.get("/greet").send().await.json().await;
+        let body: Value = app.get("/greet").send().await.unwrap().json().await;
         assert_eq!(body, json!({ "message": "hello from test" }));
-        assert_eq!(app.resolve::<GreetingService>().message, "hello from test");
+        assert_eq!(
+            app.resolve::<GreetingService>().unwrap().message,
+            "hello from test"
+        );
     }
 
     #[actix_web::test]
     async fn test_application_enforces_body_limit() {
         let app = TestApplication::new::<GreetingModule>()
             .body_limit(8)
-            .await;
+            .await
+            .unwrap();
 
         let response = app
             .post("/greet/echo")
             .header("content-type", "application/json")
             .set_payload(r#"{"too":"large"}"#)
             .send()
-            .await;
+            .await
+            .unwrap();
 
         response.assert_status(CaelixStatus::PAYLOAD_TOO_LARGE);
     }
 
     #[actix_web::test]
     async fn test_application_not_found_is_caelix_json() {
-        let app = TestApplication::new::<GreetingModule>().await;
+        let app = TestApplication::new::<GreetingModule>().await.unwrap();
 
         let body: Value = app
             .get("/missing")
             .send()
             .await
+            .unwrap()
             .assert_status(CaelixStatus::NOT_FOUND)
             .json()
             .await;
@@ -457,7 +462,7 @@ mod tests {
     async fn test_application_shutdown_runs_hooks() {
         SHUTDOWN_COUNT.store(0, Ordering::SeqCst);
 
-        let app = TestApplication::new::<ShutdownModule>().await;
+        let app = TestApplication::new::<ShutdownModule>().await.unwrap();
         app.shutdown().await.unwrap();
 
         assert_eq!(SHUTDOWN_COUNT.load(Ordering::SeqCst), 1);

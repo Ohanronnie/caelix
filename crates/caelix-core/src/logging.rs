@@ -3,11 +3,10 @@ use std::{
     io::{self, Write},
     panic::{self, PanicHookInfo},
     process,
-    sync::Once,
-    time::Duration,
+    sync::{Once, OnceLock},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use chrono::Local;
 use tracing::{
     Event, Level, Metadata, Subscriber,
     field::{Field, Visit},
@@ -32,6 +31,8 @@ const OK_STATUS: &str = "\x1b[38;5;82m";
 
 static TRACING_INIT: Once = Once::new();
 static PANIC_HOOK_INIT: Once = Once::new();
+static LOG_PRIORITY: OnceLock<u8> = OnceLock::new();
+static HTTP_REQUEST_LOGGING: OnceLock<bool> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LogLevel {
@@ -134,7 +135,7 @@ impl Logger {
         init_logging();
 
         let pid = process::id();
-        let timestamp = Local::now().format("%m/%d/%Y, %I:%M:%S %p");
+        let timestamp = current_timestamp();
         let level_label = format!("{:>5}", level.label());
         let elapsed = elapsed
             .map(|duration| format!(" {}", format_elapsed(duration)))
@@ -186,9 +187,44 @@ fn format_elapsed(duration: Duration) -> String {
     }
 }
 
+fn current_timestamp() -> String {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO);
+    let total_seconds = duration.as_secs();
+    let days = (total_seconds / 86_400) as i64;
+    let seconds_of_day = total_seconds % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    let hour_24 = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+    let period = if hour_24 < 12 { "AM" } else { "PM" };
+    let hour_12 = match hour_24 % 12 {
+        0 => 12,
+        hour => hour,
+    };
+
+    format!("{month:02}/{day:02}/{year:04}, {hour_12:02}:{minute:02}:{second:02} {period}")
+}
+
+fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = year + if month <= 2 { 1 } else { 0 };
+
+    (year, month as u32, day as u32)
+}
+
 impl crate::Injectable for Logger {
-    fn create(_container: &crate::Container) -> crate::BoxFuture<'_, Self> {
-        Box::pin(async move { Self::new("Application") })
+    fn create(_container: &crate::Container) -> crate::BoxFuture<'_, crate::Result<Self>> {
+        Box::pin(async move { Ok(Self::new("Application")) })
     }
 }
 
@@ -437,6 +473,10 @@ pub fn log_http_request(method: &str, path: &str, status: u16, elapsed: Duration
         500..=599 => LogLevel::Error,
         _ => LogLevel::Info,
     };
+    if !log_level_enabled(level) {
+        return;
+    }
+
     let status = color_status(status);
 
     log(
@@ -445,6 +485,16 @@ pub fn log_http_request(method: &str, path: &str, status: u16, elapsed: Duration
         format!("{} {} {}", method, path, status),
         Some(elapsed),
     );
+}
+
+pub fn http_request_logging_enabled() -> bool {
+    *HTTP_REQUEST_LOGGING.get_or_init(|| {
+        env::var("CAELIX_HTTP_LOG")
+            .or_else(|_| env::var("CAELIX_ACCESS_LOG"))
+            .ok()
+            .and_then(|value| parse_bool(&value))
+            .unwrap_or(false)
+    })
 }
 
 pub fn log_module_routes<M: Module>() {
@@ -478,15 +528,17 @@ fn log_level_enabled(level: LogLevel) -> bool {
 }
 
 fn configured_log_priority() -> u8 {
-    env::var("CAELIX_LOG")
-        .ok()
-        .and_then(|value| parse_log_level(&value))
-        .or_else(|| {
-            env::var("RUST_LOG")
-                .ok()
-                .and_then(|value| parse_rust_log_level(&value))
-        })
-        .unwrap_or(LogLevel::Info.priority())
+    *LOG_PRIORITY.get_or_init(|| {
+        env::var("CAELIX_LOG")
+            .ok()
+            .and_then(|value| parse_log_level(&value))
+            .or_else(|| {
+                env::var("RUST_LOG")
+                    .ok()
+                    .and_then(|value| parse_rust_log_level(&value))
+            })
+            .unwrap_or(LogLevel::Info.priority())
+    })
 }
 
 fn parse_rust_log_level(value: &str) -> Option<u8> {
@@ -517,6 +569,14 @@ fn parse_log_level(value: &str) -> Option<u8> {
     }
 }
 
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "y" | "on" => Some(true),
+        "0" | "false" | "no" | "n" | "off" => Some(false),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,5 +587,14 @@ mod tests {
         assert_eq!(format_elapsed(Duration::from_micros(742)), "+742µs");
         assert_eq!(format_elapsed(Duration::from_micros(1_200)), "+1ms");
         assert_eq!(format_elapsed(Duration::from_millis(42)), "+42ms");
+    }
+
+    #[test]
+    fn parse_bool_accepts_common_env_values() {
+        assert_eq!(parse_bool("1"), Some(true));
+        assert_eq!(parse_bool("on"), Some(true));
+        assert_eq!(parse_bool("false"), Some(false));
+        assert_eq!(parse_bool("off"), Some(false));
+        assert_eq!(parse_bool("sometimes"), None);
     }
 }

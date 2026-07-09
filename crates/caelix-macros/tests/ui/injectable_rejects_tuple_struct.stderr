@@ -1,7 +1,5 @@
-error: custom attribute panicked
- --> tests/ui/injectable_rejects_tuple_struct.rs:5:1
+error: #[injectable] only supports named-field or unit structs
+ --> tests/ui/injectable_rejects_tuple_struct.rs:6:1
   |
-5 | #[injectable]
-  | ^^^^^^^^^^^^^
-  |
-  = help: message: #[injectable] only supports named-field or unit structs
+6 | struct Service(std::sync::Arc<Repo>);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

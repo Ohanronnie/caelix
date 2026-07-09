@@ -92,4 +92,4 @@ Application startup fails when metadata references a provider that was not regis
 - A factory provider returns an error.
 - A lifecycle hook returns an `Err(HttpException)`.
 
-`Application::new::<AppModule>()` panics on these startup errors. `Application::try_new::<AppModule>()` returns them as `caelix::Result<Application>`.
+`Application::new::<AppModule>()` returns these startup errors as `caelix::Result<Application>`.

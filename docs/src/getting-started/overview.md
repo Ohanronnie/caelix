@@ -20,7 +20,7 @@ cd demo-api
 caelix run
 ```
 
-The generated application uses `caelix = "0.0.8"` from crates.io:
+The generated application uses `caelix = "0.0.9"` from crates.io:
 
 ```text
 demo-api/
@@ -55,7 +55,7 @@ Add application config as a normal provider. It can own both settings and applic
 
 ```rust
 // src/config.rs
-use caelix::{BoxFuture, Container, Injectable};
+use caelix::{BoxFuture, Container, Injectable, Result, ServiceUnavailableException};
 use sqlx::PgPool;
 
 pub struct AppConfig {
@@ -64,16 +64,15 @@ pub struct AppConfig {
 }
 
 impl Injectable for AppConfig {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async {
             let database_url = std::env::var("DATABASE_URL")
-                .expect("DATABASE_URL must be set");
+                .map_err(|_| ServiceUnavailableException::new("DATABASE_URL must be set"))?;
 
             let pool = PgPool::connect(&database_url)
-                .await
-                .expect("DATABASE_URL must point to a reachable database");
+                .await?;
 
-            Self { database_url, pool }
+            Ok(Self { database_url, pool })
         })
     }
 }

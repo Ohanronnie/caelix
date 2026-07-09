@@ -70,10 +70,11 @@ impl caelix::Module for ValidationModule {
 
 #[actix_web::test]
 async fn validate_body_empty_object_returns_field_errors() {
-    let container = std::sync::Arc::new(caelix::build_container::<ValidationModule>().await);
+    let container =
+        std::sync::Arc::new(caelix::build_container::<ValidationModule>().await.unwrap());
     let app = actix_test::init_service(
         App::new()
-            .app_data(web::Data::new(container))
+            .app_data(web::Data::from(container))
             .configure(|cfg| caelix::register_module_controllers::<ValidationModule>(cfg)),
     )
     .await;
@@ -105,10 +106,11 @@ async fn validate_body_empty_object_returns_field_errors() {
 
 #[actix_web::test]
 async fn validate_query_empty_query_returns_field_errors() {
-    let container = std::sync::Arc::new(caelix::build_container::<ValidationModule>().await);
+    let container =
+        std::sync::Arc::new(caelix::build_container::<ValidationModule>().await.unwrap());
     let app = actix_test::init_service(
         App::new()
-            .app_data(web::Data::new(container))
+            .app_data(web::Data::from(container))
             .configure(|cfg| caelix::register_module_controllers::<ValidationModule>(cfg)),
     )
     .await;
@@ -138,10 +140,11 @@ async fn validate_query_empty_query_returns_field_errors() {
 
 #[actix_web::test]
 async fn validate_path_runs_after_path_deserialization() {
-    let container = std::sync::Arc::new(caelix::build_container::<ValidationModule>().await);
+    let container =
+        std::sync::Arc::new(caelix::build_container::<ValidationModule>().await.unwrap());
     let app = actix_test::init_service(
         App::new()
-            .app_data(web::Data::new(container))
+            .app_data(web::Data::from(container))
             .configure(|cfg| caelix::register_module_controllers::<ValidationModule>(cfg)),
     )
     .await;

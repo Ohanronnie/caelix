@@ -8,18 +8,19 @@ Build a `Container`, register dependencies, and call methods directly:
 
 ```rust
 #[tokio::test]
-async fn service_returns_user() {
+async fn service_returns_user() -> caelix::Result<()> {
     let mut container = Container::new();
-    container.register::<UsersService>().await;
+    container.register::<UsersService>().await?;
 
-    let service = container.resolve::<UsersService>();
-    let user = service.find(1).await.unwrap();
+    let service = container.resolve::<UsersService>()?;
+    let user = service.find(1).await?;
 
     assert_eq!(user.id, 1);
+    Ok(())
 }
 ```
 
-You can also use `try_build_container::<AppModule>()` or `try_build_container_with_overrides` when you want the full module graph without HTTP.
+You can also use `build_container::<AppModule>()` or `build_container_with_overrides` when you want the full module graph without HTTP.
 
 ## Integration tests with `TestApplication`
 
@@ -29,8 +30,8 @@ You can also use `try_build_container::<AppModule>()` or `try_build_container_wi
 use caelix::{StatusCode, TestApplication};
 
 #[caelix::test]
-async fn should_create_user() {
-    let app = TestApplication::new::<AppModule>().await;
+async fn should_create_user() -> caelix::Result<()> {
+    let app = TestApplication::new::<AppModule>().await?;
 
     let response = app
         .post("/users")
@@ -39,9 +40,10 @@ async fn should_create_user() {
             email: "ronnie@example.com".into(),
         })
         .send()
-        .await;
+        .await?;
 
     response.assert_status(StatusCode::CREATED);
+    Ok(())
 }
 ```
 
@@ -72,10 +74,10 @@ Swap a concrete provider (including ones registered in nested imports) before th
 
 ```rust
 #[caelix::test]
-async fn creates_user_without_database() {
+async fn creates_user_without_database() -> caelix::Result<()> {
     let app = TestApplication::new::<AppModule>()
         .override_provider(UserRepository::in_memory())
-        .await;
+        .await?;
 
     let response = app
         .post("/users")
@@ -84,11 +86,12 @@ async fn creates_user_without_database() {
             email: "ronnie@example.com".into(),
         })
         .send()
-        .await;
+        .await?;
 
     response.assert_status(StatusCode::CREATED);
     // resolve the same type the app injects
-    let _repo = app.resolve::<UserRepository>();
+    let _repo = app.resolve::<UserRepository>()?;
+    Ok(())
 }
 ```
 
@@ -103,7 +106,7 @@ Instance overrides use NestJS-style `useValue` semantics: declared lifecycle hoo
 ### Shutdown
 
 ```rust
-app.shutdown().await.unwrap();
+app.shutdown().await?;
 ```
 
 Dropping a `TestApplication` without `shutdown` skips `on_shutdown` hooks. Call `shutdown` when your test cares about cleanup.

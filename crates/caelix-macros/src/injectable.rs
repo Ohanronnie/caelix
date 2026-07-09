@@ -5,16 +5,32 @@ use syn::{Data, DeriveInput, Fields, GenericArgument, PathArguments, Type, parse
 pub(crate) fn expand(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let struct_name = &input.ident;
+    let mut errors = Vec::new();
 
     let create_body = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(fields) => {
                 let field_resolutions = fields.named.iter().map(|field| {
-                    let field_name = field.ident.as_ref().unwrap();
+                    let Some(field_name) = field.ident.as_ref() else {
+                        errors.push(
+                            syn::Error::new_spanned(field, "#[injectable] fields must be named")
+                                .to_compile_error(),
+                        );
+                        return quote! {};
+                    };
                     let field_type = &field.ty;
-                    let resolved_type = arc_inner_type(field_type).unwrap_or_else(|| {
-                        panic!("#[injectable] fields must be std::sync::Arc<T>")
-                    });
+                    let Some(resolved_type) = arc_inner_type(field_type) else {
+                        errors.push(
+                            syn::Error::new_spanned(
+                                field_type,
+                                "#[injectable] fields must be std::sync::Arc<T>",
+                            )
+                            .to_compile_error(),
+                        );
+                        return quote! {
+                            #field_name: unreachable!()
+                        };
+                    };
 
                     if is_logger_type(resolved_type) {
                         return quote! {
@@ -23,29 +39,44 @@ pub(crate) fn expand(_args: TokenStream, input: TokenStream) -> TokenStream {
                     }
 
                     quote! {
-                        #field_name: container.resolve::<#resolved_type>()
+                        #field_name: container.resolve::<#resolved_type>()?
                     }
                 });
 
                 quote! {
-                    Self {
+                    Ok(Self {
                         #(#field_resolutions),*
-                    }
+                    })
                 }
             }
-            Fields::Unit => quote! { Self },
+            Fields::Unit => quote! { Ok(Self) },
             Fields::Unnamed(_) => {
-                panic!("#[injectable] only supports named-field or unit structs")
+                errors.push(
+                    syn::Error::new_spanned(
+                        &input,
+                        "#[injectable] only supports named-field or unit structs",
+                    )
+                    .to_compile_error(),
+                );
+                quote! { Ok(Self) }
             }
         },
-        _ => panic!("#[injectable] can only be applied to structs"),
+        _ => {
+            errors.push(
+                syn::Error::new_spanned(&input, "#[injectable] can only be applied to structs")
+                    .to_compile_error(),
+            );
+            quote! { Ok(Self) }
+        }
     };
 
     let expanded = quote! {
+        #(#errors)*
+
         #input
 
         impl caelix::Injectable for #struct_name {
-            fn create(container: &caelix::Container) -> caelix::BoxFuture<'_, Self> {
+            fn create(container: &caelix::Container) -> caelix::BoxFuture<'_, caelix::Result<Self>> {
                 Box::pin(async move {
                     #create_body
                 })

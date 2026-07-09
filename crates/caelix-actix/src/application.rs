@@ -9,8 +9,8 @@ use actix_web::{
 use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpException, HttpResponse as CaelixHttpResponse,
     IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException, ResponseBody,
-    log_application_started, log_http_request, log_listening, log_module_routes,
-    register_module_controllers, try_build_container, try_shutdown_module,
+    build_container, http_request_logging_enabled, log_application_started, log_http_request,
+    log_listening, log_module_routes, register_module_controllers, shutdown_module,
 };
 use futures_util::StreamExt;
 
@@ -47,6 +47,7 @@ pub struct Application {
     configure_fn: fn(&mut web::ServiceConfig),
     shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, caelix_core::Result<()>>,
     body_limit: usize,
+    workers: usize,
 }
 
 fn json_config(body_limit: usize) -> web::JsonConfig {
@@ -140,30 +141,28 @@ pub(crate) fn configure_caelix_services(
 }
 
 impl Application {
-    pub async fn new<M: Module + 'static>() -> Self {
-        Self::try_new::<M>()
-            .await
-            .unwrap_or_else(|err| panic!("{}", err.message))
-    }
-
-    pub async fn try_new<M: Module + 'static>() -> caelix_core::Result<Self> {
+    pub async fn new<M: Module + 'static>() -> caelix_core::Result<Self> {
         let start = Instant::now();
-        let container = try_build_container::<M>().await?;
+        let container = build_container::<M>().await?;
         log_module_routes::<M>();
         log_application_started(start.elapsed());
 
         Ok(Self {
             container: Arc::new(container),
             configure_fn: |cfg| register_module_controllers::<M>(cfg),
-            shutdown_fn: |container| {
-                Box::pin(async move { try_shutdown_module::<M>(container).await })
-            },
+            shutdown_fn: |container| Box::pin(async move { shutdown_module::<M>(container).await }),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            workers: num_cpus::get(),
         })
     }
 
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
+        self
+    }
+
+    pub fn workers(mut self, workers: usize) -> Self {
+        self.workers = workers.max(1);
         self
     }
 
@@ -180,28 +179,35 @@ impl Application {
         let container = self.container.clone();
         let configure_fn = self.configure_fn;
         let body_limit = self.body_limit;
+        let workers = self.workers;
         let addr = addr.to_string();
 
         log_listening(&addr);
 
         let server = match HttpServer::new(move || {
             App::new()
-                .app_data(web::Data::new(container.clone()))
+                .app_data(web::Data::from(container.clone()))
                 .wrap_fn(move |req, service| {
-                    let method = req.method().to_string();
-                    let path = req.path().to_string();
-                    let start = Instant::now();
+                    let request_log_start = http_request_logging_enabled().then(Instant::now);
                     let future = service.call(req);
 
                     async move {
                         let response = future.await?;
-                        let status = response.status().as_u16();
-                        log_http_request(&method, &path, status, start.elapsed());
+                        if let Some(start) = request_log_start {
+                            let status = response.status().as_u16();
+                            log_http_request(
+                                response.request().method().as_str(),
+                                response.request().path(),
+                                status,
+                                start.elapsed(),
+                            );
+                        }
                         Ok(response)
                     }
                 })
                 .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn))
         })
+        .workers(workers)
         .bind(addr.as_str())
         {
             Ok(server) => server.run(),
@@ -241,8 +247,8 @@ mod tests {
     }
 
     impl Injectable for HealthService {
-        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, Self> {
-            Box::pin(async move { Self { status: "ok" } })
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move { Ok(Self { status: "ok" }) })
         }
     }
 
@@ -257,8 +263,8 @@ mod tests {
     struct JsonController;
 
     impl Injectable for JsonController {
-        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, Self> {
-            Box::pin(async move { Self })
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move { Ok(Self) })
         }
     }
 
@@ -346,8 +352,8 @@ mod tests {
     struct ShutdownService;
 
     impl Injectable for ShutdownService {
-        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, Self> {
-            Box::pin(async move { Self })
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move { Ok(Self) })
         }
 
         fn on_shutdown(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
@@ -368,9 +374,9 @@ mod tests {
 
     #[actix_web::test]
     async fn new_builds_container_from_module_metadata() {
-        let app = Application::new::<TestModule>().await;
+        let app = Application::new::<TestModule>().await.unwrap();
 
-        let service = app.container.resolve::<HealthService>();
+        let service = app.container.resolve::<HealthService>().unwrap();
 
         assert_eq!(service.status, "ok");
     }
@@ -471,10 +477,13 @@ mod tests {
 
     #[actix_web::test]
     async fn application_enforces_configured_body_limit() {
-        let application = Application::new::<JsonModule>().await.body_limit(8);
+        let application = Application::new::<JsonModule>()
+            .await
+            .unwrap()
+            .body_limit(8);
         let app = actix_test::init_service(
             App::new()
-                .app_data(web::Data::new(application.container.clone()))
+                .app_data(web::Data::from(application.container.clone()))
                 .configure(|cfg| application.configure_services(cfg)),
         )
         .await;
@@ -646,7 +655,7 @@ mod tests {
     async fn application_runs_module_shutdown_hook() {
         SHUTDOWN_COUNT.store(0, Ordering::SeqCst);
 
-        let application = Application::new::<ShutdownModule>().await;
+        let application = Application::new::<ShutdownModule>().await.unwrap();
         application.shutdown().await.unwrap();
 
         assert_eq!(SHUTDOWN_COUNT.load(Ordering::SeqCst), 1);

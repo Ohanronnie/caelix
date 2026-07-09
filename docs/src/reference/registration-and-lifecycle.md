@@ -28,6 +28,6 @@ Startup can fail for:
 - Missing `EventModule` import before resolving `Arc<EventBus>` or registering event handlers.
 - Async factory errors.
 - Lifecycle hook errors.
-- Dependency resolution panics during provider construction.
+- Dependency resolution failures during provider construction.
 
-Use `Application::try_new::<AppModule>()` when callers should handle startup errors instead of panics.
+`Application::new::<AppModule>()` returns startup errors as `caelix::Result<Application>`, so callers can choose whether to propagate, map, or unwrap them.

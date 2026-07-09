@@ -9,7 +9,7 @@ use std::{
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub trait Injectable: Send + Sync + 'static {
-    fn create(container: &Container) -> BoxFuture<'_, Self>
+    fn create(container: &Container) -> BoxFuture<'_, crate::Result<Self>>
     where
         Self: Sized;
 
@@ -66,14 +66,8 @@ impl Container {
         self.services.insert(TypeId::of::<T>(), Arc::new(value));
     }
 
-    pub async fn register<T: Injectable>(&mut self) {
-        self.try_register::<T>()
-            .await
-            .unwrap_or_else(|err| panic!("{}", err.message));
-    }
-
-    pub async fn try_register<T: Injectable>(&mut self) -> crate::Result<()> {
-        let instance = T::create(self).await;
+    pub async fn register<T: Injectable>(&mut self) -> crate::Result<()> {
+        let instance = T::create(self).await?;
         let instance = Arc::new(instance);
         instance.on_module_init().await.map_err(|err| {
             crate::exception::startup_error(format!(
@@ -99,10 +93,7 @@ impl Container {
         self.services.contains_key(&type_id)
     }
 
-    pub(crate) fn take_pending_override(
-        &mut self,
-        type_id: TypeId,
-    ) -> Option<crate::ProviderDef> {
+    pub(crate) fn take_pending_override(&mut self, type_id: TypeId) -> Option<crate::ProviderDef> {
         self.pending_overrides.remove(&type_id)
     }
 
@@ -118,7 +109,7 @@ impl Container {
         self.pending_overrides = overrides.into_inner();
     }
 
-    pub(crate) fn try_assert_no_unused_overrides(&self) -> crate::Result<()> {
+    pub(crate) fn assert_no_unused_overrides(&self) -> crate::Result<()> {
         if self.pending_overrides.is_empty() {
             return Ok(());
         }
@@ -136,13 +127,20 @@ impl Container {
         )))
     }
 
-    pub fn resolve<T: Send + Sync + 'static>(&self) -> Arc<T> {
-        self.services
-            .get(&TypeId::of::<T>())
-            .unwrap_or_else(|| panic!("no provider registered for {}", std::any::type_name::<T>()))
-            .clone()
-            .downcast::<T>()
-            .unwrap_or_else(|_| panic!("type mismatch resolving {}", std::any::type_name::<T>()))
+    pub fn resolve<T: Send + Sync + 'static>(&self) -> crate::Result<Arc<T>> {
+        let value = self.services.get(&TypeId::of::<T>()).ok_or_else(|| {
+            crate::exception::startup_error(format!(
+                "no provider registered for {}",
+                std::any::type_name::<T>()
+            ))
+        })?;
+
+        value.clone().downcast::<T>().map_err(|_| {
+            crate::exception::startup_error(format!(
+                "type mismatch resolving {}",
+                std::any::type_name::<T>()
+            ))
+        })
     }
 
     pub fn resolve_logger(&self, context: impl Into<String>) -> Arc<crate::Logger> {

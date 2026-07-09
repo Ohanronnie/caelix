@@ -7,9 +7,9 @@ struct Logger;
 
 async fn exercise() {
     let mut container = Container::new();
-    container.register::<Logger>().await;
+    container.register::<Logger>().await.unwrap();
 
-    let _logger = container.resolve::<Logger>();
+    let _logger = container.resolve::<Logger>().unwrap();
 }
 
 fn main() {

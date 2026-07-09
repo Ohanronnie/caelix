@@ -25,7 +25,7 @@ pub struct CurrentUser {
     pub id: i64,
 }
 
-ctx.set(CurrentUser { id: 42 });
+ctx.set(CurrentUser { id: 42 })?;
 ```
 
 Typed values are stored by concrete Rust type. A later `ctx.set::<CurrentUser>(...)` replaces the earlier value for that type.
@@ -33,7 +33,7 @@ Typed values are stored by concrete Rust type. A later `ctx.set::<CurrentUser>(.
 Guards and interceptors can read values back:
 
 ```rust
-if let Some(user) = ctx.get::<CurrentUser>() {
+if let Some(user) = ctx.get::<CurrentUser>()? {
     tracing::info!("user {}", user.id);
 }
 ```

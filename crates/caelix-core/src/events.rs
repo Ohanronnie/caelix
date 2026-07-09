@@ -1,5 +1,5 @@
 use crate::{BoxFuture, Container, Injectable, Module, ModuleMetadata, Result};
-use futures_util::StreamExt;
+use futures_util::{StreamExt, stream, stream::BoxStream};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -30,11 +30,11 @@ pub trait EventHandler<E>: Send + Sync + 'static {
 pub trait RegisterableEventHandler: Injectable {
     type Event: Clone + Send + Sync + 'static;
 
-    fn register_into(handler: Arc<Self>, bus: &EventBus)
+    fn register_into(handler: Arc<Self>, bus: &EventBus) -> Result<()>
     where
         Self: Sized + EventHandler<Self::Event>,
     {
-        bus.register::<Self::Event, Self>(handler);
+        bus.register::<Self::Event, Self>(handler)
     }
 }
 
@@ -53,10 +53,14 @@ where
     H: EventHandler<E>,
 {
     fn handle_erased(&self, event: &dyn Any) -> BoxFuture<'_, Result<()>> {
-        let event = event
-            .downcast_ref::<E>()
-            .expect("event type mismatch")
-            .clone();
+        let event = match event.downcast_ref::<E>() {
+            Some(event) => event.clone(),
+            None => {
+                return Box::pin(async {
+                    Err(crate::exception::startup_error("event type mismatch"))
+                });
+            }
+        };
         let handler = self.handler.clone();
 
         Box::pin(async move { handler.handle(event).await })
@@ -80,7 +84,7 @@ impl EventBus {
         }
     }
 
-    pub fn register<E, H>(&self, handler: Arc<H>)
+    pub fn register<E, H>(&self, handler: Arc<H>) -> Result<()>
     where
         E: Clone + Send + Sync + 'static,
         H: EventHandler<E>,
@@ -92,37 +96,35 @@ impl EventBus {
 
         self.handlers
             .write()
-            .expect("event handler registry lock poisoned")
+            .map_err(|_| crate::exception::startup_error("event handler registry lock poisoned"))?
             .entry(TypeId::of::<E>())
             .or_default()
             .push(wrapped);
+        Ok(())
     }
 
     /// Create the per-type broadcast channel if missing; used only by [`Self::subscribe`].
-    fn ensure_sender<E>(&self) -> broadcast::Sender<E>
+    fn ensure_sender<E>(&self) -> Result<broadcast::Sender<E>>
     where
         E: Clone + Send + Sync + 'static,
     {
         let type_id = TypeId::of::<E>();
 
         {
-            let broadcasts = self
-                .broadcasts
-                .read()
-                .expect("event broadcast registry lock poisoned");
+            let broadcasts = self.broadcasts.read().map_err(|_| {
+                crate::exception::startup_error("event broadcast registry lock poisoned")
+            })?;
             if let Some(channel) = broadcasts.get(&type_id) {
                 return channel
                     .downcast_ref::<EventChannel<E>>()
-                    .expect("event broadcast type mismatch")
-                    .tx
-                    .clone();
+                    .ok_or_else(|| crate::exception::startup_error("event broadcast type mismatch"))
+                    .map(|channel| channel.tx.clone());
             }
         }
 
-        let mut broadcasts = self
-            .broadcasts
-            .write()
-            .expect("event broadcast registry lock poisoned");
+        let mut broadcasts = self.broadcasts.write().map_err(|_| {
+            crate::exception::startup_error("event broadcast registry lock poisoned")
+        })?;
         let channel = broadcasts.entry(type_id).or_insert_with(|| {
             let (tx, _rx) = broadcast::channel::<E>(EVENT_BROADCAST_CAPACITY);
             Box::new(EventChannel { tx })
@@ -130,27 +132,26 @@ impl EventBus {
 
         channel
             .downcast_ref::<EventChannel<E>>()
-            .expect("event broadcast type mismatch")
-            .tx
-            .clone()
+            .ok_or_else(|| crate::exception::startup_error("event broadcast type mismatch"))
+            .map(|channel| channel.tx.clone())
     }
 
     /// Existing channel only — does not allocate. Used by [`Self::emit`].
-    fn existing_sender<E>(&self) -> Option<broadcast::Sender<E>>
+    fn existing_sender<E>(&self) -> Result<Option<broadcast::Sender<E>>>
     where
         E: Clone + Send + Sync + 'static,
     {
         self.broadcasts
             .read()
-            .expect("event broadcast registry lock poisoned")
+            .map_err(|_| crate::exception::startup_error("event broadcast registry lock poisoned"))?
             .get(&TypeId::of::<E>())
             .map(|channel| {
                 channel
                     .downcast_ref::<EventChannel<E>>()
-                    .expect("event broadcast type mismatch")
-                    .tx
-                    .clone()
+                    .ok_or_else(|| crate::exception::startup_error("event broadcast type mismatch"))
+                    .map(|channel| channel.tx.clone())
             })
+            .transpose()
     }
 
     /// Live stream of events of type `E`. Receives events after subscription;
@@ -159,20 +160,24 @@ impl EventBus {
     ///
     /// Creates the broadcast channel for `E` on first subscribe. [`Self::emit`]
     /// only fans out when a channel already exists (i.e. someone has subscribed).
-    pub fn subscribe<E>(&self) -> impl futures_core::Stream<Item = Result<E>> + Send + 'static
+    pub fn subscribe<E>(&self) -> BoxStream<'static, Result<E>>
     where
         E: Clone + Send + Sync + 'static,
     {
-        let rx = self.ensure_sender::<E>().subscribe();
-        BroadcastStream::new(rx).filter_map(|item| async move {
-            match item {
-                Ok(event) => Some(Ok(event)),
-                Err(BroadcastStreamRecvError::Lagged(_)) => {
-                    tracing::warn!("event bus subscriber lagged; dropped events");
-                    None
-                }
-            }
-        })
+        match self.ensure_sender::<E>() {
+            Ok(tx) => BroadcastStream::new(tx.subscribe())
+                .filter_map(|item| async move {
+                    match item {
+                        Ok(event) => Some(Ok(event)),
+                        Err(BroadcastStreamRecvError::Lagged(_)) => {
+                            tracing::warn!("event bus subscriber lagged; dropped events");
+                            None
+                        }
+                    }
+                })
+                .boxed(),
+            Err(err) => stream::once(async move { Err(err) }).boxed(),
+        }
     }
 
     /// Run registered handlers in order, then fan out to live subscribers.
@@ -187,7 +192,7 @@ impl EventBus {
         let handlers = self
             .handlers
             .read()
-            .expect("event handler registry lock poisoned")
+            .map_err(|_| crate::exception::startup_error("event handler registry lock poisoned"))?
             .get(&TypeId::of::<E>())
             .cloned();
 
@@ -197,22 +202,23 @@ impl EventBus {
             }
         }
 
-        if let Some(tx) = self.existing_sender::<E>() {
+        if let Some(tx) = self.existing_sender::<E>()? {
             let _ = tx.send(event);
         }
 
         Ok(())
     }
 
-    pub fn handler_count<E>(&self) -> usize
+    pub fn handler_count<E>(&self) -> Result<usize>
     where
         E: Clone + Send + Sync + 'static,
     {
-        self.handlers
+        Ok(self
+            .handlers
             .read()
-            .expect("event handler registry lock poisoned")
+            .map_err(|_| crate::exception::startup_error("event handler registry lock poisoned"))?
             .get(&TypeId::of::<E>())
-            .map_or(0, Vec::len)
+            .map_or(0, Vec::len))
     }
 }
 
@@ -223,8 +229,8 @@ impl Default for EventBus {
 }
 
 impl Injectable for EventBus {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
-        Box::pin(async { Self::new() })
+    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async { Ok(Self::new()) })
     }
 }
 
@@ -239,7 +245,7 @@ impl Module for EventModule {
 pub struct EventHandlerDef {
     type_id: TypeId,
     type_name: &'static str,
-    register_fn: Box<dyn Fn(&Container) + Send + Sync>,
+    register_fn: Box<dyn Fn(&Container) -> Result<()> + Send + Sync>,
 }
 
 impl EventHandlerDef {
@@ -251,9 +257,9 @@ impl EventHandlerDef {
             type_id: TypeId::of::<H>(),
             type_name: std::any::type_name::<H>(),
             register_fn: Box::new(|container| {
-                let handler = container.resolve::<H>();
-                let bus = container.resolve::<EventBus>();
-                H::register_into(handler, &bus);
+                let handler = container.resolve::<H>()?;
+                let bus = container.resolve::<EventBus>()?;
+                H::register_into(handler, &bus)
             }),
         }
     }
@@ -267,14 +273,14 @@ impl EventHandlerDef {
             type_id: TypeId::of::<H>(),
             type_name: std::any::type_name::<H>(),
             register_fn: Box::new(|container| {
-                let handler = container.resolve::<H>();
-                let bus = container.resolve::<EventBus>();
-                bus.register::<E, H>(handler);
+                let handler = container.resolve::<H>()?;
+                let bus = container.resolve::<EventBus>()?;
+                bus.register::<E, H>(handler)
             }),
         }
     }
 
-    pub(crate) fn try_assert_registered(&self, container: &Container) -> Result<()> {
+    pub(crate) fn assert_registered(&self, container: &Container) -> Result<()> {
         if container.contains_type_id(self.type_id) {
             return Ok(());
         }
@@ -285,7 +291,7 @@ impl EventHandlerDef {
         )))
     }
 
-    pub(crate) fn register(&self, container: &Container) {
-        (self.register_fn)(container);
+    pub(crate) fn register(&self, container: &Container) -> Result<()> {
+        (self.register_fn)(container)
     }
 }

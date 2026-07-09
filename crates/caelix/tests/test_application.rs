@@ -14,8 +14,8 @@ struct NamedRepository {
 }
 
 impl Injectable for NamedRepository {
-    fn create(_container: &Container) -> caelix::BoxFuture<'_, Self> {
-        Box::pin(async move { Self { name: "production" } })
+    fn create(_container: &Container) -> caelix::BoxFuture<'_, caelix::Result<Self>> {
+        Box::pin(async move { Ok(Self { name: "production" }) })
     }
 }
 
@@ -24,11 +24,11 @@ struct UsersService {
 }
 
 impl Injectable for UsersService {
-    fn create(container: &Container) -> caelix::BoxFuture<'_, Self> {
+    fn create(container: &Container) -> caelix::BoxFuture<'_, caelix::Result<Self>> {
         Box::pin(async move {
-            Self {
-                repo: container.resolve::<NamedRepository>(),
-            }
+            Ok(Self {
+                repo: container.resolve::<NamedRepository>()?,
+            })
         })
     }
 }
@@ -38,11 +38,11 @@ struct UsersController {
 }
 
 impl Injectable for UsersController {
-    fn create(container: &Container) -> caelix::BoxFuture<'_, Self> {
+    fn create(container: &Container) -> caelix::BoxFuture<'_, caelix::Result<Self>> {
         Box::pin(async move {
-            Self {
-                service: container.resolve::<UsersService>(),
-            }
+            Ok(Self {
+                service: container.resolve::<UsersService>()?,
+            })
         })
     }
 }
@@ -62,10 +62,10 @@ struct UserDto {
 
 impl UsersController {
     async fn create(
-        container: actix_web::web::Data<Arc<Container>>,
+        container: actix_web::web::Data<Container>,
         body: actix_web::web::Json<CreateUserDto>,
     ) -> actix_web::HttpResponse {
-        let controller = container.resolve::<UsersController>();
+        let controller = container.resolve::<UsersController>().unwrap();
         let body = body.into_inner();
         let dto = UserDto {
             name: body.name,
@@ -77,8 +77,8 @@ impl UsersController {
         ))
     }
 
-    async fn backend(container: actix_web::web::Data<Arc<Container>>) -> actix_web::HttpResponse {
-        let controller = container.resolve::<UsersController>();
+    async fn backend(container: actix_web::web::Data<Container>) -> actix_web::HttpResponse {
+        let controller = container.resolve::<UsersController>().unwrap();
         caelix::to_actix_response(caelix::IntoCaelixResponse::into_response(Response::Body(
             json!({ "backend": controller.service.repo.name }),
         )))
@@ -95,10 +95,7 @@ impl Controller for UsersController {
             .downcast_mut::<actix_web::web::ServiceConfig>()
             .expect("expected actix ServiceConfig");
 
-        cfg.route(
-            "/users",
-            actix_web::web::post().to(UsersController::create),
-        );
+        cfg.route("/users", actix_web::web::post().to(UsersController::create));
         cfg.route(
             "/users/backend",
             actix_web::web::get().to(UsersController::backend),
@@ -125,7 +122,7 @@ impl Module for AppModule {
 
 #[caelix::test]
 async fn should_create_user() {
-    let app = TestApplication::new::<AppModule>().await;
+    let app = TestApplication::new::<AppModule>().await.unwrap();
 
     let response = app
         .post("/users")
@@ -135,6 +132,7 @@ async fn should_create_user() {
         })
         .send()
         .await
+        .unwrap()
         .assert_status(StatusCode::CREATED);
 
     let body: UserDto = response.json().await;
@@ -147,16 +145,18 @@ async fn should_create_user() {
 async fn should_override_nested_provider() {
     let app = TestApplication::new::<AppModule>()
         .override_provider(NamedRepository { name: "in-memory" })
-        .await;
+        .await
+        .unwrap();
 
     let body: Value = app
         .get("/users/backend")
         .send()
         .await
+        .unwrap()
         .assert_status(StatusCode::OK)
         .json()
         .await;
 
     assert_eq!(body, json!({ "backend": "in-memory" }));
-    assert_eq!(app.resolve::<NamedRepository>().name, "in-memory");
+    assert_eq!(app.resolve::<NamedRepository>().unwrap().name, "in-memory");
 }

@@ -68,7 +68,7 @@ impl Guard for AuthGuard {
             };
 
             let claims = self.auth.verify(token).await?;
-            ctx.set(CurrentUser { id: claims.sub });
+            ctx.set(CurrentUser { id: claims.sub })?;
             Ok(true)
         })
     }

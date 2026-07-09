@@ -83,10 +83,7 @@ impl MemoryCacheStore {
     }
 
     pub fn len(&self) -> usize {
-        self.entries
-            .read()
-            .expect("cache store lock poisoned")
-            .len()
+        self.entries.read().map_or(0, |entries| entries.len())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -124,15 +121,17 @@ impl Default for MemoryCacheStore {
 }
 
 impl Injectable for MemoryCacheStore {
-    fn create(_container: &Container) -> BoxFuture<'_, Self> {
-        Box::pin(async { Self::new() })
+    fn create(_container: &Container) -> BoxFuture<'_, crate::Result<Self>> {
+        Box::pin(async { Ok(Self::new()) })
     }
 }
 
 impl CacheStore for MemoryCacheStore {
     fn get(&self, key: String) -> BoxFuture<'_, crate::Result<Option<Value>>> {
         Box::pin(async move {
-            let mut entries = self.entries.write().expect("cache store lock poisoned");
+            let mut entries = self.entries.write().map_err(|_| {
+                InternalServerErrorException::new(anyhow::anyhow!("cache store lock poisoned"))
+            })?;
             let Some(entry) = entries.get(&key) else {
                 return Ok(None);
             };
@@ -165,7 +164,9 @@ impl CacheStore for MemoryCacheStore {
             }
 
             let ttl = ttl.or(self.options.default_ttl);
-            let mut entries = self.entries.write().expect("cache store lock poisoned");
+            let mut entries = self.entries.write().map_err(|_| {
+                InternalServerErrorException::new(anyhow::anyhow!("cache store lock poisoned"))
+            })?;
             Self::remove_expired(&mut entries);
             entries.insert(key, CacheEntry::new(value, ttl));
             self.evict_to_capacity(&mut entries);
@@ -177,7 +178,9 @@ impl CacheStore for MemoryCacheStore {
         Box::pin(async move {
             self.entries
                 .write()
-                .expect("cache store lock poisoned")
+                .map_err(|_| {
+                    InternalServerErrorException::new(anyhow::anyhow!("cache store lock poisoned"))
+                })?
                 .remove(&key);
             Ok(())
         })
@@ -187,7 +190,9 @@ impl CacheStore for MemoryCacheStore {
         Box::pin(async move {
             self.entries
                 .write()
-                .expect("cache store lock poisoned")
+                .map_err(|_| {
+                    InternalServerErrorException::new(anyhow::anyhow!("cache store lock poisoned"))
+                })?
                 .clear();
             Ok(())
         })
@@ -258,10 +263,10 @@ impl Cache {
 }
 
 impl Injectable for Cache {
-    fn create(container: &Container) -> BoxFuture<'_, Self> {
+    fn create(container: &Container) -> BoxFuture<'_, crate::Result<Self>> {
         Box::pin(async move {
-            let store = container.resolve::<MemoryCacheStore>() as Arc<dyn CacheStore>;
-            Self::new(store)
+            let store = container.resolve::<MemoryCacheStore>()? as Arc<dyn CacheStore>;
+            Ok(Self::new(store))
         })
     }
 }

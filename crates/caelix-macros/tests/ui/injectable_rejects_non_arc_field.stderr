@@ -1,7 +1,5 @@
-error: custom attribute panicked
- --> tests/ui/injectable_rejects_non_arc_field.rs:5:1
+error: #[injectable] fields must be std::sync::Arc<T>
+ --> tests/ui/injectable_rejects_non_arc_field.rs:7:11
   |
-5 | #[injectable]
-  | ^^^^^^^^^^^^^
-  |
-  = help: message: #[injectable] fields must be std::sync::Arc<T>
+7 |     repo: Repo,
+  |           ^^^^

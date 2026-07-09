@@ -28,8 +28,8 @@ struct Service {
 fn injectable_macro_injects_contextual_logger() {
     let mut container = Container::new();
 
-    block_on(container.register::<Service>());
-    let service = container.resolve::<Service>();
+    block_on(container.register::<Service>()).unwrap();
+    let service = container.resolve::<Service>().unwrap();
 
     assert_eq!(service.logger.context(), "Service");
 }

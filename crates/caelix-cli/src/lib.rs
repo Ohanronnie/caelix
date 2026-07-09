@@ -272,7 +272,10 @@ fn run_application_watch(cwd: &Path, app_args: Vec<OsString>) -> Result<i32> {
         .map_err(CliError::SignalHandler)?;
     }
 
-    process.lock().expect("process mutex poisoned").start()?;
+    process
+        .lock()
+        .map_err(|_| CliError::Watcher("process mutex poisoned".into()))?
+        .start()?;
 
     let (tx, rx) = mpsc::channel();
     let mut debouncer = new_debouncer(Duration::from_millis(300), tx)
@@ -308,7 +311,10 @@ fn run_application_watch(cwd: &Path, app_args: Vec<OsString>) -> Result<i32> {
                     continue;
                 }
                 println!("Change detected. Restarting...");
-                process.lock().expect("process mutex poisoned").start()?;
+                process
+                    .lock()
+                    .map_err(|_| CliError::Watcher("process mutex poisoned".into()))?
+                    .start()?;
             }
             Ok(Err(errors)) => {
                 return Err(CliError::Watcher(format!("file watcher failed: {errors}")));
@@ -316,7 +322,7 @@ fn run_application_watch(cwd: &Path, app_args: Vec<OsString>) -> Result<i32> {
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 process
                     .lock()
-                    .expect("process mutex poisoned")
+                    .map_err(|_| CliError::Watcher("process mutex poisoned".into()))?
                     .reap_finished();
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -744,7 +750,7 @@ edition = "2024"
 
 [dependencies]
 actix-web = "4.14.0"
-caelix = "0.0.8"
+caelix = "0.0.9"
 serde = {{ version = "1.0.228", features = ["derive"] }}
 "#
     )
@@ -759,6 +765,7 @@ use {crate_name}::AppModule;
 async fn main() -> std::io::Result<()> {{
     Application::new::<AppModule>()
         .await
+        .map_err(|err| std::io::Error::other(err.message))?
         .listen("127.0.0.1:8080")
         .await
 }}
