@@ -1,6 +1,6 @@
 [package]
 name = "caelix-core"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2024"
 description = "Core primitives for the Caelix framework."
 license = "MIT"
