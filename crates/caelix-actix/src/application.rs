@@ -2,19 +2,73 @@ use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use actix_web::{
     App, HttpRequest, HttpResponse, HttpServer,
-    dev::Service,
+    body::{BodySize, MessageBody},
+    dev::{Service, ServiceResponse},
     error::{JsonPayloadError, PathError, QueryPayloadError},
+    http::header,
     web,
 };
 use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpException, HttpResponse as CaelixHttpResponse,
     IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException, ResponseBody,
     build_container, http_request_logging_enabled, log_application_started, log_http_request,
-    log_listening, log_module_routes, register_module_controllers, shutdown_module,
+    log_http_request_info, log_listening, log_module_routes, register_module_controllers,
+    shutdown_module,
 };
 use futures_util::StreamExt;
 
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AccessLogFormat {
+    Compact,
+    Info,
+}
+
+/// Configures Actix runtime logging for an [`Application`].
+///
+/// `Logging::default()` enables Caelix's asynchronous HTTP access log.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Logging {
+    access_log: bool,
+    access_log_format: AccessLogFormat,
+}
+
+impl Default for Logging {
+    fn default() -> Self {
+        Self {
+            access_log: true,
+            access_log_format: AccessLogFormat::Compact,
+        }
+    }
+}
+
+impl Logging {
+    /// Enables Actix-compatible detailed HTTP access logs.
+    ///
+    /// The output includes client address, request line and protocol, status,
+    /// response size, referrer, user agent, and duration.
+    pub fn info() -> Self {
+        Self {
+            access_log: true,
+            access_log_format: AccessLogFormat::Info,
+        }
+    }
+
+    /// Enables or disables HTTP access logging.
+    pub fn access_log(mut self, enabled: bool) -> Self {
+        self.access_log = enabled;
+        self
+    }
+
+    pub fn access_log_enabled(&self) -> bool {
+        self.access_log
+    }
+
+    fn access_log_format(&self) -> AccessLogFormat {
+        self.access_log_format
+    }
+}
 
 pub fn to_actix_response(response: CaelixHttpResponse) -> HttpResponse {
     // Caelix core uses http 1.x while Actix 4 still builds responses with http 0.2.
@@ -48,6 +102,7 @@ pub struct Application {
     shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, caelix_core::Result<()>>,
     body_limit: usize,
     workers: usize,
+    logging: Option<Logging>,
 }
 
 fn json_config(body_limit: usize) -> web::JsonConfig {
@@ -128,6 +183,55 @@ async fn not_found(req: HttpRequest) -> HttpResponse {
     )
 }
 
+fn log_access_request<B: MessageBody>(
+    format: AccessLogFormat,
+    response: &ServiceResponse<B>,
+    elapsed: std::time::Duration,
+) {
+    let request = response.request();
+
+    match format {
+        AccessLogFormat::Compact => log_http_request(
+            request.method().as_str(),
+            request.path(),
+            response.status().as_u16(),
+            elapsed,
+        ),
+        AccessLogFormat::Info => {
+            let path_and_query = if request.query_string().is_empty() {
+                request.path().to_string()
+            } else {
+                format!("{}?{}", request.path(), request.query_string())
+            };
+            let response_size = match response.response().body().size() {
+                BodySize::None => Some(0),
+                BodySize::Sized(size) => Some(size),
+                BodySize::Stream => None,
+            };
+
+            log_http_request_info(
+                request.connection_info().peer_addr().unwrap_or("-"),
+                request.method().as_str(),
+                &path_and_query,
+                &format!("{:?}", request.version()),
+                response.status().as_u16(),
+                response_size,
+                request_header(request, &header::REFERER).as_str(),
+                request_header(request, &header::USER_AGENT).as_str(),
+                elapsed,
+            );
+        }
+    }
+}
+
+fn request_header(request: &HttpRequest, name: &header::HeaderName) -> String {
+    request
+        .headers()
+        .get(name)
+        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
+        .unwrap_or_else(|| "-".to_string())
+}
+
 pub(crate) fn configure_caelix_services(
     cfg: &mut web::ServiceConfig,
     body_limit: usize,
@@ -153,6 +257,7 @@ impl Application {
             shutdown_fn: |container| Box::pin(async move { shutdown_module::<M>(container).await }),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
             workers: num_cpus::get(),
+            logging: None,
         })
     }
 
@@ -163,6 +268,16 @@ impl Application {
 
     pub fn workers(mut self, workers: usize) -> Self {
         self.workers = workers.max(1);
+        self
+    }
+
+    /// Configures runtime logging for this application.
+    ///
+    /// An explicit configuration takes precedence over `CAELIX_HTTP_LOG` and
+    /// `CAELIX_ACCESS_LOG`. When omitted, those environment variables remain
+    /// supported for backwards compatibility.
+    pub fn logging(mut self, logging: Logging) -> Self {
+        self.logging = Some(logging);
         self
     }
 
@@ -181,43 +296,65 @@ impl Application {
         let body_limit = self.body_limit;
         let workers = self.workers;
         let addr = addr.to_string();
+        let logging = self.logging.unwrap_or(Logging {
+            access_log: http_request_logging_enabled(),
+            access_log_format: AccessLogFormat::Compact,
+        });
 
         log_listening(&addr);
 
-        let server = match HttpServer::new(move || {
-            App::new()
-                .app_data(web::Data::from(container.clone()))
-                .wrap_fn(move |req, service| {
-                    let request_log_start = http_request_logging_enabled().then(Instant::now);
-                    let future = service.call(req);
+        let result = if logging.access_log_enabled() {
+            let logging_container = container.clone();
+            let access_log_format = logging.access_log_format();
+            let server = match HttpServer::new(move || {
+                App::new()
+                    .app_data(web::Data::from(logging_container.clone()))
+                    .wrap_fn(move |req, service| {
+                        let request_log_start = Instant::now();
+                        let future = service.call(req);
 
-                    async move {
-                        let response = future.await?;
-                        if let Some(start) = request_log_start {
-                            let status = response.status().as_u16();
-                            log_http_request(
-                                response.request().method().as_str(),
-                                response.request().path(),
-                                status,
-                                start.elapsed(),
+                        async move {
+                            let response = future.await?;
+                            log_access_request(
+                                access_log_format,
+                                &response,
+                                request_log_start.elapsed(),
                             );
+                            Ok(response)
                         }
-                        Ok(response)
-                    }
-                })
-                .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn))
-        })
-        .workers(workers)
-        .bind(addr.as_str())
-        {
-            Ok(server) => server.run(),
-            Err(err) => {
-                let _ = self.shutdown().await;
-                return Err(err);
-            }
+                    })
+                    .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn))
+            })
+            .workers(workers)
+            .bind(addr.as_str())
+            {
+                Ok(server) => server.run(),
+                Err(err) => {
+                    let _ = self.shutdown().await;
+                    return Err(err);
+                }
+            };
+
+            server.await
+        } else {
+            let server = match HttpServer::new(move || {
+                App::new()
+                    .app_data(web::Data::from(container.clone()))
+                    .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn))
+            })
+            .workers(workers)
+            .bind(addr.as_str())
+            {
+                Ok(server) => server.run(),
+                Err(err) => {
+                    let _ = self.shutdown().await;
+                    return Err(err);
+                }
+            };
+
+            server.await
         };
 
-        let result = server.await;
         self.shutdown().await.map_err(to_io_error)?;
         result
     }
@@ -379,6 +516,19 @@ mod tests {
         let service = app.container.resolve::<HealthService>().unwrap();
 
         assert_eq!(service.status, "ok");
+    }
+
+    #[actix_web::test]
+    async fn application_accepts_explicit_logging_configuration() {
+        let app = Application::new::<TestModule>()
+            .await
+            .unwrap()
+            .logging(Logging::default().access_log(false));
+
+        assert_eq!(app.logging, Some(Logging::default().access_log(false)));
+        assert!(!Logging::default().access_log(false).access_log_enabled());
+        assert!(Logging::default().access_log_enabled());
+        assert_eq!(Logging::info().access_log_format(), AccessLogFormat::Info);
     }
 
     #[actix_web::test]

@@ -1,6 +1,6 @@
 [package]
 name = "caelix"
-version = "0.0.9"
+version = "0.0.10"
 edition = "2024"
 description = "Public Caelix framework crate."
 license = "MIT"
@@ -12,8 +12,8 @@ sqlx = ["caelix-core/sqlx"]
 validator = ["caelix-core/validator"]
 
 [dependencies]
-caelix-actix = { path = "../caelix-actix", version = "0.0.9", optional = true }
-caelix-core = { path = "../caelix-core", version = "0.0.6" }
+caelix-actix = { path = "../caelix-actix", version = "0.0.10", optional = true }
+caelix-core = { path = "../caelix-core", version = "0.0.7" }
 caelix-macros = { path = "../caelix-macros", version = "0.0.5" }
 
 [lib]

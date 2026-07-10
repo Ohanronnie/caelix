@@ -7,5 +7,5 @@ mod test_app;
 #[doc(hidden)]
 pub use actix_web as __actix_web;
 
-pub use application::{Application, to_actix_response};
+pub use application::{Application, Logging, to_actix_response};
 pub use test_app::{TestApplication, TestApplicationBuilder, TestRequestBuilder, TestResponse};

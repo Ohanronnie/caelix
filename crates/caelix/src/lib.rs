@@ -16,8 +16,8 @@ pub use caelix_actix::__actix_web;
 
 #[cfg(feature = "actix")]
 pub use caelix_actix::{
-    Application, TestApplication, TestApplicationBuilder, TestRequestBuilder, TestResponse,
-    to_actix_response,
+    Application, Logging, TestApplication, TestApplicationBuilder, TestRequestBuilder,
+    TestResponse, to_actix_response,
 };
 
 pub mod prelude {

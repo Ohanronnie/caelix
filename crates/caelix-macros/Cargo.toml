@@ -10,8 +10,8 @@ proc-macro = true
 
 [dev-dependencies]
 actix-web = "4.14.0"
-caelix-actix = { path = "../caelix-actix", version = "0.0.9" }
-caelix-core = { path = "../caelix-core", version = "0.0.6" }
+caelix-actix = { path = "../caelix-actix", version = "0.0.10" }
+caelix-core = { path = "../caelix-core", version = "0.0.7" }
 serde = { version = "1.0.228", features = ["derive"] }
 trybuild = "1.0.117"
 

@@ -1,6 +1,6 @@
 [package]
 name = "caelix-core"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2024"
 description = "Core primitives for the Caelix framework."
 license = "MIT"
@@ -16,6 +16,7 @@ validator = ["dep:validator"]
 [dependencies]
 anyhow = "1.0.103"
 bytes = "1.10.1"
+crossbeam-channel = "0.5.16"
 futures-core = "0.3.31"
 futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
 http = "1.4.2"

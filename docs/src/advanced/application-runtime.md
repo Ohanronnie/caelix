@@ -51,7 +51,33 @@ Application::new::<AppModule>()
 
 ## Logging
 
-The Actix adapter logs startup timing, the route table, and listening address. Per-request access logging is disabled by default; set `CAELIX_HTTP_LOG=1` or `CAELIX_ACCESS_LOG=1` to log request method/path/status/duration.
+The Actix adapter logs startup timing, the route table, and listening address. Enable per-request access logging explicitly on the application:
+
+```rust
+use caelix::{Application, Logging};
+
+Application::new::<AppModule>()
+    .await?
+    .logging(Logging::default())
+    .listen("127.0.0.1:3000")
+    .await?;
+```
+
+`Logging::default()` enables the access log. Use `.logging(Logging::default().access_log(false))` to explicitly disable it. Application configuration takes precedence over `CAELIX_HTTP_LOG` and `CAELIX_ACCESS_LOG`; those variables remain as a backwards-compatible fallback when `.logging(...)` is omitted. When access logging is disabled, Caelix does not install the access-log middleware, so requests do not pay its timing or logging overhead.
+
+Use `Logging::info()` for the Actix-compatible detailed format:
+
+```rust
+Application::new::<AppModule>()
+    .await?
+    .logging(Logging::info())
+    .listen("127.0.0.1:3000")
+    .await?;
+```
+
+It logs the peer address, request line and HTTP protocol, response status and body size, `Referer`, `User-Agent`, and duration. Unknown streaming response sizes are logged as `-`.
+
+When access logging is enabled, request workers enqueue compact events to a dedicated, buffered writer thread instead of waiting for stdout or stderr. The queue holds 65,536 entries; when its output sink cannot keep up, new access-log entries are dropped rather than slowing requests. `dropped_http_request_logs()` exposes the drop count for monitoring, and a warning is emitted to stderr at most once per second while entries are being dropped.
 
 `Container::new()` initializes framework logging. The default `Logger` provider is available in every container, and `#[injectable]` gives `Arc<Logger>` fields a logger scoped to the provider type.
 

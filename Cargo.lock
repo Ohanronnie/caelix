@@ -372,7 +372,7 @@ dependencies = [
 
 [[package]]
 name = "caelix"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "actix-web",
  "caelix-actix",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-actix"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "actix-http",
  "actix-web",
@@ -415,10 +415,11 @@ dependencies = [
 
 [[package]]
 name = "caelix-core"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "anyhow",
  "bytes",
+ "crossbeam-channel",
  "futures-core",
  "futures-util",
  "http 1.4.2",
