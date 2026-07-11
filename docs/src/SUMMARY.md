@@ -29,6 +29,7 @@
 - [WebSockets](advanced/websockets.md)
 - [Service-Level Cache](advanced/cache.md)
 - [Application Runtime](advanced/application-runtime.md)
+- [Axum and Tower](advanced/axum.md)
 
 # Recipes
 

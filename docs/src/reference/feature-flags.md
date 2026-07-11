@@ -14,6 +14,29 @@ The default features include:
 
 Generated applications depend directly on `caelix`; they do not need additional Caelix package dependencies.
 
+## Axum backend
+
+Actix remains the default backend. To use Axum, disable defaults and select `axum`; `actix` and `axum` are mutually exclusive.
+
+```toml
+[dependencies]
+caelix = { version = "0.0.11", default-features = false, features = ["axum", "sqlx", "validator"] }
+```
+
+The same `#[controller]`, route, extractor, guard, interceptor, `#[gateway]`, and
+`#[caelix::main]` source works on either backend.
+
+## Socket.IO backend extension
+
+The `socketio` feature selects Axum automatically and is structurally unavailable with the
+default Actix-only build. It exposes `caelix::socket_io` and
+`Application::with_socket_io::<AppModule>()`.
+
+```toml
+[dependencies]
+caelix = { version = "0.0.11", default-features = false, features = ["socketio"] }
+```
+
 Example generated dependencies:
 
 ```toml

@@ -34,6 +34,12 @@ caelix run --watch -- --port 4000 --verbose
 caelix new demo-api
 ```
 
+Pass `--backend axum` to generate a project that opts into Caelix's Axum adapter and includes `tower-http` for native Tower layers:
+
+```sh
+caelix new demo-api --backend axum
+```
+
 The command creates:
 
 - `Cargo.toml`
@@ -42,11 +48,11 @@ The command creates:
 - `src/lib.rs`
 - `src/app.rs`
 
-The generated `Cargo.toml` uses `caelix = "0.0.9"` from crates.io.
+The default generated `Cargo.toml` uses `caelix = "0.0.12"` from crates.io and the Actix backend. The Axum option disables default features and enables `axum` instead.
 
 The generated `AGENTS.md` gives AI coding agents the app-level Caelix conventions: explicit module registration, provider/controller registration, injectable field shape, service-level cache behavior, and the usual `cargo test` check.
 
-Generated `src/main.rs` starts the Actix adapter:
+Generated `src/main.rs` starts the selected adapter:
 
 ```rust
 use caelix::Application;

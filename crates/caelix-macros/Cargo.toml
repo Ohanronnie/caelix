@@ -1,6 +1,6 @@
 [package]
 name = "caelix-macros"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2024"
 description = "Procedural macros for the Caelix framework."
 license = "MIT"
@@ -8,10 +8,15 @@ license = "MIT"
 [lib]
 proc-macro = true
 
+[features]
+default = ["actix"]
+actix = []
+axum = []
+
 [dev-dependencies]
 actix-web = "4.14.0"
-caelix-actix = { path = "../caelix-actix", version = "0.0.11" }
-caelix-core = { path = "../caelix-core", version = "0.0.8" }
+caelix-actix = { path = "../caelix-actix", version = "0.0.12" }
+caelix-core = { path = "../caelix-core", version = "0.0.9" }
 serde = { version = "1.0.228", features = ["derive"] }
 trybuild = "1.0.117"
 

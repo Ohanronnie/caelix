@@ -136,6 +136,9 @@ pub(crate) fn configure_gateway_routes<M: Module + 'static>(
     max_size: usize,
 ) {
     visit_module_gateways::<M>(&mut |definition| {
+        if !definition.is_websocket() {
+            return;
+        }
         let path = definition.path;
         let gateway = definition
             .resolve(&container)
@@ -474,7 +477,7 @@ mod tests {
         http::{StatusCode as ActixStatus, header},
         test,
     };
-    use caelix_core::{Injectable, ModuleMetadata, build_container};
+    use caelix_core::{Gateway, GatewayDef, Injectable, ModuleMetadata, build_container};
 
     #[actix_web::test]
     async fn protocol_errors_map_by_typed_variant() {
@@ -509,9 +512,6 @@ mod tests {
         }
     }
     impl WebSocketGateway for TestGateway {
-        fn path() -> &'static str {
-            "/socket"
-        }
         fn on_text(
             &self,
             session: Arc<WebSocketSession>,
@@ -552,6 +552,11 @@ mod tests {
             Box::pin(async move {
                 self.close_frames.lock().unwrap().push(frame);
             })
+        }
+    }
+    impl Gateway for TestGateway {
+        fn definition() -> GatewayDef {
+            GatewayDef::websocket::<Self>("/socket")
         }
     }
     struct TestModule;

@@ -229,21 +229,73 @@ pub struct GatewayDef {
     pub path: &'static str,
     pub type_id: TypeId,
     provider: ProviderDef,
-    resolve_fn: fn(&Container) -> crate::Result<Arc<dyn WebSocketGateway>>,
+    kind: GatewayKind,
+}
+
+enum GatewayKind {
+    WebSocket {
+        resolve_fn: fn(&Container) -> crate::Result<Arc<dyn WebSocketGateway>>,
+    },
+    SocketIo {
+        register_fn: fn(&Container, &dyn Any) -> crate::Result<()>,
+    },
 }
 
 impl GatewayDef {
-    pub fn of<G: WebSocketGateway>() -> Self {
+    pub fn websocket<G: WebSocketGateway>(path: &'static str) -> Self {
         Self {
-            path: G::path(),
+            path,
             type_id: TypeId::of::<G>(),
             provider: ProviderDef::of::<G>(),
-            resolve_fn: |container| Ok(container.resolve::<G>()? as Arc<dyn WebSocketGateway>),
+            kind: GatewayKind::WebSocket {
+                resolve_fn: |container| Ok(container.resolve::<G>()? as Arc<dyn WebSocketGateway>),
+            },
         }
     }
-    pub fn resolve(&self, container: &Container) -> crate::Result<Arc<dyn WebSocketGateway>> {
-        (self.resolve_fn)(container)
+
+    /// Creates metadata for an optional Socket.IO gateway without coupling
+    /// `caelix-core` to the Axum-only Socket.IO crate.
+    #[doc(hidden)]
+    pub fn socket_io<G: Injectable>(
+        path: &'static str,
+        register_fn: fn(&Container, &dyn Any) -> crate::Result<()>,
+    ) -> Self {
+        Self {
+            path,
+            type_id: TypeId::of::<G>(),
+            provider: ProviderDef::of::<G>(),
+            kind: GatewayKind::SocketIo { register_fn },
+        }
     }
+
+    pub fn resolve(&self, container: &Container) -> crate::Result<Arc<dyn WebSocketGateway>> {
+        match self.kind {
+            GatewayKind::WebSocket { resolve_fn } => resolve_fn(container),
+            GatewayKind::SocketIo { .. } => Err(crate::exception::startup_error(format!(
+                "Socket.IO gateway {} cannot be mounted by an RFC 6455 application",
+                self.path
+            ))),
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn is_websocket(&self) -> bool {
+        matches!(self.kind, GatewayKind::WebSocket { .. })
+    }
+
+    #[doc(hidden)]
+    pub fn register_socket_io(&self, container: &Container, handle: &dyn Any) -> crate::Result<()> {
+        match self.kind {
+            GatewayKind::WebSocket { .. } => Ok(()),
+            GatewayKind::SocketIo { register_fn } => register_fn(container, handle),
+        }
+    }
+}
+
+/// Metadata supplied by `#[gateway("/path")]`.
+pub trait Gateway: Injectable {
+    #[doc(hidden)]
+    fn definition() -> GatewayDef;
 }
 
 impl ControllerDef {
@@ -333,8 +385,8 @@ impl ModuleMetadata {
         self
     }
 
-    pub fn gateway<G: WebSocketGateway>(mut self) -> Self {
-        self.gateways.push(GatewayDef::of::<G>());
+    pub fn gateway<G: Gateway>(mut self) -> Self {
+        self.gateways.push(G::definition());
         self
     }
 
@@ -518,6 +570,25 @@ pub async fn build_container<M: Module>() -> crate::Result<Container> {
     build_container_with_overrides::<M>(ProviderOverrides::new()).await
 }
 
+/// Builds a container after registering framework-owned instance providers.
+///
+/// Runtime adapters use this for handles that must be injectable while normal
+/// module providers are being constructed, but which cannot implement
+/// `Injectable` because their construction also produces runtime state.
+#[doc(hidden)]
+pub async fn build_container_with_setup<M: Module>(
+    setup: impl FnOnce(&mut Container),
+) -> crate::Result<Container> {
+    crate::log_application_starting();
+    let mut container = Container::new();
+    setup(&mut container);
+    register_module::<M>(&mut container).await?;
+    validate_module_providers::<M>(&container)?;
+    validate_gateway_paths::<M>()?;
+    bootstrap_module::<M>(&container).await?;
+    Ok(container)
+}
+
 pub async fn build_container_with_overrides<M: Module>(
     overrides: ProviderOverrides,
 ) -> crate::Result<Container> {
@@ -536,13 +607,13 @@ fn validate_gateway_paths<M: Module>() -> crate::Result<()> {
     let mut paths = std::collections::HashSet::new();
     let mut duplicate = None;
     visit_module_gateways::<M>(&mut |gateway| {
-        if !paths.insert(gateway.path) {
+        if !paths.insert((gateway.path, gateway.is_websocket())) {
             duplicate = Some(gateway.path);
         }
     });
     if let Some(path) = duplicate {
         return Err(crate::exception::startup_error(format!(
-            "duplicate websocket gateway path: {path}"
+            "duplicate gateway path: {path}"
         )));
     }
     Ok(())
@@ -614,7 +685,7 @@ fn visit_module_gateway_defs<M: Module>(
 #[cfg(test)]
 mod gateway_tests {
     use super::*;
-    use crate::{Result, WebSocketGateway};
+    use crate::{Gateway, Result, WebSocketGateway};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct FirstGateway;
@@ -629,14 +700,16 @@ mod gateway_tests {
             Box::pin(async { Ok(Self) })
         }
     }
-    impl WebSocketGateway for FirstGateway {
-        fn path() -> &'static str {
-            "/duplicate"
+    impl WebSocketGateway for FirstGateway {}
+    impl Gateway for FirstGateway {
+        fn definition() -> GatewayDef {
+            GatewayDef::websocket::<Self>("/duplicate")
         }
     }
-    impl WebSocketGateway for SecondGateway {
-        fn path() -> &'static str {
-            "/duplicate"
+    impl WebSocketGateway for SecondGateway {}
+    impl Gateway for SecondGateway {
+        fn definition() -> GatewayDef {
+            GatewayDef::websocket::<Self>("/duplicate")
         }
     }
 
@@ -655,7 +728,7 @@ mod gateway_tests {
             Ok(_) => panic!("duplicate gateway paths should fail"),
             Err(error) => error,
         };
-        assert!(error.message.contains("duplicate websocket gateway path"));
+        assert!(error.message.contains("duplicate gateway path"));
     }
 
     static BOOTSTRAPS: AtomicUsize = AtomicUsize::new(0);
@@ -685,9 +758,10 @@ mod gateway_tests {
             })
         }
     }
-    impl WebSocketGateway for DualRegisteredGateway {
-        fn path() -> &'static str {
-            "/dual"
+    impl WebSocketGateway for DualRegisteredGateway {}
+    impl Gateway for DualRegisteredGateway {
+        fn definition() -> GatewayDef {
+            GatewayDef::websocket::<Self>("/dual")
         }
     }
     struct DualRegistrationModule;

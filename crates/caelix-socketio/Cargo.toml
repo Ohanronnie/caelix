@@ -1,0 +1,11 @@
+[package]
+name = "caelix-socketio"
+version = "0.0.12"
+edition = "2024"
+description = "Socket.IO integration for the Axum Caelix runtime."
+license = "MIT"
+
+[dependencies]
+caelix-core = { path = "../caelix-core", version = "0.0.9" }
+serde = { version = "1.0.228", features = ["derive"] }
+socketioxide = "=0.18.5"

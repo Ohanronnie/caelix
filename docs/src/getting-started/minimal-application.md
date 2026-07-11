@@ -1,6 +1,6 @@
 # Minimal Application
 
-A minimal app needs a module and an Actix entry point.
+A minimal app needs a module and an entry point for the selected backend (Actix is the default; Axum is enabled with the `axum` feature).
 
 ```rust
 use caelix::{Module, ModuleMetadata};

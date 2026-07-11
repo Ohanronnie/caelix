@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use heck::{ToKebabCase, ToPascalCase, ToSnakeCase};
 use notify::RecursiveMode;
 use notify_debouncer_mini::new_debouncer;
@@ -107,6 +107,15 @@ enum Command {
 #[derive(Args, Debug)]
 struct NewArgs {
     name: String,
+    /// Runtime adapter for the generated application
+    #[arg(long, value_enum, default_value_t = BackendChoice::Actix)]
+    backend: BackendChoice,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum BackendChoice {
+    Actix,
+    Axum,
 }
 
 #[derive(Args, Debug)]
@@ -614,7 +623,7 @@ fn generate_new(args: NewArgs, cwd: &Path) -> Result<String> {
         source,
     })?;
 
-    let cargo_toml = render_app_cargo_toml(&package_name);
+    let cargo_toml = render_app_cargo_toml_for_backend(&package_name, args.backend);
     create_file(target_dir.join("Cargo.toml"), &cargo_toml)?;
     create_file(target_dir.join("AGENTS.md"), render_agents_md())?;
     create_file(target_dir.join("src/main.rs"), &render_main_rs(&crate_name))?;
@@ -742,6 +751,16 @@ fn package_name_for_path(path: &Path, fallback: &str) -> Result<String> {
 }
 
 pub fn render_app_cargo_toml(package_name: &str) -> String {
+    render_app_cargo_toml_for_backend(package_name, BackendChoice::Actix)
+}
+
+fn render_app_cargo_toml_for_backend(package_name: &str, backend: BackendChoice) -> String {
+    let backend_dependencies = match backend {
+        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.12\"",
+        BackendChoice::Axum => {
+            "caelix = { version = \"0.0.12\", default-features = false, features = [\"axum\", \"sqlx\", \"validator\"] }\ntower-http = { version = \"0.6\", features = [\"trace\", \"compression-full\"] }"
+        }
+    };
     format!(
         r#"[package]
 name = "{package_name}"
@@ -749,8 +768,7 @@ version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-actix-web = "4.14.0"
-caelix = "0.0.9"
+{backend_dependencies}
 serde = {{ version = "1.0.228", features = ["derive"] }}
 "#
     )
@@ -800,7 +818,7 @@ For fuller documentation, refer to https://ohanronnie.github.io/caelix/.
 
 ## App Structure
 
-- `src/main.rs` starts the Actix runtime with `Application::new::<AppModule>()`.
+- `src/main.rs` starts the selected Caelix runtime with `Application::new::<AppModule>()`.
 - `src/lib.rs` exports the root `AppModule` and should declare feature modules with `pub mod feature_name;`.
 - `src/app.rs` owns the root `AppModule`.
 - Feature folders usually contain `mod.rs`, `service.rs`, and `controller.rs`.

@@ -1,4 +1,4 @@
-use crate::{BoxFuture, HttpException, Injectable, Result};
+use crate::{BoxFuture, Gateway, HttpException, Injectable, Result};
 use bytes::Bytes;
 use std::{
     collections::BTreeMap,
@@ -223,9 +223,6 @@ impl WebSocketSession {
 }
 
 pub trait WebSocketGateway: Injectable {
-    fn path() -> &'static str
-    where
-        Self: Sized;
     fn on_connect(
         &self,
         _session: Arc<WebSocketSession>,
@@ -258,6 +255,14 @@ pub trait WebSocketGateway: Injectable {
         Box::pin(async {})
     }
 }
+
+/// Marker implemented by [`#[gateway]`](https://docs.rs/caelix) for RFC 6455
+/// gateways. It separates path metadata from the transport callbacks so the
+/// same `ModuleMetadata::gateway` registration API can also support optional
+/// transports such as Socket.IO.
+pub trait RegisteredWebSocketGateway: WebSocketGateway + Gateway {}
+
+impl<T: WebSocketGateway + Gateway> RegisteredWebSocketGateway for T {}
 
 #[cfg(test)]
 mod tests {

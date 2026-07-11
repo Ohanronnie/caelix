@@ -100,3 +100,16 @@ pub async fn find(&self, #[param] Some(id): Option<i64>) -> Result<String> {
 ```
 
 Extractor arguments must be simple identifiers because the macro moves extracted values into the controller method call.
+
+## `#[gateway("/path")]`
+
+Decorates a WebSocket or Socket.IO gateway implementation and supplies the explicit path metadata
+used by `ModuleMetadata::gateway::<Gateway>()`.
+
+For RFC 6455 sockets, place it on `impl WebSocketGateway for Gateway`; callback methods use the
+`WebSocketGateway` trait. This works with both Actix and Axum.
+
+With the Axum-only `socketio` feature, place it on an inherent implementation and annotate each
+async event method with `#[on_message("event")]`. Such methods accept either `payload: T` or
+`socket: SocketRef, payload: T` and return `Result<Reply>`; successful replies become Socket.IO
+acks, while failures also emit `"error"`.

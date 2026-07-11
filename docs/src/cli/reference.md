@@ -6,6 +6,8 @@
 caelix new <name>
 ```
 
+Pass `--backend axum` to generate an Axum-backed app. The default is Actix.
+
 Creates a new Caelix application directory named `<name>`.
 
 The command creates `Cargo.toml`, `AGENTS.md`, `src/main.rs`, `src/lib.rs`, and `src/app.rs`. The package name comes from the target directory and is converted to kebab case.

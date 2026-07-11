@@ -1,6 +1,6 @@
 # Application Runtime
 
-`caelix` provides `Application` for production and `TestApplication` for in-process HTTP tests (see [Testing](../recipes/testing.md)).
+`caelix` provides `Application` for production and, with the default Actix backend, `TestApplication` for in-process HTTP tests (see [Testing](../recipes/testing.md)). The Axum adapter is documented in [Axum and Tower](axum.md).
 
 ```rust
 use caelix::Application;

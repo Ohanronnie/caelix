@@ -3,9 +3,23 @@
 pub use caelix_core::*;
 // Explicit re-exports so `test` / `main` are not pulled into `prelude` (which
 // would shadow Rust's `#[test]`).
-pub use caelix_macros::{controller, guard, injectable};
+pub use caelix_macros::{controller, gateway, guard, injectable, on_message};
 
-#[cfg(feature = "actix")]
+/// RFC 6455 WebSocket gateway APIs.
+///
+/// The same types remain re-exported at the crate root for backwards
+/// compatibility; prefer this namespace for new gateway code.
+pub mod websocket {
+    pub use caelix_core::{
+        WebSocketCloseCode, WebSocketCloseFrame, WebSocketError, WebSocketGateway,
+        WebSocketRequest, WebSocketSession,
+    };
+}
+
+#[cfg(all(feature = "actix", feature = "axum"))]
+compile_error!("Caelix backends `actix` and `axum` are mutually exclusive; select exactly one");
+
+#[cfg(any(feature = "actix", feature = "axum"))]
 pub use caelix_macros::{main, test};
 
 /// Hidden Actix re-export for macro-generated code. Prefer `caelix` public APIs
@@ -20,7 +34,23 @@ pub use caelix_actix::{
     TestResponse, to_actix_response,
 };
 
+/// Hidden Axum and Tokio re-exports for generated controller and runtime code.
+#[cfg(feature = "axum")]
+#[doc(hidden)]
+pub use caelix_axum::{__axum, __tokio};
+
+#[cfg(feature = "axum")]
+pub use caelix_axum::{
+    Application, AxumRequestInfo, AxumRouterBuilder, DEFAULT_BODY_LIMIT_BYTES, to_axum_response,
+};
+
+/// Socket.IO APIs, available only with the Axum-selecting `socketio` feature.
+#[cfg(feature = "socketio")]
+pub mod socket_io {
+    pub use caelix_socketio::*;
+}
+
 pub mod prelude {
     pub use caelix_core::*;
-    pub use caelix_macros::{controller, guard, injectable};
+    pub use caelix_macros::{controller, gateway, guard, injectable, on_message};
 }

@@ -3,6 +3,8 @@ members = [
     "crates/caelix-core",
     "crates/caelix",
     "crates/caelix-actix",
+    "crates/caelix-axum",
+    "crates/caelix-socketio",
     "crates/caelix-macros",
     "crates/caelix-cli",
 ]

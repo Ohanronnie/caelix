@@ -18,7 +18,7 @@ fn new_creates_application_structure_with_crates_io_dependency() {
     assert!(output.contains("Created Caelix application `demo-api`"));
     assert!(cargo_toml.contains("edition = \"2024\""));
     assert!(!cargo_toml.contains("[workspace]"));
-    assert!(cargo_toml.contains("caelix = \"0.0.9\""));
+    assert!(cargo_toml.contains("caelix = \"0.0.12\""));
     assert!(!cargo_toml.contains("path = "));
     assert!(!cargo_toml.contains("caelix-core"));
     assert!(!cargo_toml.contains("caelix-actix"));
@@ -39,6 +39,22 @@ fn new_creates_application_structure_with_crates_io_dependency() {
     assert_eq!(lib_rs, "pub mod app;\n\npub use app::AppModule;\n");
     assert!(app_rs.contains("use caelix::{Module, ModuleMetadata};"));
     assert!(app_rs.contains("ModuleMetadata::new()"));
+}
+
+#[test]
+fn new_with_axum_backend_enables_the_axum_feature() {
+    let tmp = tempdir().unwrap();
+    caelix_cli::run_from(
+        ["caelix", "new", "demo-api", "--backend", "axum"],
+        tmp.path(),
+    )
+    .unwrap();
+    let cargo_toml = fs::read_to_string(tmp.path().join("demo-api/Cargo.toml")).unwrap();
+
+    assert!(cargo_toml.contains("default-features = false"));
+    assert!(cargo_toml.contains("features = [\"axum\", \"sqlx\", \"validator\"]"));
+    assert!(cargo_toml.contains("tower-http"));
+    assert!(!cargo_toml.contains("actix-web"));
 }
 
 #[test]

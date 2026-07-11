@@ -1,0 +1,25 @@
+[package]
+name = "caelix-axum"
+version = "0.0.12"
+edition = "2024"
+description = "Axum runtime adapter for Caelix."
+license = "MIT"
+
+[features]
+socketio = ["dep:caelix-socketio"]
+
+[dependencies]
+axum = { version = "0.8.8", features = ["ws"] }
+bytes = "1.10.1"
+caelix-core = { path = "../caelix-core", version = "0.0.9" }
+caelix-socketio = { path = "../caelix-socketio", version = "0.0.12", optional = true }
+futures-util = { version = "0.3.31", default-features = false, features = ["std", "sink"] }
+http = "1.4.2"
+tokio = { version = "1.47.1", features = ["macros", "net", "rt", "rt-multi-thread", "signal"] }
+tower = "0.5.3"
+uuid = { version = "1.19.0", features = ["v4"] }
+
+[dev-dependencies]
+http-body-util = "0.1.3"
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.6.8", features = ["compression-full", "trace"] }
