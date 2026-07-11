@@ -9,7 +9,7 @@ Caelix is a Rust workspace for a NestJS-style backend framework:
 - `crates/caelix-core`: framework primitives: DI container, modules, providers, controllers, responses, exceptions, guards, interceptors, events, request context, logging, and service-level cache.
 - `crates/caelix-macros`: proc macros: `#[injectable]`, `#[guard]`, and `#[controller("...")]`.
 - `crates/caelix-actix`: Actix Web runtime integration and `Application`.
-- `crates/caelix-axum`: Axum runtime integration and Tower-layer escape hatch.
+- `crates/caelix-axum`: Axum runtime integration, in-process `TestApplication`, and Tower-layer escape hatch.
 - `crates/caelix`: public framework facade that re-exports core and macros, plus exactly one runtime behind the `actix` (default) or `axum` feature.
 - `crates/caelix-cli`: project/code generation CLI.
 - `docs/src`: mdBook documentation. Update docs when changing public behavior.
@@ -100,7 +100,7 @@ Do not add automatic HTTP response caching. Users can implement response caching
 Most users should depend on `caelix`:
 
 - `caelix` re-exports `caelix_core::*` and `caelix_macros::*`.
-- With feature `actix`, it exports `Application`, `TestApplication`, `main`, and `to_actix_response`; with feature `axum`, it exports `Application`, `main`, `to_axum_response`, and `AxumRouterBuilder`.
+- With feature `actix`, it exports `Application`, `TestApplication`, `main`, and `to_actix_response`; with feature `axum`, it exports `Application`, `TestApplication`, `main`, `to_axum_response`, and `AxumRouterBuilder`.
 - `#[caelix::main]` / `#[caelix::test]` and generated controllers expand through hidden runtime re-exports, so apps need only a `caelix` dependency for runtime macros and controller code.
 - `caelix::prelude::*` exports core and macros (not `test`/`main`, so Rust’s `#[test]` is not shadowed).
 
@@ -108,7 +108,7 @@ Inside generated macro code, paths intentionally use `caelix::...`; keep that fa
 
 ## Tests And Checks
 
-App authors integration-test modules with `TestApplication` (Actix feature):
+App authors integration-test modules with `TestApplication` on either backend:
 
 ```rust
 #[caelix::test]

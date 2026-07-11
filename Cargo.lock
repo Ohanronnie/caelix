@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "caelix"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "actix-web",
  "caelix-actix",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-axum"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "axum",
  "bytes",
@@ -502,6 +502,8 @@ dependencies = [
  "futures-util",
  "http 1.4.2",
  "http-body-util",
+ "serde",
+ "serde_json",
  "tokio",
  "tower",
  "tower-http",

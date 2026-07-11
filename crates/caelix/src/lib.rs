@@ -41,7 +41,8 @@ pub use caelix_axum::{__axum, __tokio};
 
 #[cfg(feature = "axum")]
 pub use caelix_axum::{
-    Application, AxumRequestInfo, AxumRouterBuilder, DEFAULT_BODY_LIMIT_BYTES, to_axum_response,
+    Application, AxumRequestInfo, AxumRouterBuilder, DEFAULT_BODY_LIMIT_BYTES, TestApplication,
+    TestApplicationBuilder, TestRequestBuilder, TestResponse, to_axum_response,
 };
 
 /// Socket.IO APIs, available only with the Axum-selecting `socketio` feature.

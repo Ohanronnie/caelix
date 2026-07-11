@@ -24,7 +24,7 @@ You can also use `build_container::<AppModule>()` or `build_container_with_overr
 
 ## Integration tests with `TestApplication`
 
-`TestApplication` builds the same container and route table as production, then serves requests through Actix's in-memory test service (no TCP listener).
+`TestApplication` builds the same container and route table as production, then serves requests through the selected runtime's in-memory service (no TCP listener). The API is the same when the Actix or Axum backend is selected.
 
 ```rust
 use caelix::{StatusCode, TestApplication};
@@ -47,7 +47,10 @@ async fn should_create_user() -> caelix::Result<()> {
 }
 ```
 
-`#[caelix::test]` runs the Actix runtime (equivalent to `#[actix_web::test]`). Prefer it for any test that uses `TestApplication`. It expands through Caelix’s Actix re-export, so a direct `actix-web` dependency is **not** required—only `caelix` with the `actix` feature (the default).
+`#[caelix::test]` runs the selected backend runtime, so it is suitable for
+`TestApplication` tests with either backend. It expands through Caelix's hidden
+runtime re-exports, so a direct Actix or Axum runtime dependency is not needed
+just to use the test macro.
 
 ### Request helpers
 

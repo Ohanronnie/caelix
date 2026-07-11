@@ -388,8 +388,36 @@ events, acknowledgements, rooms, and client examples.
 
 ## Testing Axum applications
 
-Axum does not use Caelix's Actix-only `TestApplication`. Build the router and
-send in-process requests with Tower's `ServiceExt::oneshot`:
+Axum provides the same in-process `TestApplication` API as the Actix adapter.
+It builds the production container and routes without opening a TCP listener:
+
+```rust
+use caelix::{StatusCode, TestApplication};
+
+#[caelix::test]
+async fn health_route_works() {
+    let app = TestApplication::new::<AppModule>().await.unwrap();
+    let body = app
+        .get("/health")
+        .send()
+        .await
+        .unwrap()
+        .assert_status(StatusCode::OK)
+        .json::<serde_json::Value>()
+        .await;
+
+    assert_eq!(body["status"], "ok");
+}
+```
+
+The builder supports `override_provider`, `override_provider_factory`, and
+`body_limit`. Request helpers include `get`, `post`, `put`, `patch`, and
+`delete`, with `json`, `header`, `set_payload`, and `send`; response helpers
+include `status`, `assert_status`, `json`, `body`, and `text`. Call
+`app.shutdown().await` when tests need provider shutdown hooks to run.
+
+For lower-level Axum or Tower integration tests, you can still build the router
+directly and send requests with `ServiceExt::oneshot`:
 
 ```toml
 [dev-dependencies]
