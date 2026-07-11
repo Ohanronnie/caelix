@@ -3,7 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -32,6 +32,9 @@ pub struct Container {
     pub(crate) pending_overrides: HashMap<TypeId, crate::ProviderDef>,
     /// TypeIds that were satisfied by an override (skip declared lifecycle hooks).
     pub(crate) applied_overrides: HashSet<TypeId>,
+    gateway_bootstrapped: Arc<Mutex<HashSet<TypeId>>>,
+    gateway_shutdown: Arc<Mutex<HashSet<TypeId>>>,
+    declared_provider_types: HashSet<TypeId>,
 }
 
 impl Clone for Container {
@@ -41,6 +44,9 @@ impl Clone for Container {
             // Overrides are build-time only; clones used by factories do not need them.
             pending_overrides: HashMap::new(),
             applied_overrides: self.applied_overrides.clone(),
+            gateway_bootstrapped: self.gateway_bootstrapped.clone(),
+            gateway_shutdown: self.gateway_shutdown.clone(),
+            declared_provider_types: self.declared_provider_types.clone(),
         }
     }
 }
@@ -59,6 +65,9 @@ impl Container {
             services,
             pending_overrides: HashMap::new(),
             applied_overrides: HashSet::new(),
+            gateway_bootstrapped: Arc::new(Mutex::new(HashSet::new())),
+            gateway_shutdown: Arc::new(Mutex::new(HashSet::new())),
+            declared_provider_types: HashSet::new(),
         }
     }
 
@@ -103,6 +112,28 @@ impl Container {
 
     pub(crate) fn was_overridden(&self, type_id: TypeId) -> bool {
         self.applied_overrides.contains(&type_id)
+    }
+
+    pub(crate) fn begin_gateway_bootstrap(&self, type_id: TypeId) -> bool {
+        self.gateway_bootstrapped
+            .lock()
+            .expect("gateway lifecycle lock poisoned")
+            .insert(type_id)
+    }
+
+    pub(crate) fn begin_gateway_shutdown(&self, type_id: TypeId) -> bool {
+        self.gateway_shutdown
+            .lock()
+            .expect("gateway lifecycle lock poisoned")
+            .insert(type_id)
+    }
+
+    pub(crate) fn mark_provider_declared(&mut self, type_id: TypeId) {
+        self.declared_provider_types.insert(type_id);
+    }
+
+    pub(crate) fn is_provider_declared(&self, type_id: TypeId) -> bool {
+        self.declared_provider_types.contains(&type_id)
     }
 
     pub(crate) fn seed_overrides(&mut self, overrides: crate::ProviderOverrides) {

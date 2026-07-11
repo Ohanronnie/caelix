@@ -1,6 +1,6 @@
 use crate::{
     BoxFuture, Container, Controller, EventHandler, EventHandlerDef, Injectable,
-    RegisterableEventHandler,
+    RegisterableEventHandler, WebSocketGateway,
 };
 use std::{
     any::{Any, TypeId},
@@ -225,6 +225,27 @@ pub struct ControllerDef {
     provider: ProviderDef,
 }
 
+pub struct GatewayDef {
+    pub path: &'static str,
+    pub type_id: TypeId,
+    provider: ProviderDef,
+    resolve_fn: fn(&Container) -> crate::Result<Arc<dyn WebSocketGateway>>,
+}
+
+impl GatewayDef {
+    pub fn of<G: WebSocketGateway>() -> Self {
+        Self {
+            path: G::path(),
+            type_id: TypeId::of::<G>(),
+            provider: ProviderDef::of::<G>(),
+            resolve_fn: |container| Ok(container.resolve::<G>()? as Arc<dyn WebSocketGateway>),
+        }
+    }
+    pub fn resolve(&self, container: &Container) -> crate::Result<Arc<dyn WebSocketGateway>> {
+        (self.resolve_fn)(container)
+    }
+}
+
 impl ControllerDef {
     pub fn of<C: Controller + Injectable + 'static>() -> Self {
         Self {
@@ -241,6 +262,8 @@ pub struct ModuleDef {
     pub(crate) controller_register_fn: fn(&mut dyn Any),
     pub(crate) route_log_fn: fn(),
     pub(crate) validate_fn: fn(&Container) -> crate::Result<()>,
+    pub(crate) gateway_visit_fn:
+        fn(&mut dyn FnMut(&GatewayDef), &mut std::collections::HashSet<TypeId>),
 }
 
 impl ModuleDef {
@@ -254,6 +277,7 @@ impl ModuleDef {
             controller_register_fn: |any| register_module_controllers::<M>(any),
             route_log_fn: || crate::log_module_routes::<M>(),
             validate_fn: |container| validate_module_providers::<M>(container),
+            gateway_visit_fn: |visitor, seen| visit_module_gateway_defs::<M>(visitor, seen),
         }
     }
 }
@@ -266,6 +290,7 @@ pub struct ModuleMetadata {
     pub providers: Vec<ProviderDef>,
     pub controllers: Vec<ControllerDef>,
     pub event_handlers: Vec<EventHandlerDef>,
+    pub gateways: Vec<GatewayDef>,
 }
 
 impl ModuleMetadata {
@@ -275,6 +300,7 @@ impl ModuleMetadata {
             providers: vec![],
             controllers: vec![],
             event_handlers: vec![],
+            gateways: vec![],
         }
     }
 
@@ -304,6 +330,11 @@ impl ModuleMetadata {
 
     pub fn controller<C: Controller + Injectable + 'static>(mut self) -> Self {
         self.controllers.push(ControllerDef::of::<C>());
+        self
+    }
+
+    pub fn gateway<G: WebSocketGateway>(mut self) -> Self {
+        self.gateways.push(GatewayDef::of::<G>());
         self
     }
 
@@ -341,11 +372,18 @@ pub async fn register_module<M: Module>(container: &mut Container) -> crate::Res
     }
 
     for provider in &metadata.providers {
+        container.mark_provider_declared(provider.type_id);
         register_provider_def(container, provider).await?;
     }
 
     for controller in &metadata.controllers {
         register_provider_def(container, &controller.provider).await?;
+    }
+
+    for gateway in &metadata.gateways {
+        if !container.contains_type_id(gateway.type_id) {
+            register_provider_def(container, &gateway.provider).await?;
+        }
     }
 
     for handler in &metadata.event_handlers {
@@ -414,11 +452,37 @@ pub async fn bootstrap_module<M: Module>(container: &Container) -> crate::Result
             .await?;
     }
 
+    for gateway in &metadata.gateways {
+        if container.was_overridden(gateway.type_id)
+            || container.is_provider_declared(gateway.type_id)
+            || !container.begin_gateway_bootstrap(gateway.type_id)
+        {
+            continue;
+        }
+        gateway
+            .provider
+            .run_lifecycle_from_container(container, "on_bootstrap", &gateway.provider.bootstrap_fn)
+            .await?;
+    }
+
     Ok(())
 }
 
 pub async fn shutdown_module<M: Module>(container: &Container) -> crate::Result<()> {
     let metadata = M::register();
+
+    for gateway in metadata.gateways.iter().rev() {
+        if container.was_overridden(gateway.type_id)
+            || container.is_provider_declared(gateway.type_id)
+            || !container.begin_gateway_shutdown(gateway.type_id)
+        {
+            continue;
+        }
+        gateway
+            .provider
+            .run_lifecycle_from_container(container, "on_shutdown", &gateway.provider.shutdown_fn)
+            .await?;
+    }
 
     for controller in metadata.controllers.iter().rev() {
         if container.was_overridden(controller.provider.type_id) {
@@ -463,8 +527,25 @@ pub async fn build_container_with_overrides<M: Module>(
     register_module::<M>(&mut container).await?;
     container.assert_no_unused_overrides()?;
     validate_module_providers::<M>(&container)?;
+    validate_gateway_paths::<M>()?;
     bootstrap_module::<M>(&container).await?;
     Ok(container)
+}
+
+fn validate_gateway_paths<M: Module>() -> crate::Result<()> {
+    let mut paths = std::collections::HashSet::new();
+    let mut duplicate = None;
+    visit_module_gateways::<M>(&mut |gateway| {
+        if !paths.insert(gateway.path) {
+            duplicate = Some(gateway.path);
+        }
+    });
+    if let Some(path) = duplicate {
+        return Err(crate::exception::startup_error(format!(
+            "duplicate websocket gateway path: {path}"
+        )));
+    }
+    Ok(())
 }
 
 pub fn validate_module_providers<M: Module>(container: &Container) -> crate::Result<()> {
@@ -480,6 +561,16 @@ pub fn validate_module_providers<M: Module>(container: &Container) -> crate::Res
 
     for controller in &metadata.controllers {
         controller.provider.assert_registered(container)?;
+    }
+
+    for gateway in &metadata.gateways {
+        gateway.provider.assert_registered(container)?;
+        if !gateway.path.starts_with('/') {
+            return Err(crate::exception::startup_error(format!(
+                "websocket gateway path must start with '/': {}",
+                gateway.path
+            )));
+        }
     }
 
     for handler in &metadata.event_handlers {
@@ -498,5 +589,127 @@ pub fn register_module_controllers<M: Module>(any: &mut dyn Any) {
 
     for controller in &metadata.controllers {
         (controller.register_fn)(any)
+    }
+}
+
+pub fn visit_module_gateways<M: Module>(visitor: &mut impl FnMut(&GatewayDef)) {
+    visit_module_gateway_defs::<M>(visitor, &mut std::collections::HashSet::new());
+}
+
+fn visit_module_gateway_defs<M: Module>(
+    visitor: &mut dyn FnMut(&GatewayDef),
+    seen: &mut std::collections::HashSet<TypeId>,
+) {
+    let metadata = M::register();
+    for import in metadata.imports {
+        (import.gateway_visit_fn)(visitor, seen);
+    }
+    for gateway in &metadata.gateways {
+        if seen.insert(gateway.type_id) {
+            visitor(gateway);
+        }
+    }
+}
+
+#[cfg(test)]
+mod gateway_tests {
+    use super::*;
+    use crate::{Result, WebSocketGateway};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FirstGateway;
+    struct SecondGateway;
+    impl Injectable for FirstGateway {
+        fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
+            Box::pin(async { Ok(Self) })
+        }
+    }
+    impl Injectable for SecondGateway {
+        fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
+            Box::pin(async { Ok(Self) })
+        }
+    }
+    impl WebSocketGateway for FirstGateway {
+        fn path() -> &'static str {
+            "/duplicate"
+        }
+    }
+    impl WebSocketGateway for SecondGateway {
+        fn path() -> &'static str {
+            "/duplicate"
+        }
+    }
+
+    struct DuplicateGatewayModule;
+    impl Module for DuplicateGatewayModule {
+        fn register() -> ModuleMetadata {
+            ModuleMetadata::new()
+                .gateway::<FirstGateway>()
+                .gateway::<SecondGateway>()
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicate_gateway_paths_fail_at_startup() {
+        let error = match build_container::<DuplicateGatewayModule>().await {
+            Ok(_) => panic!("duplicate gateway paths should fail"),
+            Err(error) => error,
+        };
+        assert!(error.message.contains("duplicate websocket gateway path"));
+    }
+
+    static BOOTSTRAPS: AtomicUsize = AtomicUsize::new(0);
+    static SHUTDOWNS: AtomicUsize = AtomicUsize::new(0);
+    static INITIALIZATIONS: AtomicUsize = AtomicUsize::new(0);
+    struct DualRegisteredGateway;
+    impl Injectable for DualRegisteredGateway {
+        fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
+            Box::pin(async { Ok(Self) })
+        }
+        fn on_module_init(&self) -> BoxFuture<'_, Result<()>> {
+            Box::pin(async {
+                INITIALIZATIONS.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+        fn on_bootstrap(&self) -> BoxFuture<'_, Result<()>> {
+            Box::pin(async {
+                BOOTSTRAPS.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+        fn on_shutdown(&self) -> BoxFuture<'_, Result<()>> {
+            Box::pin(async {
+                SHUTDOWNS.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+    }
+    impl WebSocketGateway for DualRegisteredGateway {
+        fn path() -> &'static str {
+            "/dual"
+        }
+    }
+    struct DualRegistrationModule;
+    impl Module for DualRegistrationModule {
+        fn register() -> ModuleMetadata {
+            ModuleMetadata::new()
+                .provider::<DualRegisteredGateway>()
+                .gateway::<DualRegisteredGateway>()
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_and_gateway_registration_runs_lifecycle_once() {
+        BOOTSTRAPS.store(0, Ordering::SeqCst);
+        SHUTDOWNS.store(0, Ordering::SeqCst);
+        INITIALIZATIONS.store(0, Ordering::SeqCst);
+        let container = build_container::<DualRegistrationModule>().await.unwrap();
+        assert_eq!(INITIALIZATIONS.load(Ordering::SeqCst), 1);
+        assert_eq!(BOOTSTRAPS.load(Ordering::SeqCst), 1);
+        shutdown_module::<DualRegistrationModule>(&container)
+            .await
+            .unwrap();
+        assert_eq!(SHUTDOWNS.load(Ordering::SeqCst), 1);
     }
 }

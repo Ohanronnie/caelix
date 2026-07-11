@@ -99,8 +99,10 @@ pub fn to_actix_response(response: CaelixHttpResponse) -> HttpResponse {
 pub struct Application {
     container: Arc<Container>,
     configure_fn: fn(&mut web::ServiceConfig),
+    gateway_configure_fn: fn(&mut web::ServiceConfig, Arc<Container>, usize),
     shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, caelix_core::Result<()>>,
     body_limit: usize,
+    websocket_max_message_size: usize,
     workers: usize,
     logging: Option<Logging>,
 }
@@ -254,8 +256,12 @@ impl Application {
         Ok(Self {
             container: Arc::new(container),
             configure_fn: |cfg| register_module_controllers::<M>(cfg),
+            gateway_configure_fn: |cfg, container, max| {
+                crate::websocket::configure_gateway_routes::<M>(cfg, container, max)
+            },
             shutdown_fn: |container| Box::pin(async move { shutdown_module::<M>(container).await }),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            websocket_max_message_size: crate::websocket::DEFAULT_WEBSOCKET_MAX_MESSAGE_SIZE,
             workers: num_cpus::get(),
             logging: None,
         })
@@ -263,6 +269,11 @@ impl Application {
 
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
+        self
+    }
+
+    pub fn websocket_max_message_size(mut self, bytes: usize) -> Self {
+        self.websocket_max_message_size = bytes.max(1);
         self
     }
 
@@ -294,6 +305,8 @@ impl Application {
         let container = self.container.clone();
         let configure_fn = self.configure_fn;
         let body_limit = self.body_limit;
+        let websocket_max_message_size = self.websocket_max_message_size;
+        let gateway_configure_fn = self.gateway_configure_fn;
         let workers = self.workers;
         let addr = addr.to_string();
         let logging = self.logging.unwrap_or(Logging {
@@ -324,6 +337,12 @@ impl Application {
                         }
                     })
                     .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn))
+                    .configure({
+                        let container = logging_container.clone();
+                        move |cfg| {
+                            gateway_configure_fn(cfg, container.clone(), websocket_max_message_size)
+                        }
+                    })
             })
             .workers(workers)
             .bind(addr.as_str())
@@ -341,6 +360,12 @@ impl Application {
                 App::new()
                     .app_data(web::Data::from(container.clone()))
                     .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn))
+                    .configure({
+                        let container = container.clone();
+                        move |cfg| {
+                            gateway_configure_fn(cfg, container.clone(), websocket_max_message_size)
+                        }
+                    })
             })
             .workers(workers)
             .bind(addr.as_str())

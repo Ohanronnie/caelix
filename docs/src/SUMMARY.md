@@ -26,6 +26,7 @@
 - [Request Context](advanced/request-context.md)
 - [Lifecycle Hooks](advanced/lifecycle-hooks.md)
 - [Events](advanced/events.md)
+- [WebSockets](advanced/websockets.md)
 - [Service-Level Cache](advanced/cache.md)
 - [Application Runtime](advanced/application-runtime.md)
 

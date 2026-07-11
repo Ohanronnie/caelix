@@ -14,6 +14,7 @@ mod logging;
 mod module;
 mod response;
 mod result;
+mod websocket;
 
 pub use bytes::Bytes;
 pub use cache::*;
@@ -30,6 +31,7 @@ pub use logging::*;
 pub use module::*;
 pub use response::*;
 pub use result::Result;
+pub use websocket::*;
 
 #[cfg(feature = "validator")]
 pub use validator;
