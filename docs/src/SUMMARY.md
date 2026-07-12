@@ -18,6 +18,7 @@
 - [Modules](concepts/modules.md)
 - [Providers](concepts/providers.md)
 - [Controllers](concepts/controllers.md)
+- [OpenAPI and Swagger UI](advanced/openapi.md)
 - [Responses and Errors](concepts/responses-and-errors.md)
 
 # Advanced Usage

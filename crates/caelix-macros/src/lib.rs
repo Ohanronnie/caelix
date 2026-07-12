@@ -25,6 +25,30 @@ pub fn controller(args: TokenStream, input: TokenStream) -> TokenStream {
     controller::expand(args, input)
 }
 
+/// OpenAPI-only marker consumed by `#[controller]`.
+#[proc_macro_attribute]
+pub fn response(_args: TokenStream, input: TokenStream) -> TokenStream {
+    input
+}
+
+/// OpenAPI-only marker consumed by `#[controller]`.
+#[proc_macro_attribute]
+pub fn errors(_args: TokenStream, input: TokenStream) -> TokenStream {
+    input
+}
+
+/// OpenAPI-only marker consumed by `#[controller]`.
+#[proc_macro_attribute]
+pub fn request_header(_args: TokenStream, input: TokenStream) -> TokenStream {
+    input
+}
+
+/// OpenAPI-only marker consumed by `#[controller]`.
+#[proc_macro_attribute]
+pub fn security(_args: TokenStream, input: TokenStream) -> TokenStream {
+    input
+}
+
 /// Registers either an RFC 6455 `impl WebSocketGateway` or an Axum Socket.IO
 /// gateway implementation at the supplied path.
 #[proc_macro_attribute]

@@ -21,6 +21,8 @@ use serde::{Serialize, de::DeserializeOwned};
 use tower::ServiceExt;
 
 use crate::{AxumRouterBuilder, application::DEFAULT_BODY_LIMIT_BYTES, to_axum_response};
+#[cfg(feature = "openapi")]
+use caelix_core::openapi::{OpenApiConfig, build_openapi};
 
 /// In-process Caelix application for integration tests.
 ///
@@ -37,6 +39,8 @@ pub struct TestApplication {
 pub struct TestApplicationBuilder<M> {
     overrides: ProviderOverrides,
     body_limit: usize,
+    #[cfg(feature = "openapi")]
+    openapi: Option<OpenApiConfig>,
     _module: PhantomData<M>,
 }
 
@@ -46,6 +50,8 @@ impl TestApplication {
         TestApplicationBuilder {
             overrides: ProviderOverrides::new(),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            #[cfg(feature = "openapi")]
+            openapi: None,
             _module: PhantomData,
         }
     }
@@ -127,6 +133,13 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         self
     }
 
+    /// Serves OpenAPI JSON and Swagger UI in the in-process test application.
+    #[cfg(feature = "openapi")]
+    pub fn with_openapi(mut self, config: OpenApiConfig) -> Self {
+        self.openapi = Some(config);
+        self
+    }
+
     pub async fn compile(self) -> caelix_core::Result<TestApplication> {
         let start = std::time::Instant::now();
         let container = build_container_with_overrides::<M>(self.overrides).await?;
@@ -143,6 +156,15 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         );
 
         let mut router = routes.into_router(container.clone());
+        #[cfg(feature = "openapi")]
+        if let Some(config) = self.openapi {
+            let document = build_openapi::<M>(&config)?;
+            router = crate::application::mount_openapi(
+                router,
+                config,
+                document.to_json().expect("OpenAPI document must serialize"),
+            );
+        }
         router = router.layer(axum::extract::DefaultBodyLimit::max(self.body_limit));
         router = router.fallback(|request: Request<Body>| async move {
             to_axum_response(

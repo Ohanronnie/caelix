@@ -12,6 +12,8 @@ mod guard;
 mod interceptor;
 mod logging;
 mod module;
+#[cfg(feature = "openapi")]
+pub mod openapi;
 mod response;
 mod result;
 mod websocket;

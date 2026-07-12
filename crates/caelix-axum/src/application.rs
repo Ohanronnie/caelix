@@ -1,5 +1,7 @@
 use std::{convert::Infallible, sync::Arc, time::Instant};
 
+#[cfg(feature = "openapi")]
+use axum::http::header;
 use axum::{
     Router,
     body::Body,
@@ -11,6 +13,8 @@ use axum::{
 use caelix_core::build_container;
 #[cfg(feature = "socketio")]
 use caelix_core::build_container_with_setup;
+#[cfg(feature = "openapi")]
+use caelix_core::openapi::{OpenApiConfig, build_openapi};
 #[cfg(feature = "socketio")]
 use caelix_core::visit_module_gateways;
 use caelix_core::{
@@ -22,6 +26,13 @@ use futures_util::StreamExt;
 use tower::{Layer, Service};
 
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+
+#[cfg(feature = "openapi")]
+#[derive(Clone)]
+struct OpenApiServices {
+    config: OpenApiConfig,
+    document: String,
+}
 
 /// The request data Caelix needs to construct a framework-neutral
 /// [`caelix_core::RequestContext`]. It is a parts-only Axum extractor so it
@@ -135,6 +146,11 @@ pub struct Application {
     body_limit: usize,
     websocket_max_message_size: usize,
     layers: Vec<RouterLayer>,
+    #[cfg(feature = "openapi")]
+    openapi: Option<OpenApiServices>,
+    #[cfg(feature = "openapi")]
+    openapi_build_fn:
+        fn(&OpenApiConfig) -> caelix_core::Result<caelix_core::openapi::utoipa::openapi::OpenApi>,
     #[cfg(feature = "socketio")]
     socket_io_layer: Option<caelix_socketio::SocketIoLayer>,
 }
@@ -166,6 +182,10 @@ impl Application {
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
             websocket_max_message_size: crate::websocket::DEFAULT_WEBSOCKET_MAX_MESSAGE_SIZE,
             layers: Vec::new(),
+            #[cfg(feature = "openapi")]
+            openapi: None,
+            #[cfg(feature = "openapi")]
+            openapi_build_fn: |config| build_openapi::<M>(config),
             #[cfg(feature = "socketio")]
             socket_io_layer: Some(socket_io_layer),
         })
@@ -174,6 +194,17 @@ impl Application {
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
         self
+    }
+
+    /// Generates and serves OpenAPI JSON plus Swagger UI for this application.
+    #[cfg(feature = "openapi")]
+    pub fn with_openapi(mut self, config: OpenApiConfig) -> caelix_core::Result<Self> {
+        let document = (self.openapi_build_fn)(&config)?;
+        self.openapi = Some(OpenApiServices {
+            config,
+            document: document.to_json().expect("OpenAPI document must serialize"),
+        });
+        Ok(self)
     }
 
     /// Sets the maximum assembled RFC 6455 message size accepted by decorated
@@ -227,6 +258,10 @@ impl Application {
             self.websocket_max_message_size,
         );
         let mut router = routes.into_router(self.container);
+        #[cfg(feature = "openapi")]
+        if let Some(openapi) = self.openapi {
+            router = mount_openapi(router, openapi.config, openapi.document);
+        }
         router = router.layer(axum::extract::DefaultBodyLimit::max(self.body_limit));
         router = router.fallback(|request: Request<Body>| async move {
             to_axum_response(
@@ -264,6 +299,46 @@ impl Application {
         shutdown_fn(&container).await.map_err(to_io_error)?;
         result
     }
+}
+
+#[cfg(feature = "openapi")]
+pub(crate) fn mount_openapi(router: Router, config: OpenApiConfig, document: String) -> Router {
+    let json_document = document.clone();
+    let json_path = config.json_path.clone();
+    let html = swagger_ui_html(&json_path);
+    router
+        .route(
+            &json_path,
+            axum::routing::get(move || {
+                let document = json_document.clone();
+                async move { ([(header::CONTENT_TYPE, "application/json")], document) }
+            }),
+        )
+        .route(
+            &config.ui_path,
+            axum::routing::get({
+                let html = html.clone();
+                move || {
+                    let html = html.clone();
+                    async move { ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html) }
+                }
+            }),
+        )
+        .route(
+            &format!("{}/", config.ui_path.trim_end_matches('/')),
+            axum::routing::get(move || {
+                let html = html.clone();
+                async move { ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html) }
+            }),
+        )
+}
+
+#[cfg(feature = "openapi")]
+fn swagger_ui_html(json_path: &str) -> String {
+    let json_path = serde_json::to_string(json_path).expect("OpenAPI path must serialize");
+    format!(
+        r#"<!doctype html><html><head><meta charset="utf-8"><title>Swagger UI</title><link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"></head><body><div id="swagger-ui"></div><script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script><script>SwaggerUIBundle({{url:{json_path},dom_id:'#swagger-ui'}});</script></body></html>"#
+    )
 }
 
 fn to_io_error(err: caelix_core::HttpException) -> std::io::Error {

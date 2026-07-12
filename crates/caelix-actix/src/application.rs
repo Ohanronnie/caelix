@@ -8,6 +8,8 @@ use actix_web::{
     http::header,
     web,
 };
+#[cfg(feature = "openapi")]
+use caelix_core::openapi::{OpenApiConfig, build_openapi};
 use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpException, HttpResponse as CaelixHttpResponse,
     IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException, ResponseBody,
@@ -18,6 +20,17 @@ use caelix_core::{
 use futures_util::StreamExt;
 
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+
+#[cfg(feature = "openapi")]
+#[derive(Clone)]
+pub(crate) struct OpenApiServices {
+    pub config: OpenApiConfig,
+    pub document: String,
+}
+
+#[cfg(not(feature = "openapi"))]
+#[derive(Clone)]
+pub(crate) struct OpenApiServices;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AccessLogFormat {
@@ -105,6 +118,10 @@ pub struct Application {
     websocket_max_message_size: usize,
     workers: usize,
     logging: Option<Logging>,
+    openapi: Option<OpenApiServices>,
+    #[cfg(feature = "openapi")]
+    openapi_build_fn:
+        fn(&OpenApiConfig) -> caelix_core::Result<caelix_core::openapi::utoipa::openapi::OpenApi>,
 }
 
 fn json_config(body_limit: usize) -> web::JsonConfig {
@@ -238,12 +255,63 @@ pub(crate) fn configure_caelix_services(
     cfg: &mut web::ServiceConfig,
     body_limit: usize,
     configure_fn: fn(&mut web::ServiceConfig),
+    openapi: Option<&OpenApiServices>,
 ) {
     cfg.app_data(json_config(body_limit));
     cfg.app_data(path_config());
     cfg.app_data(query_config());
     configure_fn(cfg);
+    #[cfg(feature = "openapi")]
+    if let Some(openapi) = openapi {
+        let ui_base = openapi.config.ui_path.trim_end_matches('/');
+        let ui_redirect = format!("{ui_base}/");
+        let document = openapi.document.clone();
+        cfg.route(
+            &openapi.config.json_path,
+            web::get().to(move || {
+                let document = document.clone();
+                async move {
+                    HttpResponse::Ok()
+                        .content_type("application/json")
+                        .body(document)
+                }
+            }),
+        );
+        let html = swagger_ui_html(&openapi.config.json_path);
+        cfg.route(
+            &format!("{ui_base}/"),
+            web::get().to(move || {
+                let html = html.clone();
+                async move {
+                    HttpResponse::Ok()
+                        .content_type("text/html; charset=utf-8")
+                        .body(html)
+                }
+            }),
+        );
+        cfg.route(
+            ui_base,
+            web::get().to(move || {
+                let ui_redirect = ui_redirect.clone();
+                async move {
+                    HttpResponse::TemporaryRedirect()
+                        .insert_header((header::LOCATION, ui_redirect))
+                        .finish()
+                }
+            }),
+        );
+    }
+    #[cfg(not(feature = "openapi"))]
+    let _ = openapi;
     cfg.default_service(web::route().to(not_found));
+}
+
+#[cfg(feature = "openapi")]
+fn swagger_ui_html(json_path: &str) -> String {
+    let json_path = serde_json::to_string(json_path).expect("OpenAPI path must serialize");
+    format!(
+        r#"<!doctype html><html><head><meta charset="utf-8"><title>Swagger UI</title><link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"></head><body><div id="swagger-ui"></div><script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script><script>SwaggerUIBundle({{url:{json_path},dom_id:'#swagger-ui'}});</script></body></html>"#
+    )
 }
 
 impl Application {
@@ -264,6 +332,9 @@ impl Application {
             websocket_max_message_size: crate::websocket::DEFAULT_WEBSOCKET_MAX_MESSAGE_SIZE,
             workers: num_cpus::get(),
             logging: None,
+            openapi: None,
+            #[cfg(feature = "openapi")]
+            openapi_build_fn: |config| build_openapi::<M>(config),
         })
     }
 
@@ -292,9 +363,25 @@ impl Application {
         self
     }
 
+    /// Generates and serves OpenAPI JSON plus Swagger UI for this application.
+    #[cfg(feature = "openapi")]
+    pub fn with_openapi(mut self, config: OpenApiConfig) -> caelix_core::Result<Self> {
+        let document = (self.openapi_build_fn)(&config)?;
+        self.openapi = Some(OpenApiServices {
+            config,
+            document: document.to_json().expect("OpenAPI document must serialize"),
+        });
+        Ok(self)
+    }
+
     #[cfg(test)]
     fn configure_services(&self, cfg: &mut web::ServiceConfig) {
-        configure_caelix_services(cfg, self.body_limit, self.configure_fn);
+        configure_caelix_services(
+            cfg,
+            self.body_limit,
+            self.configure_fn,
+            self.openapi.as_ref(),
+        );
     }
 
     async fn shutdown(&self) -> caelix_core::Result<()> {
@@ -313,11 +400,13 @@ impl Application {
             access_log: http_request_logging_enabled(),
             access_log_format: AccessLogFormat::Compact,
         });
+        let openapi = self.openapi.clone();
 
         log_listening(&addr);
 
         let result = if logging.access_log_enabled() {
             let logging_container = container.clone();
+            let openapi_with_logging = openapi.clone();
             let access_log_format = logging.access_log_format();
             let server = match HttpServer::new(move || {
                 App::new()
@@ -336,7 +425,17 @@ impl Application {
                             Ok(response)
                         }
                     })
-                    .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn))
+                    .configure({
+                        let openapi = openapi_with_logging.clone();
+                        move |cfg| {
+                            configure_caelix_services(
+                                cfg,
+                                body_limit,
+                                configure_fn,
+                                openapi.as_ref(),
+                            )
+                        }
+                    })
                     .configure({
                         let container = logging_container.clone();
                         move |cfg| {
@@ -359,7 +458,17 @@ impl Application {
             let server = match HttpServer::new(move || {
                 App::new()
                     .app_data(web::Data::from(container.clone()))
-                    .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn))
+                    .configure({
+                        let openapi = openapi.clone();
+                        move |cfg| {
+                            configure_caelix_services(
+                                cfg,
+                                body_limit,
+                                configure_fn,
+                                openapi.as_ref(),
+                            )
+                        }
+                    })
                     .configure({
                         let container = container.clone();
                         move |cfg| {
@@ -802,10 +911,9 @@ mod tests {
 
     #[actix_web::test]
     async fn unmatched_routes_are_caelix_json_errors() {
-        let app = actix_test::init_service(
-            App::new()
-                .configure(|cfg| configure_caelix_services(cfg, DEFAULT_BODY_LIMIT_BYTES, |_| {})),
-        )
+        let app = actix_test::init_service(App::new().configure(|cfg| {
+            configure_caelix_services(cfg, DEFAULT_BODY_LIMIT_BYTES, |_| {}, None)
+        }))
         .await;
 
         let response = actix_test::call_service(

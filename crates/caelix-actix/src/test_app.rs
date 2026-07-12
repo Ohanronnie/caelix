@@ -19,7 +19,11 @@ use caelix_core::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 
+#[cfg(feature = "openapi")]
+use crate::application::OpenApiServices;
 use crate::application::{DEFAULT_BODY_LIMIT_BYTES, configure_caelix_services};
+#[cfg(feature = "openapi")]
+use caelix_core::openapi::{OpenApiConfig, build_openapi};
 
 type CallFuture = Pin<Box<dyn Future<Output = Result<ServiceResponse, Error>>>>;
 type CallFn = Box<dyn Fn(Request) -> CallFuture>;
@@ -39,6 +43,8 @@ pub struct TestApplication {
 pub struct TestApplicationBuilder<M> {
     overrides: ProviderOverrides,
     body_limit: usize,
+    #[cfg(feature = "openapi")]
+    openapi: Option<OpenApiConfig>,
     _module: PhantomData<M>,
 }
 
@@ -55,6 +61,8 @@ impl TestApplication {
         TestApplicationBuilder {
             overrides: ProviderOverrides::new(),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            #[cfg(feature = "openapi")]
+            openapi: None,
             _module: PhantomData,
         }
     }
@@ -129,6 +137,13 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         self
     }
 
+    /// Serves OpenAPI JSON and Swagger UI in the in-process test application.
+    #[cfg(feature = "openapi")]
+    pub fn with_openapi(mut self, config: OpenApiConfig) -> Self {
+        self.openapi = Some(config);
+        self
+    }
+
     pub async fn compile(self) -> caelix_core::Result<TestApplication> {
         let start = std::time::Instant::now();
         let container = build_container_with_overrides::<M>(self.overrides).await?;
@@ -138,10 +153,32 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         let container = Arc::new(container);
         let body_limit = self.body_limit;
         let configure_fn: fn(&mut web::ServiceConfig) = |cfg| register_module_controllers::<M>(cfg);
+        #[cfg(feature = "openapi")]
+        let openapi = match self.openapi {
+            Some(config) => {
+                let document = build_openapi::<M>(&config)?;
+                Some(OpenApiServices {
+                    config,
+                    document: document.to_json().expect("OpenAPI document must serialize"),
+                })
+            }
+            None => None,
+        };
 
         let app = App::new()
             .app_data(web::Data::from(container.clone()))
-            .configure(move |cfg| configure_caelix_services(cfg, body_limit, configure_fn));
+            .configure(move |cfg| {
+                configure_caelix_services(cfg, body_limit, configure_fn, {
+                    #[cfg(feature = "openapi")]
+                    {
+                        openapi.as_ref()
+                    }
+                    #[cfg(not(feature = "openapi"))]
+                    {
+                        None
+                    }
+                })
+            });
 
         let service = Rc::new(actix_test::init_service(app).await);
         let call: CallFn = Box::new(move |request| {

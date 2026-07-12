@@ -222,6 +222,8 @@ fn noop_lifecycle() -> LifecycleFn {
 pub struct ControllerDef {
     pub register_fn: fn(&mut dyn Any),
     pub route_log_fn: fn(),
+    #[cfg(feature = "openapi")]
+    pub(crate) openapi_routes_fn: fn() -> &'static [crate::openapi::OpenApiRouteDef],
     provider: ProviderDef,
 }
 
@@ -303,6 +305,8 @@ impl ControllerDef {
         Self {
             register_fn: |any| C::register_routes(any),
             route_log_fn: || crate::log_controller_routes::<C>(),
+            #[cfg(feature = "openapi")]
+            openapi_routes_fn: || C::openapi_routes(),
             provider: ProviderDef::of::<C>(),
         }
     }
@@ -316,6 +320,8 @@ pub struct ModuleDef {
     pub(crate) validate_fn: fn(&Container) -> crate::Result<()>,
     pub(crate) gateway_visit_fn:
         fn(&mut dyn FnMut(&GatewayDef), &mut std::collections::HashSet<TypeId>),
+    #[cfg(feature = "openapi")]
+    pub(crate) openapi_visit_fn: fn(&mut dyn FnMut(&crate::openapi::OpenApiRouteDef)),
 }
 
 impl ModuleDef {
@@ -330,6 +336,8 @@ impl ModuleDef {
             route_log_fn: || crate::log_module_routes::<M>(),
             validate_fn: |container| validate_module_providers::<M>(container),
             gateway_visit_fn: |visitor, seen| visit_module_gateway_defs::<M>(visitor, seen),
+            #[cfg(feature = "openapi")]
+            openapi_visit_fn: |visitor| visit_module_openapi_routes_dyn::<M>(visitor),
         }
     }
 }
@@ -660,6 +668,30 @@ pub fn register_module_controllers<M: Module>(any: &mut dyn Any) {
 
     for controller in &metadata.controllers {
         (controller.register_fn)(any)
+    }
+}
+
+/// Visits controller OpenAPI metadata for `M` and all imported modules.
+#[cfg(feature = "openapi")]
+#[doc(hidden)]
+pub fn visit_module_openapi_routes<M: Module>(
+    visitor: &mut impl FnMut(&crate::openapi::OpenApiRouteDef),
+) {
+    visit_module_openapi_routes_dyn::<M>(visitor);
+}
+
+#[cfg(feature = "openapi")]
+fn visit_module_openapi_routes_dyn<M: Module>(
+    visitor: &mut dyn FnMut(&crate::openapi::OpenApiRouteDef),
+) {
+    let metadata = M::register();
+    for import in &metadata.imports {
+        (import.openapi_visit_fn)(visitor);
+    }
+    for controller in &metadata.controllers {
+        for route in (controller.openapi_routes_fn)() {
+            visitor(route);
+        }
     }
 }
 

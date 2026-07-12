@@ -13,4 +13,10 @@ pub trait Controller {
         &[]
     }
     fn register_routes(cfg: &mut dyn Any);
+
+    #[cfg(feature = "openapi")]
+    #[doc(hidden)]
+    fn openapi_routes() -> &'static [crate::openapi::OpenApiRouteDef] {
+        &[]
+    }
 }

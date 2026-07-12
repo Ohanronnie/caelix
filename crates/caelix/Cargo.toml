@@ -1,6 +1,6 @@
 [package]
 name = "caelix"
-version = "0.0.13"
+version = "0.0.14"
 edition = "2024"
 description = "Public Caelix framework crate."
 license = "MIT"
@@ -12,13 +12,14 @@ axum = ["dep:caelix-axum", "caelix-macros/axum"]
 socketio = ["axum", "caelix-axum/socketio", "dep:caelix-socketio"]
 sqlx = ["caelix-core/sqlx"]
 validator = ["caelix-core/validator"]
+openapi = ["caelix-core/openapi", "caelix-macros/openapi", "caelix-actix?/openapi", "caelix-axum?/openapi"]
 
 [dependencies]
-caelix-actix = { path = "../caelix-actix", version = "0.0.12", optional = true }
-caelix-axum = { path = "../caelix-axum", version = "0.0.13", optional = true }
-caelix-socketio = { path = "../caelix-socketio", version = "0.0.12", optional = true }
-caelix-core = { path = "../caelix-core", version = "0.0.9" }
-caelix-macros = { path = "../caelix-macros", version = "0.0.6", default-features = false }
+caelix-actix = { path = "../caelix-actix", version = "0.0.13", optional = true }
+caelix-axum = { path = "../caelix-axum", version = "0.0.14", optional = true }
+caelix-socketio = { path = "../caelix-socketio", version = "0.0.13", optional = true }
+caelix-core = { path = "../caelix-core", version = "0.0.10" }
+caelix-macros = { path = "../caelix-macros", version = "0.0.7", default-features = false }
 
 [lib]
 path = "src/lib.rs"

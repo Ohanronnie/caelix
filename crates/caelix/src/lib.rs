@@ -5,6 +5,13 @@ pub use caelix_core::*;
 // would shadow Rust's `#[test]`).
 pub use caelix_macros::{controller, gateway, guard, injectable, on_message};
 
+/// OpenAPI generation types and controller documentation marker attributes.
+#[cfg(feature = "openapi")]
+pub mod openapi {
+    pub use caelix_core::openapi::*;
+    pub use caelix_macros::{errors, request_header, response, security};
+}
+
 /// RFC 6455 WebSocket gateway APIs.
 ///
 /// The same types remain re-exported at the crate root for backwards
