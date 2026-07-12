@@ -1,8 +1,12 @@
 use proc_macro::TokenStream;
-use quote::{ToTokens, format_ident, quote};
+#[cfg(feature = "openapi")]
+use quote::ToTokens;
+use quote::{format_ident, quote};
+#[cfg(feature = "openapi")]
+use syn::{Expr, Meta, spanned::Spanned};
 use syn::{
-    Expr, FnArg, ImplItem, ItemImpl, LitStr, Meta, Pat, Token, Type, parse::Parser,
-    parse_macro_input, punctuated::Punctuated, spanned::Spanned,
+    FnArg, ImplItem, ItemImpl, LitStr, Pat, Token, Type, parse::Parser, parse_macro_input,
+    punctuated::Punctuated,
 };
 
 enum Extractor {
@@ -724,6 +728,10 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     };
     #[cfg(not(feature = "openapi"))]
     let openapi_controller_methods = quote! {};
+    #[cfg(feature = "openapi")]
+    let openapi_route_functions = quote! { #(#openapi_routes)* };
+    #[cfg(not(feature = "openapi"))]
+    let openapi_route_functions = quote! {};
     quote! {
         #(#errors)*
         #impl_block
@@ -733,7 +741,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             fn register_routes(cfg_any: &mut dyn std::any::Any) { #register_routes }
             #openapi_controller_methods
         }
-        impl #struct_type { #(#wrappers)* #(#openapi_routes)* }
+        impl #struct_type { #(#wrappers)* #openapi_route_functions }
     }
     .into()
 }

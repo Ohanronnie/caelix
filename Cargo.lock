@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "caelix"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "actix-web",
  "caelix-actix",
@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-macros"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "actix-web",
  "caelix-actix",
