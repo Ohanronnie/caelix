@@ -3,7 +3,7 @@
 Enable the `openapi` feature. Caelix re-exports `utoipa`, including `ToSchema`, so no separate dependency is required:
 
 ```toml
-caelix = { version = "0.0.16", features = ["openapi"] }
+caelix = { version = "0.0.17", features = ["openapi"] }
 ```
 
 Opt in when building the application. Caelix serves OpenAPI 3.1 JSON at `/openapi.json` and Swagger UI at `/docs`.

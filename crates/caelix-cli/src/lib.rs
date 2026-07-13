@@ -782,9 +782,9 @@ pub fn render_app_cargo_toml(package_name: &str) -> String {
 
 fn render_app_cargo_toml_for_backend(package_name: &str, backend: BackendChoice) -> String {
     let backend_dependencies = match backend {
-        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.16\"",
+        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.17\"",
         BackendChoice::Axum => {
-            "caelix = { version = \"0.0.16\", default-features = false, features = [\"axum\", \"sqlx\", \"validator\"] }\ntower-http = { version = \"0.6\", features = [\"trace\", \"compression-full\"] }"
+            "caelix = { version = \"0.0.17\", default-features = false, features = [\"axum\", \"sqlx\", \"validator\"] }\ntower-http = { version = \"0.6\", features = [\"trace\", \"compression-full\"] }"
         }
     };
     format!(

@@ -378,7 +378,9 @@ mod tests {
     struct NestedGreetingModule;
     impl Module for NestedGreetingModule {
         fn register() -> ModuleMetadata {
-            ModuleMetadata::new().provider::<GreetingService>()
+            ModuleMetadata::new()
+                .provider::<GreetingService>()
+                .export::<GreetingService>()
         }
     }
 
