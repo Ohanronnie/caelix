@@ -507,6 +507,10 @@ mod tests {
         close_frames: std::sync::Mutex<Vec<Option<WebSocketCloseFrame>>>,
     }
     impl Injectable for TestGateway {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
         fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
             Box::pin(async { Ok(Self::default()) })
         }

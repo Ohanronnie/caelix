@@ -9,6 +9,10 @@ struct OrderPlaced;
 struct SendWelcomeEmail;
 
 impl Injectable for SendWelcomeEmail {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async { Ok(Self) })
     }

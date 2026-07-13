@@ -70,6 +70,22 @@ pub(crate) fn expand(_args: TokenStream, input: TokenStream) -> TokenStream {
         }
     };
 
+    let dependencies = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => fields
+                .named
+                .iter()
+                .filter_map(|field| {
+                    let resolved = arc_inner_type(&field.ty)?;
+                    (!is_logger_type(resolved))
+                        .then(|| quote! { caelix::ProviderDependency::of::<#resolved>() })
+                })
+                .collect::<Vec<_>>(),
+            _ => vec![],
+        },
+        _ => vec![],
+    };
+
     let expanded = quote! {
         #(#errors)*
 
@@ -80,6 +96,10 @@ pub(crate) fn expand(_args: TokenStream, input: TokenStream) -> TokenStream {
                 Box::pin(async move {
                     #create_body
                 })
+            }
+
+            fn dependencies() -> Vec<caelix::ProviderDependency> {
+                vec![#(#dependencies),*]
             }
         }
     };

@@ -15,6 +15,10 @@ use tower::ServiceExt;
 struct AllowGuard;
 
 impl Injectable for AllowGuard {
+    fn dependencies() -> Vec<caelix::ProviderDependency> {
+        caelix::provider_dependencies![]
+    }
+
     fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async { Ok(Self) })
     }
@@ -29,6 +33,10 @@ impl Guard for AllowGuard {
 struct PassThroughInterceptor;
 
 impl Injectable for PassThroughInterceptor {
+    fn dependencies() -> Vec<caelix::ProviderDependency> {
+        caelix::provider_dependencies![]
+    }
+
     fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async { Ok(Self) })
     }
@@ -64,6 +72,10 @@ struct Output {
 struct HealthController;
 
 impl Injectable for HealthController {
+    fn dependencies() -> Vec<caelix::ProviderDependency> {
+        caelix::provider_dependencies![]
+    }
+
     fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async { Ok(Self) })
     }
@@ -126,6 +138,10 @@ async fn axum_runtime_macro_can_be_used_more_than_once() {}
 struct EchoGateway;
 
 impl Injectable for EchoGateway {
+    fn dependencies() -> Vec<caelix::ProviderDependency> {
+        caelix::provider_dependencies![]
+    }
+
     fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async { Ok(Self) })
     }

@@ -34,6 +34,10 @@ struct Greeter {
 }
 
 impl Injectable for Greeter {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![Config]
+    }
+
     fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
             Ok(Self {
@@ -144,6 +148,10 @@ struct AwaitingProvider {
 }
 
 impl Injectable for AwaitingProvider {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![Config]
+    }
+
     fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
             std::future::ready(()).await;
@@ -174,6 +182,10 @@ static LIFECYCLE_EVENTS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 struct LifecycleProvider;
 
 impl Injectable for LifecycleProvider {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move { Ok(Self) })
     }
@@ -230,6 +242,10 @@ struct NestedRepo {
 }
 
 impl Injectable for NestedRepo {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
             Ok(Self {
@@ -317,6 +333,10 @@ struct DuplicateRepo {
 }
 
 impl Injectable for DuplicateRepo {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
             Ok(Self {
@@ -382,7 +402,10 @@ impl Module for FactoryModule {
     fn register() -> ModuleMetadata {
         ModuleMetadata::new()
             .provider::<Greeter>()
-            .provider_async_factory::<FactoryBuiltProvider, _, _>(build_factory_provider)
+            .provider_async_factory::<FactoryBuiltProvider, _, _>(
+                provider_dependencies![Config],
+                build_factory_provider,
+            )
     }
 }
 
@@ -410,8 +433,10 @@ async fn fail_factory_provider(
 struct FailingFactoryModule;
 impl Module for FailingFactoryModule {
     fn register() -> ModuleMetadata {
-        ModuleMetadata::new()
-            .provider_async_factory::<FailingFactoryProvider, _, _>(fail_factory_provider)
+        ModuleMetadata::new().provider_async_factory::<FailingFactoryProvider, _, _>(
+            provider_dependencies![],
+            fail_factory_provider,
+        )
     }
 }
 
@@ -540,6 +565,10 @@ fn resolving_missing_provider_returns_error_with_type_name() {
 
 struct ImportedProvider;
 impl Injectable for ImportedProvider {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move { Ok(Self) })
     }
@@ -549,6 +578,10 @@ struct RootProvider {
     imported: Arc<ImportedProvider>,
 }
 impl Injectable for RootProvider {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![ImportedProvider]
+    }
+
     fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
             Ok(Self {
@@ -560,6 +593,10 @@ impl Injectable for RootProvider {
 
 struct ImportedController;
 impl Injectable for ImportedController {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move { Ok(Self) })
     }
@@ -578,6 +615,10 @@ impl Controller for ImportedController {
 
 struct RootController;
 impl Injectable for RootController {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move { Ok(Self) })
     }
@@ -599,6 +640,7 @@ impl Module for ImportedModule {
     fn register() -> ModuleMetadata {
         ModuleMetadata::new()
             .provider::<ImportedProvider>()
+            .export::<ImportedProvider>()
             .controller::<ImportedController>()
     }
 }
@@ -652,6 +694,10 @@ impl EventAuditLog {
 }
 
 impl Injectable for EventAuditLog {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
             Ok(Self {
@@ -666,6 +712,10 @@ struct WelcomeEmailHandler {
 }
 
 impl Injectable for WelcomeEmailHandler {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![EventAuditLog]
+    }
+
     fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
             Ok(Self {
@@ -693,6 +743,10 @@ struct AuditUserHandler {
 }
 
 impl Injectable for AuditUserHandler {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![EventAuditLog]
+    }
+
     fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
             Ok(Self {
@@ -777,6 +831,10 @@ fn event_handler_provider_does_not_fire_until_registered_as_an_event_handler() {
 struct MissingEventHandler;
 
 impl Injectable for MissingEventHandler {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move { Ok(Self) })
     }

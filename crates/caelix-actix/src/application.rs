@@ -518,6 +518,10 @@ mod tests {
     }
 
     impl Injectable for HealthService {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
         fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
             Box::pin(async move { Ok(Self { status: "ok" }) })
         }
@@ -534,6 +538,10 @@ mod tests {
     struct JsonController;
 
     impl Injectable for JsonController {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
         fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
             Box::pin(async move { Ok(Self) })
         }
@@ -623,6 +631,10 @@ mod tests {
     struct ShutdownService;
 
     impl Injectable for ShutdownService {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
         fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
             Box::pin(async move { Ok(Self) })
         }

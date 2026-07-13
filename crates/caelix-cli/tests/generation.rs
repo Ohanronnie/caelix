@@ -18,7 +18,7 @@ fn new_creates_application_structure_with_crates_io_dependency() {
     assert!(output.contains("Created Caelix application `demo-api`"));
     assert!(cargo_toml.contains("edition = \"2024\""));
     assert!(!cargo_toml.contains("[workspace]"));
-    assert!(cargo_toml.contains("caelix = \"0.0.12\""));
+    assert!(cargo_toml.contains("caelix = \"0.0.16\""));
     assert!(!cargo_toml.contains("path = "));
     assert!(!cargo_toml.contains("caelix-core"));
     assert!(!cargo_toml.contains("caelix-actix"));
@@ -55,6 +55,39 @@ fn new_with_axum_backend_enables_the_axum_feature() {
     assert!(cargo_toml.contains("features = [\"axum\", \"sqlx\", \"validator\"]"));
     assert!(cargo_toml.contains("tower-http"));
     assert!(!cargo_toml.contains("actix-web"));
+}
+
+#[test]
+fn new_rejects_paths_keywords_and_other_non_component_names_without_writing() {
+    let tmp = tempdir().unwrap();
+    let outside = tmp.path().parent().unwrap().join("caelix-escape-check");
+    let invalid = [
+        "../caelix-escape-check",
+        "/tmp/caelix-escape-check",
+        "",
+        "two words",
+        "fn",
+        ".",
+        "a.b",
+        "a/b",
+        "a\\b",
+    ];
+
+    for name in invalid {
+        let error = caelix_cli::run_from(["caelix", "new", name], tmp.path()).unwrap_err();
+        assert!(error.to_string().contains("invalid project"), "{name}");
+    }
+
+    assert!(!outside.exists());
+    assert!(!std::path::Path::new("/tmp/caelix-escape-check").exists());
+    assert!(fs::read_dir(tmp.path()).unwrap().next().is_none());
+}
+
+#[test]
+fn new_accepts_identifier_like_hyphen_and_underscore_names() {
+    let tmp = tempdir().unwrap();
+    caelix_cli::run_from(["caelix", "new", "demo-api_2"], tmp.path()).unwrap();
+    assert!(tmp.path().join("demo-api_2/Cargo.toml").exists());
 }
 
 #[test]

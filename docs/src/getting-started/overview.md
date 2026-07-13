@@ -55,7 +55,10 @@ Add application config as a normal provider. It can own both settings and applic
 
 ```rust
 // src/config.rs
-use caelix::{BoxFuture, Container, Injectable, Result, ServiceUnavailableException};
+use caelix::{
+    BoxFuture, Container, Injectable, ProviderDependency, Result,
+    ServiceUnavailableException, provider_dependencies,
+};
 use sqlx::PgPool;
 
 pub struct AppConfig {
@@ -64,6 +67,10 @@ pub struct AppConfig {
 }
 
 impl Injectable for AppConfig {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async {
             let database_url = std::env::var("DATABASE_URL")

@@ -13,6 +13,15 @@ pub trait Injectable: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// Dependencies resolved while constructing this provider.
+    ///
+    /// `#[injectable]` supplies this automatically. Handwritten implementations
+    /// must return `provider_dependencies![...]`; Caelix rejects construction-time
+    /// resolution of a provider that is absent from this declaration.
+    fn dependencies() -> Vec<crate::ProviderDependency>
+    where
+        Self: Sized;
+
     fn on_module_init(&self) -> BoxFuture<'_, crate::Result<()>> {
         Box::pin(async { Ok(()) })
     }
@@ -32,9 +41,16 @@ pub struct Container {
     pub(crate) pending_overrides: HashMap<TypeId, crate::ProviderDef>,
     /// TypeIds that were satisfied by an override (skip declared lifecycle hooks).
     pub(crate) applied_overrides: HashSet<TypeId>,
-    gateway_bootstrapped: Arc<Mutex<HashSet<TypeId>>>,
-    gateway_shutdown: Arc<Mutex<HashSet<TypeId>>>,
     declared_provider_types: HashSet<TypeId>,
+    /// Successful production initializations, in startup order.
+    pub(crate) initialized_providers: Arc<Mutex<Vec<TypeId>>>,
+    pub(crate) bootstrapped_providers: Arc<Mutex<HashSet<TypeId>>>,
+    dependency_scope: Option<Arc<DependencyScope>>,
+}
+
+struct DependencyScope {
+    provider_type_name: &'static str,
+    allowed_type_ids: HashSet<TypeId>,
 }
 
 impl Clone for Container {
@@ -44,9 +60,10 @@ impl Clone for Container {
             // Overrides are build-time only; clones used by factories do not need them.
             pending_overrides: HashMap::new(),
             applied_overrides: self.applied_overrides.clone(),
-            gateway_bootstrapped: self.gateway_bootstrapped.clone(),
-            gateway_shutdown: self.gateway_shutdown.clone(),
             declared_provider_types: self.declared_provider_types.clone(),
+            initialized_providers: self.initialized_providers.clone(),
+            bootstrapped_providers: self.bootstrapped_providers.clone(),
+            dependency_scope: self.dependency_scope.clone(),
         }
     }
 }
@@ -65,9 +82,10 @@ impl Container {
             services,
             pending_overrides: HashMap::new(),
             applied_overrides: HashSet::new(),
-            gateway_bootstrapped: Arc::new(Mutex::new(HashSet::new())),
-            gateway_shutdown: Arc::new(Mutex::new(HashSet::new())),
             declared_provider_types: HashSet::new(),
+            initialized_providers: Arc::new(Mutex::new(Vec::new())),
+            bootstrapped_providers: Arc::new(Mutex::new(HashSet::new())),
+            dependency_scope: None,
         }
     }
 
@@ -114,17 +132,10 @@ impl Container {
         self.applied_overrides.contains(&type_id)
     }
 
-    pub(crate) fn begin_gateway_bootstrap(&self, type_id: TypeId) -> bool {
-        self.gateway_bootstrapped
+    pub(crate) fn begin_provider_bootstrap(&self, type_id: TypeId) -> bool {
+        self.bootstrapped_providers
             .lock()
-            .expect("gateway lifecycle lock poisoned")
-            .insert(type_id)
-    }
-
-    pub(crate) fn begin_gateway_shutdown(&self, type_id: TypeId) -> bool {
-        self.gateway_shutdown
-            .lock()
-            .expect("gateway lifecycle lock poisoned")
+            .expect("provider lifecycle lock poisoned")
             .insert(type_id)
     }
 
@@ -132,12 +143,55 @@ impl Container {
         self.declared_provider_types.insert(type_id);
     }
 
-    pub(crate) fn is_provider_declared(&self, type_id: TypeId) -> bool {
-        self.declared_provider_types.contains(&type_id)
-    }
-
     pub(crate) fn seed_overrides(&mut self, overrides: crate::ProviderOverrides) {
         self.pending_overrides = overrides.into_inner();
+    }
+
+    pub(crate) fn has_pending_override(&self, type_id: TypeId) -> bool {
+        self.pending_overrides.contains_key(&type_id)
+    }
+
+    pub(crate) fn pending_override(&self, type_id: TypeId) -> Option<&crate::ProviderDef> {
+        self.pending_overrides.get(&type_id)
+    }
+
+    pub(crate) fn record_initialized_provider(&self, type_id: TypeId) {
+        self.initialized_providers
+            .lock()
+            .expect("provider lifecycle lock poisoned")
+            .push(type_id);
+    }
+
+    pub(crate) fn take_initialized_providers(&self) -> Vec<TypeId> {
+        std::mem::take(
+            &mut *self
+                .initialized_providers
+                .lock()
+                .expect("provider lifecycle lock poisoned"),
+        )
+    }
+
+    pub(crate) fn initialized_provider_types(&self) -> Vec<TypeId> {
+        self.initialized_providers
+            .lock()
+            .expect("provider lifecycle lock poisoned")
+            .clone()
+    }
+
+    pub(crate) fn scoped_for_provider(
+        &self,
+        provider_type_name: &'static str,
+        dependencies: &[crate::ProviderDependency],
+    ) -> Self {
+        let mut scoped = self.clone();
+        scoped.dependency_scope = Some(Arc::new(DependencyScope {
+            provider_type_name,
+            allowed_type_ids: dependencies
+                .iter()
+                .map(|dependency| dependency.type_id())
+                .collect(),
+        }));
+        scoped
     }
 
     pub(crate) fn assert_no_unused_overrides(&self) -> crate::Result<()> {
@@ -159,7 +213,19 @@ impl Container {
     }
 
     pub fn resolve<T: Send + Sync + 'static>(&self) -> crate::Result<Arc<T>> {
-        let value = self.services.get(&TypeId::of::<T>()).ok_or_else(|| {
+        let type_id = TypeId::of::<T>();
+        if let Some(scope) = &self.dependency_scope
+            && type_id != TypeId::of::<crate::Logger>()
+            && !scope.allowed_type_ids.contains(&type_id)
+        {
+            return Err(crate::exception::startup_error(format!(
+                "{} resolved {} without declaring it in dependencies()",
+                scope.provider_type_name,
+                std::any::type_name::<T>()
+            )));
+        }
+
+        let value = self.services.get(&type_id).ok_or_else(|| {
             crate::exception::startup_error(format!(
                 "no provider registered for {}",
                 std::any::type_name::<T>()

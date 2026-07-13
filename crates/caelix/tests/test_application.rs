@@ -14,6 +14,10 @@ struct NamedRepository {
 }
 
 impl Injectable for NamedRepository {
+    fn dependencies() -> Vec<caelix::ProviderDependency> {
+        caelix::provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> caelix::BoxFuture<'_, caelix::Result<Self>> {
         Box::pin(async move { Ok(Self { name: "production" }) })
     }
@@ -24,6 +28,10 @@ struct UsersService {
 }
 
 impl Injectable for UsersService {
+    fn dependencies() -> Vec<caelix::ProviderDependency> {
+        caelix::provider_dependencies![NamedRepository]
+    }
+
     fn create(container: &Container) -> caelix::BoxFuture<'_, caelix::Result<Self>> {
         Box::pin(async move {
             Ok(Self {
@@ -38,6 +46,10 @@ struct UsersController {
 }
 
 impl Injectable for UsersController {
+    fn dependencies() -> Vec<caelix::ProviderDependency> {
+        caelix::provider_dependencies![UsersService]
+    }
+
     fn create(container: &Container) -> caelix::BoxFuture<'_, caelix::Result<Self>> {
         Box::pin(async move {
             Ok(Self {

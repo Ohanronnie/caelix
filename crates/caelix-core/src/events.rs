@@ -229,6 +229,10 @@ impl Default for EventBus {
 }
 
 impl Injectable for EventBus {
+    fn dependencies() -> Vec<crate::ProviderDependency> {
+        crate::provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async { Ok(Self::new()) })
     }
@@ -238,7 +242,9 @@ pub struct EventModule;
 
 impl Module for EventModule {
     fn register() -> ModuleMetadata {
-        ModuleMetadata::new().provider::<EventBus>()
+        ModuleMetadata::new()
+            .provider::<EventBus>()
+            .export::<EventBus>()
     }
 }
 
@@ -280,8 +286,11 @@ impl EventHandlerDef {
         }
     }
 
-    pub(crate) fn assert_registered(&self, container: &Container) -> Result<()> {
-        if container.contains_type_id(self.type_id) {
+    pub(crate) fn assert_registered_or_declared(
+        &self,
+        declared: &std::collections::HashSet<TypeId>,
+    ) -> Result<()> {
+        if declared.contains(&self.type_id) {
             return Ok(());
         }
 

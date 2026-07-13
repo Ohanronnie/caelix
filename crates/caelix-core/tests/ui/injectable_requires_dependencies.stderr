@@ -1,0 +1,7 @@
+error[E0046]: not all trait items implemented, missing: `dependencies`
+ --> tests/ui/injectable_requires_dependencies.rs:5:1
+  |
+5 | impl Injectable for ManualService {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `dependencies` in implementation
+  |
+  = help: implement the missing item: `fn dependencies() -> Vec<ProviderDependency> { todo!() }`

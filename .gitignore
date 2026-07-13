@@ -1,5 +1,6 @@
 /target/
 /book/
+/docs/book/
 **/node_modules/
 PLAN.md
 examples/sqlx-crud/users.db

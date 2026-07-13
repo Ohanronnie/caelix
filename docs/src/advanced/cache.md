@@ -59,14 +59,14 @@ Values are serialized to `serde_json::Value` before storage and deserialized on 
 ```rust
 use std::time::Duration;
 
-use caelix::{Cache, MemoryCacheOptions, MemoryCacheStore, Module, ModuleMetadata};
+use caelix::{Cache, MemoryCacheOptions, MemoryCacheStore, Module, ModuleMetadata, provider_dependencies};
 
 pub struct CacheConfigModule;
 
 impl Module for CacheConfigModule {
     fn register() -> ModuleMetadata {
         ModuleMetadata::new()
-            .provider_async_factory::<MemoryCacheStore, _, _>(|_container| async {
+            .provider_async_factory::<MemoryCacheStore, _, _>(provider_dependencies![], |_container| async {
                 Ok::<_, std::convert::Infallible>(
                     MemoryCacheStore::with_options(MemoryCacheOptions {
                         max_entries: 10_000,
@@ -121,7 +121,7 @@ pub struct RedisCacheModule;
 impl Module for RedisCacheModule {
     fn register() -> ModuleMetadata {
         ModuleMetadata::new()
-            .provider_async_factory::<Cache, _, _>(|_container| async move {
+            .provider_async_factory::<Cache, _, _>(provider_dependencies![], |_container| async move {
                 let store: Arc<dyn CacheStore> = Arc::new(RedisCacheStore);
                 Ok::<_, std::convert::Infallible>(Cache::new(store))
             })

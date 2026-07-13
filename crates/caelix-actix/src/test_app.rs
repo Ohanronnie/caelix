@@ -14,8 +14,9 @@ use actix_web::{
 };
 use bytes::Bytes;
 use caelix_core::{
-    BoxFuture, Container, Module, ProviderOverrides, StatusCode, build_container_with_overrides,
-    log_application_started, log_module_routes, register_module_controllers, shutdown_module,
+    BoxFuture, Container, Module, ProviderDependency, ProviderOverrides, StatusCode,
+    build_container_with_overrides, log_application_started, log_module_routes,
+    register_module_controllers, shutdown_module,
 };
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -121,6 +122,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
     /// Replace a provider with an async factory producing type `T`.
     pub fn override_provider_factory<T, Fut, E>(
         mut self,
+        dependencies: Vec<ProviderDependency>,
         factory: impl Fn(Arc<Container>) -> Fut + Send + Sync + 'static,
     ) -> Self
     where
@@ -128,7 +130,8 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         Fut: Future<Output = std::result::Result<T, E>> + Send + 'static,
         E: std::fmt::Debug + Send + 'static,
     {
-        self.overrides = std::mem::take(&mut self.overrides).insert_factory::<T, Fut, E>(factory);
+        self.overrides =
+            std::mem::take(&mut self.overrides).insert_factory::<T, Fut, E>(dependencies, factory);
         self
     }
 
@@ -292,6 +295,10 @@ mod tests {
     }
 
     impl Injectable for GreetingService {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
         fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
             Box::pin(async move {
                 Ok(Self {
@@ -306,6 +313,10 @@ mod tests {
     }
 
     impl Injectable for GreetingController {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![GreetingService]
+        }
+
         fn create(container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
             Box::pin(async move {
                 Ok(Self {
@@ -383,6 +394,10 @@ mod tests {
     struct ShutdownService;
 
     impl Injectable for ShutdownService {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
         fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
             Box::pin(async move { Ok(Self) })
         }

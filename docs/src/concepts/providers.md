@@ -37,22 +37,47 @@ Tuple structs and non-struct items are rejected by the macro. Named fields that 
 
 ## Manual Injectable
 
-Implement `Injectable` manually when construction needs owned state, custom initialization, or lifecycle hooks.
+Implement `Injectable` manually when construction needs owned state, custom
+initialization, or lifecycle hooks. A manual implementation has two parts:
+
+- `dependencies()` declares every provider type resolved with
+  `container.resolve::<T>()` in `create`.
+- `create()` performs the actual resolution and construction.
+
+Use `provider_dependencies![...]` for the declaration. It is required: omitting
+`dependencies()` is a compile error, including for a dependency-free provider.
+This is also enforced at construction time. Caelix gives `create` a scoped
+container and rejects `container.resolve::<T>()` when `T` is absent from the
+declaration. The list therefore cannot be used to bypass module visibility.
+
+Caelix uses the declaration before construction to check module visibility,
+report missing dependencies, arrange startup order, and reject dependency
+cycles. A scoped logger from `container.resolve_logger(...)` is not a provider
+dependency, so do not list `Logger`.
 
 ```rust
-use std::{collections::BTreeMap, sync::Mutex};
+use std::sync::Arc;
 
-use caelix::{BoxFuture, Container, Injectable, Result};
+use caelix::{
+    BoxFuture, Container, Injectable, Logger, ProviderDependency, Result,
+    provider_dependencies,
+};
 
 pub struct UsersService {
-    users: Mutex<BTreeMap<i64, UserDto>>,
+    repository: Arc<UsersRepository>,
+    logger: Arc<Logger>,
 }
 
 impl Injectable for UsersService {
-    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
-        Box::pin(async {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![UsersRepository]
+    }
+
+    fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async move {
             Ok(Self {
-                users: Mutex::new(BTreeMap::new()),
+                repository: container.resolve::<UsersRepository>()?,
+                logger: container.resolve_logger("UsersService"),
             })
         })
     }
@@ -63,29 +88,43 @@ impl Injectable for UsersService {
 }
 ```
 
-Manual providers resolve dependencies through `Container`:
+Keep the declaration in sync with `create`. If a provider resolves two
+services, it declares both:
 
 ```rust
-impl Injectable for UsersService {
+impl Injectable for ReportService {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![UsersRepository, AuditService]
+    }
+
     fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async move {
             Ok(Self {
                 repository: container.resolve::<UsersRepository>()?,
-                logger: container.resolve_logger("UsersService"),
+                audit: container.resolve::<AuditService>()?,
             })
         })
     }
 }
 ```
 
+For a dependency-free manual provider, return `provider_dependencies![]`.
+Dependencies must also be visible to the module: declare them locally or
+import a module that explicitly exports them. The declaration applies only
+during construction; resolving application services later from a request or
+runtime-owned container is not part of this provider-construction contract.
+
 ## Async Factories
 
-Use an async factory when construction needs fallible async work, such as opening a database pool.
+Use an async factory when construction needs fallible async work, such as
+opening a database pool. Its first argument is always a dependency declaration,
+including `provider_dependencies![]` when the factory resolves nothing. It has
+the same scheduling and visibility role as `Injectable::dependencies()`.
 
 ```rust
 use std::sync::Arc;
 
-use caelix::{Container, Module, ModuleMetadata};
+use caelix::{Container, Module, ModuleMetadata, provider_dependencies};
 
 pub struct DatabasePool;
 
@@ -94,23 +133,38 @@ pub struct AppModule;
 impl Module for AppModule {
     fn register() -> ModuleMetadata {
         ModuleMetadata::new()
-            .provider_async_factory::<DatabasePool, _, _>(|_container: Arc<Container>| async move {
-                DatabasePool::connect("postgres://localhost/app").await
-            })
+            .provider_async_factory::<DatabasePool, _, _>(
+                provider_dependencies![],
+                |_container: Arc<Container>| async move {
+                    DatabasePool::connect("postgres://localhost/app").await
+                },
+            )
     }
 }
 ```
 
-The factory receives an `Arc<Container>`, so it can resolve providers registered earlier:
+The factory receives an `Arc<Container>`. Every provider type resolved from it
+must appear in the first argument; closures cannot be inspected to infer this
+list. Caelix applies the same scoped-resolution check used for handwritten
+`Injectable` implementations. A scoped logger obtained through
+`container.resolve_logger(...)` is not a provider dependency.
 
 ```rust
 ModuleMetadata::new()
     .provider::<Config>()
-    .provider_async_factory::<DatabasePool, _, _>(|container: Arc<Container>| async move {
-        let config = container.resolve::<Config>()?;
-        DatabasePool::connect(&config.database_url).await
-    })
+    .provider_async_factory::<DatabasePool, _, _>(
+        provider_dependencies![Config],
+        |container: Arc<Container>| async move {
+            let config = container.resolve::<Config>()?;
+            DatabasePool::connect(&config.database_url).await
+        },
+    )
 ```
+
+Factory dependencies follow normal module visibility rules. If `Config` is
+owned by `ConfigModule`, `ConfigModule` must export `Config` and the module
+declaring the factory must import `ConfigModule`. Declaring `Config` in the
+factory list does not make it public or register it.
 
 Async factory providers are construction-only. They use no-op lifecycle callbacks, so providers that need `on_module_init`, `on_bootstrap`, or `on_shutdown` should implement `Injectable` directly and use `.provider::<T>()`.
 
@@ -131,6 +185,12 @@ Application crates usually cannot write `impl Injectable for PgPool` because Rus
 
 ## Provider Visibility
 
-Providers are visible after registration. Imports are processed first, then the importing module's providers, then its controllers. This allows controllers to inject providers from the same module or any earlier imported module.
+Providers are visible only within their declaring module, through explicit exports
+from direct imports, or through explicit exports of global modules. Imports are
+not registration-order visibility.
 
-If a dependency is missing, prefer `container.resolve::<T>()` in manual provider construction so startup can return an error. During `Application::new`, metadata validation also catches missing provider definitions and returns startup errors for declared-but-unregistered providers.
+`#[injectable]` records `Arc<T>` fields automatically. Manual implementations
+and async factories must declare each resolved dependency with
+`provider_dependencies![T, ...]`. The declaration is mandatory for handwritten
+providers, and Caelix rejects `container.resolve::<T>()` during construction
+when `T` is absent from it.

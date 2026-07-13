@@ -121,6 +121,10 @@ impl Default for MemoryCacheStore {
 }
 
 impl Injectable for MemoryCacheStore {
+    fn dependencies() -> Vec<crate::ProviderDependency> {
+        crate::provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, crate::Result<Self>> {
         Box::pin(async { Ok(Self::new()) })
     }
@@ -263,6 +267,10 @@ impl Cache {
 }
 
 impl Injectable for Cache {
+    fn dependencies() -> Vec<crate::ProviderDependency> {
+        crate::provider_dependencies![MemoryCacheStore]
+    }
+
     fn create(container: &Container) -> BoxFuture<'_, crate::Result<Self>> {
         Box::pin(async move {
             let store = container.resolve::<MemoryCacheStore>()? as Arc<dyn CacheStore>;
@@ -278,5 +286,7 @@ impl Module for CacheModule {
         ModuleMetadata::new()
             .provider::<MemoryCacheStore>()
             .provider::<Cache>()
+            .export::<MemoryCacheStore>()
+            .export::<Cache>()
     }
 }

@@ -16,13 +16,30 @@ pub trait Injectable: Send + Sync + 'static {
     where
         Self: Sized;
 
+    fn dependencies() -> Vec<ProviderDependency>
+    where
+        Self: Sized;
+
     fn on_module_init(&self) -> BoxFuture<'_, Result<()>>;
     fn on_bootstrap(&self) -> BoxFuture<'_, Result<()>>;
     fn on_shutdown(&self) -> BoxFuture<'_, Result<()>>;
 }
 ```
 
-Implement manually for owned state, custom construction, or lifecycle hooks. Use `#[injectable]` for unit structs and named-field structs whose fields are all `Arc<T>`.
+Implement manually for owned state, custom construction, or lifecycle hooks. A
+manual implementation must declare every provider it resolves from `create`:
+
+```rust
+fn dependencies() -> Vec<ProviderDependency> {
+    provider_dependencies![Database, Config]
+}
+```
+
+Use `provider_dependencies![]` when it resolves no providers. The compiler
+requires this method, and Caelix rejects an undeclared `container.resolve::<T>()`
+while constructing the provider. `#[injectable]` supplies the declaration
+automatically for its `Arc<T>` fields; `Arc<Logger>` is excluded because it uses
+the scoped logger API rather than DI resolution.
 
 ## `Controller`
 

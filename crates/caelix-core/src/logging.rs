@@ -242,6 +242,10 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
 }
 
 impl crate::Injectable for Logger {
+    fn dependencies() -> Vec<crate::ProviderDependency> {
+        crate::provider_dependencies![]
+    }
+
     fn create(_container: &crate::Container) -> crate::BoxFuture<'_, crate::Result<Self>> {
         Box::pin(async move { Ok(Self::new("Application")) })
     }

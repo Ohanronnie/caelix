@@ -1,7 +1,7 @@
 error[E0277]: `SendWelcomeEmail` cannot be registered with `.event_handler::<SendWelcomeEmail>()` yet
-  --> tests/ui/event_handler_missing_registerable.rs:26:14
+  --> tests/ui/event_handler_missing_registerable.rs:30:14
    |
-26 |             .event_handler::<SendWelcomeEmail>()
+30 |             .event_handler::<SendWelcomeEmail>()
    |              ^^^^^^^^^^^^^ missing `impl RegisterableEventHandler for SendWelcomeEmail`
    |
 help: the trait `RegisterableEventHandler` is not implemented for `SendWelcomeEmail`

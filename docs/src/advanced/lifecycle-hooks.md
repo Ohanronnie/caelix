@@ -13,13 +13,17 @@ The `#[injectable]` macro uses the default no-op hooks. Implement `Injectable` m
 ```rust
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use caelix::{BoxFuture, Container, Injectable, Result};
+use caelix::{BoxFuture, Container, Injectable, ProviderDependency, Result, provider_dependencies};
 
 pub struct Worker {
     started: AtomicBool,
 }
 
 impl Injectable for Worker {
+    fn dependencies() -> Vec<ProviderDependency> {
+        provider_dependencies![]
+    }
+
     fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
         Box::pin(async {
             Ok(Self {
@@ -75,4 +79,4 @@ For 5xx exceptions, the client response body is sanitized. Startup errors are re
 
 ## Async Factory Limitation
 
-Providers registered with `.provider_async_factory::<T, _, _>(...)` are construction-only. Caelix stores no lifecycle callbacks for the concrete type, so factory providers use no-op `on_module_init`, `on_bootstrap`, and `on_shutdown`. If a provider needs lifecycle hooks, implement `Injectable` and register it with `.provider::<T>()`.
+Providers registered with `.provider_async_factory::<T, _, _>(provider_dependencies![...], ...)` are construction-only. Caelix stores no lifecycle callbacks for the concrete type, so factory providers use no-op `on_module_init`, `on_bootstrap`, and `on_shutdown`. If a provider needs lifecycle hooks, implement `Injectable` and register it with `.provider::<T>()`.

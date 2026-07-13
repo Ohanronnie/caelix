@@ -4,7 +4,7 @@ use crate::{
 };
 use std::{
     any::{Any, TypeId},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Debug,
     future::Future,
     sync::Arc,
@@ -17,9 +17,38 @@ type BuildProviderFn =
 type LifecycleFn =
     Box<dyn for<'a> Fn(&'a ProviderValue) -> BoxFuture<'a, crate::Result<()>> + Send + Sync>;
 
+/// Metadata for one resolved provider dependency.
+#[derive(Clone, Copy)]
+pub struct ProviderDependency {
+    type_id: TypeId,
+    type_name: &'static str,
+}
+
+impl ProviderDependency {
+    pub fn of<T: Send + Sync + 'static>() -> Self {
+        Self {
+            type_id: TypeId::of::<T>(),
+            type_name: std::any::type_name::<T>(),
+        }
+    }
+
+    pub(crate) fn type_id(&self) -> TypeId {
+        self.type_id
+    }
+}
+
+/// Declares provider dependencies for manual `Injectable` implementations and factories.
+#[macro_export]
+macro_rules! provider_dependencies {
+    ($($dependency:ty),* $(,)?) => {
+        vec![$($crate::ProviderDependency::of::<$dependency>()),*]
+    };
+}
+
 pub struct ProviderDef {
     type_id: TypeId,
     type_name: &'static str,
+    dependencies: Vec<ProviderDependency>,
     build: BuildProviderFn,
     init_fn: LifecycleFn,
     bootstrap_fn: LifecycleFn,
@@ -31,11 +60,9 @@ impl ProviderDef {
         Self {
             type_id: TypeId::of::<T>(),
             type_name: std::any::type_name::<T>(),
+            dependencies: T::dependencies(),
             build: Box::new(|container| {
-                Box::pin(async move {
-                    let value = T::create(container).await?;
-                    Ok(Arc::new(value) as Arc<dyn Any + Send + Sync>)
-                })
+                Box::pin(async move { Ok(Arc::new(T::create(container).await?) as ProviderValue) })
             }),
             init_fn: Box::new(|value| {
                 let value = downcast_provider::<T>(value);
@@ -53,14 +80,14 @@ impl ProviderDef {
     }
 
     /// Pre-built provider value for tests and other manual registration paths.
-    ///
-    /// Lifecycle hooks are no-ops (NestJS `useValue` semantics).
+    /// Lifecycle hooks are no-ops (`useValue` semantics).
     pub fn instance<T: Send + Sync + 'static>(value: T) -> Self {
-        let value = Arc::new(value) as Arc<dyn Any + Send + Sync>;
+        let value = Arc::new(value) as ProviderValue;
         Self {
             type_id: TypeId::of::<T>(),
             type_name: std::any::type_name::<T>(),
-            build: Box::new(move |_container| {
+            dependencies: vec![],
+            build: Box::new(move |_| {
                 let value = value.clone();
                 Box::pin(async move { Ok(value) })
             }),
@@ -71,6 +98,7 @@ impl ProviderDef {
     }
 
     pub fn async_factory<T, Fut, E>(
+        dependencies: Vec<ProviderDependency>,
         factory: impl Fn(Arc<Container>) -> Fut + Send + Sync + 'static,
     ) -> Self
     where
@@ -81,10 +109,9 @@ impl ProviderDef {
         Self {
             type_id: TypeId::of::<T>(),
             type_name: std::any::type_name::<T>(),
+            dependencies,
             build: Box::new(move |container| {
-                let container = Arc::new(container.clone());
-                let future = factory(container);
-
+                let future = factory(Arc::new(container.clone()));
                 Box::pin(async move {
                     let value = future.await.map_err(|err| {
                         crate::exception::startup_error(format!(
@@ -93,8 +120,7 @@ impl ProviderDef {
                             err
                         ))
                     })?;
-
-                    Ok(Arc::new(value) as Arc<dyn Any + Send + Sync>)
+                    Ok(Arc::new(value) as ProviderValue)
                 })
             }),
             init_fn: noop_lifecycle(),
@@ -106,7 +132,6 @@ impl ProviderDef {
     pub fn type_id(&self) -> TypeId {
         self.type_id
     }
-
     pub fn type_name(&self) -> &'static str {
         self.type_name
     }
@@ -115,7 +140,6 @@ impl ProviderDef {
         if container.contains_type_id(self.type_id) {
             return Ok(());
         }
-
         Err(crate::exception::startup_error(format!(
             "missing provider at startup: {} was declared by module metadata but was not registered",
             self.type_name
@@ -125,12 +149,12 @@ impl ProviderDef {
     async fn run_lifecycle(
         &self,
         value: &ProviderValue,
-        hook_name: &'static str,
-        lifecycle_fn: &LifecycleFn,
+        hook: &'static str,
+        callback: &LifecycleFn,
     ) -> crate::Result<()> {
-        lifecycle_fn(value).await.map_err(|err| {
+        callback(value).await.map_err(|err| {
             crate::exception::startup_error(format!(
-                "{hook_name} failed for {}: {}: {}",
+                "{hook} failed for {}: {}: {}",
                 self.type_name, err.error, err.message
             ))
         })
@@ -139,43 +163,33 @@ impl ProviderDef {
     async fn run_lifecycle_from_container(
         &self,
         container: &Container,
-        hook_name: &'static str,
-        lifecycle_fn: &LifecycleFn,
+        hook: &'static str,
+        callback: &LifecycleFn,
     ) -> crate::Result<()> {
-        let value = container.resolve_erased(self.type_id).ok_or_else(|| {
-            crate::exception::startup_error(format!(
-                "missing provider during {hook_name}: {} was declared by module metadata but was not registered",
-                self.type_name
-            ))
-        })?;
-
-        self.run_lifecycle(&value, hook_name, lifecycle_fn).await
+        let value = container.resolve_erased(self.type_id).ok_or_else(|| crate::exception::startup_error(format!(
+            "missing provider during {hook}: {} was declared by module metadata but was not registered", self.type_name
+        )))?;
+        self.run_lifecycle(&value, hook, callback).await
     }
 }
 
-/// Provider replacements applied while building a container (primarily for tests).
-///
-/// Overrides match by [`TypeId`]: the replacement must be the same concrete type
-/// that modules register and inject via `Arc<T>`.
 pub struct ProviderOverrides {
     defs: HashMap<TypeId, ProviderDef>,
 }
-
 impl ProviderOverrides {
     pub fn new() -> Self {
         Self {
             defs: HashMap::new(),
         }
     }
-
     pub fn insert_instance<T: Send + Sync + 'static>(mut self, value: T) -> Self {
         self.defs
             .insert(TypeId::of::<T>(), ProviderDef::instance(value));
         self
     }
-
     pub fn insert_factory<T, Fut, E>(
         mut self,
+        dependencies: Vec<ProviderDependency>,
         factory: impl Fn(Arc<Container>) -> Fut + Send + Sync + 'static,
     ) -> Self
     where
@@ -185,21 +199,18 @@ impl ProviderOverrides {
     {
         self.defs.insert(
             TypeId::of::<T>(),
-            ProviderDef::async_factory::<T, Fut, E>(factory),
+            ProviderDef::async_factory::<T, Fut, E>(dependencies, factory),
         );
         self
     }
-
     pub fn insert(mut self, def: ProviderDef) -> Self {
         self.defs.insert(def.type_id, def);
         self
     }
-
     pub(crate) fn into_inner(self) -> HashMap<TypeId, ProviderDef> {
         self.defs
     }
 }
-
 impl Default for ProviderOverrides {
     fn default() -> Self {
         Self::new()
@@ -214,7 +225,6 @@ fn downcast_provider<T: Send + Sync + 'static>(value: &ProviderValue) -> crate::
         ))
     })
 }
-
 fn noop_lifecycle() -> LifecycleFn {
     Box::new(|_| Box::pin(async { Ok(()) }))
 }
@@ -226,6 +236,17 @@ pub struct ControllerDef {
     pub(crate) openapi_routes_fn: fn() -> &'static [crate::openapi::OpenApiRouteDef],
     provider: ProviderDef,
 }
+impl ControllerDef {
+    pub fn of<C: Controller + Injectable + 'static>() -> Self {
+        Self {
+            register_fn: |any| C::register_routes(any),
+            route_log_fn: || crate::log_controller_routes::<C>(),
+            #[cfg(feature = "openapi")]
+            openapi_routes_fn: || C::openapi_routes(),
+            provider: ProviderDef::of::<C>(),
+        }
+    }
+}
 
 pub struct GatewayDef {
     pub path: &'static str,
@@ -233,7 +254,6 @@ pub struct GatewayDef {
     provider: ProviderDef,
     kind: GatewayKind,
 }
-
 enum GatewayKind {
     WebSocket {
         resolve_fn: fn(&Container) -> crate::Result<Arc<dyn WebSocketGateway>>,
@@ -242,7 +262,6 @@ enum GatewayKind {
         register_fn: fn(&Container, &dyn Any) -> crate::Result<()>,
     },
 }
-
 impl GatewayDef {
     pub fn websocket<G: WebSocketGateway>(path: &'static str) -> Self {
         Self {
@@ -250,13 +269,10 @@ impl GatewayDef {
             type_id: TypeId::of::<G>(),
             provider: ProviderDef::of::<G>(),
             kind: GatewayKind::WebSocket {
-                resolve_fn: |container| Ok(container.resolve::<G>()? as Arc<dyn WebSocketGateway>),
+                resolve_fn: |c| Ok(c.resolve::<G>()? as Arc<dyn WebSocketGateway>),
             },
         }
     }
-
-    /// Creates metadata for an optional Socket.IO gateway without coupling
-    /// `caelix-core` to the Axum-only Socket.IO crate.
     #[doc(hidden)]
     pub fn socket_io<G: Injectable>(
         path: &'static str,
@@ -269,7 +285,6 @@ impl GatewayDef {
             kind: GatewayKind::SocketIo { register_fn },
         }
     }
-
     pub fn resolve(&self, container: &Container) -> crate::Result<Arc<dyn WebSocketGateway>> {
         match self.kind {
             GatewayKind::WebSocket { resolve_fn } => resolve_fn(container),
@@ -279,12 +294,10 @@ impl GatewayDef {
             ))),
         }
     }
-
     #[doc(hidden)]
     pub fn is_websocket(&self) -> bool {
         matches!(self.kind, GatewayKind::WebSocket { .. })
     }
-
     #[doc(hidden)]
     pub fn register_socket_io(&self, container: &Container, handle: &dyn Any) -> crate::Result<()> {
         match self.kind {
@@ -293,66 +306,40 @@ impl GatewayDef {
         }
     }
 }
-
-/// Metadata supplied by `#[gateway("/path")]`.
 pub trait Gateway: Injectable {
     #[doc(hidden)]
     fn definition() -> GatewayDef;
 }
 
-impl ControllerDef {
-    pub fn of<C: Controller + Injectable + 'static>() -> Self {
-        Self {
-            register_fn: |any| C::register_routes(any),
-            route_log_fn: || crate::log_controller_routes::<C>(),
-            #[cfg(feature = "openapi")]
-            openapi_routes_fn: || C::openapi_routes(),
-            provider: ProviderDef::of::<C>(),
-        }
-    }
-}
 pub struct ModuleDef {
-    pub(crate) register_fn: for<'a> fn(&'a mut Container) -> BoxFuture<'a, crate::Result<()>>,
-    pub(crate) bootstrap_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, crate::Result<()>>,
-    pub(crate) shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, crate::Result<()>>,
-    pub(crate) controller_register_fn: fn(&mut dyn Any),
+    type_id: TypeId,
+    type_name: &'static str,
+    metadata_fn: fn() -> ModuleMetadata,
     pub(crate) route_log_fn: fn(),
-    pub(crate) validate_fn: fn(&Container) -> crate::Result<()>,
-    pub(crate) gateway_visit_fn:
-        fn(&mut dyn FnMut(&GatewayDef), &mut std::collections::HashSet<TypeId>),
-    #[cfg(feature = "openapi")]
-    pub(crate) openapi_visit_fn: fn(&mut dyn FnMut(&crate::openapi::OpenApiRouteDef)),
 }
-
 impl ModuleDef {
     pub fn of<M: Module + 'static>() -> Self {
         Self {
-            register_fn: |container| Box::pin(async move { register_module::<M>(container).await }),
-            bootstrap_fn: |container| {
-                Box::pin(async move { bootstrap_module::<M>(container).await })
-            },
-            shutdown_fn: |container| Box::pin(async move { shutdown_module::<M>(container).await }),
-            controller_register_fn: |any| register_module_controllers::<M>(any),
+            type_id: TypeId::of::<M>(),
+            type_name: std::any::type_name::<M>(),
+            metadata_fn: M::register,
             route_log_fn: || crate::log_module_routes::<M>(),
-            validate_fn: |container| validate_module_providers::<M>(container),
-            gateway_visit_fn: |visitor, seen| visit_module_gateway_defs::<M>(visitor, seen),
-            #[cfg(feature = "openapi")]
-            openapi_visit_fn: |visitor| visit_module_openapi_routes_dyn::<M>(visitor),
         }
     }
 }
-
 pub trait Module {
     fn register() -> ModuleMetadata;
 }
+
 pub struct ModuleMetadata {
     pub imports: Vec<ModuleDef>,
     pub providers: Vec<ProviderDef>,
     pub controllers: Vec<ControllerDef>,
     pub event_handlers: Vec<EventHandlerDef>,
     pub gateways: Vec<GatewayDef>,
+    exports: Vec<ProviderDependency>,
+    global: bool,
 }
-
 impl ModuleMetadata {
     pub fn new() -> Self {
         Self {
@@ -361,21 +348,27 @@ impl ModuleMetadata {
             controllers: vec![],
             event_handlers: vec![],
             gateways: vec![],
+            exports: vec![],
+            global: false,
         }
     }
-
+    /// Creates metadata for a global module. Only explicitly exported providers become global.
+    pub fn global() -> Self {
+        let mut metadata = Self::new();
+        metadata.global = true;
+        metadata
+    }
     pub fn import<M: Module + 'static>(mut self) -> Self {
         self.imports.push(ModuleDef::of::<M>());
         self
     }
-
     pub fn provider<T: Injectable>(mut self) -> Self {
         self.providers.push(ProviderDef::of::<T>());
         self
     }
-
     pub fn provider_async_factory<T, Fut, E>(
         mut self,
+        dependencies: Vec<ProviderDependency>,
         factory: impl Fn(Arc<Container>) -> Fut + Send + Sync + 'static,
     ) -> Self
     where
@@ -383,21 +376,20 @@ impl ModuleMetadata {
         Fut: Future<Output = std::result::Result<T, E>> + Send + 'static,
         E: Debug + Send + 'static,
     {
-        self.providers
-            .push(ProviderDef::async_factory::<T, Fut, E>(factory));
+        self.providers.push(ProviderDef::async_factory::<T, Fut, E>(
+            dependencies,
+            factory,
+        ));
         self
     }
-
     pub fn controller<C: Controller + Injectable + 'static>(mut self) -> Self {
         self.controllers.push(ControllerDef::of::<C>());
         self
     }
-
     pub fn gateway<G: Gateway>(mut self) -> Self {
         self.gateways.push(G::definition());
         self
     }
-
     pub fn event_handler<H>(mut self) -> Self
     where
         H: RegisterableEventHandler + EventHandler<H::Event>,
@@ -405,7 +397,6 @@ impl ModuleMetadata {
         self.event_handlers.push(EventHandlerDef::of::<H>());
         self
     }
-
     pub fn event_handler_for<E, H>(mut self) -> Self
     where
         E: Clone + Send + Sync + 'static,
@@ -415,407 +406,535 @@ impl ModuleMetadata {
             .push(EventHandlerDef::for_event::<E, H>());
         self
     }
+    /// Makes a locally declared provider, or a direct import's export, available to importing modules.
+    pub fn export<T: Send + Sync + 'static>(mut self) -> Self {
+        self.exports.push(ProviderDependency::of::<T>());
+        self
+    }
 }
-
 impl Default for ModuleMetadata {
     fn default() -> Self {
         Self::new()
     }
 }
 
-pub async fn register_module<M: Module>(container: &mut Container) -> crate::Result<()> {
-    let module_start = Instant::now();
-    let metadata = M::register();
-
-    for import in &metadata.imports {
-        (import.register_fn)(container).await?;
-    }
-
-    for provider in &metadata.providers {
-        container.mark_provider_declared(provider.type_id);
-        register_provider_def(container, provider).await?;
-    }
-
-    for controller in &metadata.controllers {
-        register_provider_def(container, &controller.provider).await?;
-    }
-
-    for gateway in &metadata.gateways {
-        if !container.contains_type_id(gateway.type_id) {
-            register_provider_def(container, &gateway.provider).await?;
-        }
-    }
-
-    for handler in &metadata.event_handlers {
-        handler.assert_registered(container)?;
-        handler.register(container)?;
-    }
-
-    crate::log_module_initialized(std::any::type_name::<M>(), module_start.elapsed());
-    Ok(())
+struct ModuleNode {
+    type_id: TypeId,
+    type_name: &'static str,
+    metadata: ModuleMetadata,
+    imports: Vec<usize>,
+}
+struct ModuleGraph {
+    nodes: Vec<ModuleNode>,
+}
+#[derive(Clone, Copy)]
+enum ProviderSlot {
+    Provider(usize),
+    Controller(usize),
+    Gateway(usize),
+}
+#[derive(Clone, Copy)]
+struct ProviderRegistration {
+    module: usize,
+    slot: ProviderSlot,
 }
 
-async fn register_provider_def(
-    container: &mut Container,
-    declared: &ProviderDef,
-) -> crate::Result<()> {
-    // Once a type has been satisfied by an override, ignore later declarations
-    // of the same TypeId so production registrations cannot replace the test
-    // double (registration overwrites by TypeId).
-    if container.was_overridden(declared.type_id) {
-        return Ok(());
+impl ModuleGraph {
+    fn discover<M: Module + 'static>() -> crate::Result<Self> {
+        Self::discover_from(ModuleDef::of::<M>())
     }
-
-    let provider_start = Instant::now();
-    let override_def = container.take_pending_override(declared.type_id);
-    if override_def.is_some() {
-        container.mark_override_applied(declared.type_id);
-    }
-    let effective = override_def.as_ref().unwrap_or(declared);
-
-    let value = (effective.build)(container).await?;
-    container.register_erased(effective.type_id, value.clone());
-    effective
-        .run_lifecycle(&value, "on_module_init", &effective.init_fn)
-        .await?;
-    crate::log_provider_initialized(effective.type_name, provider_start.elapsed());
-    Ok(())
-}
-
-pub async fn bootstrap_module<M: Module>(container: &Container) -> crate::Result<()> {
-    let metadata = M::register();
-
-    for import in &metadata.imports {
-        (import.bootstrap_fn)(container).await?;
-    }
-
-    for provider in &metadata.providers {
-        if container.was_overridden(provider.type_id) {
-            continue;
+    fn discover_from(root: ModuleDef) -> crate::Result<Self> {
+        fn visit(
+            def: ModuleDef,
+            graph: &mut Vec<ModuleNode>,
+            states: &mut HashMap<TypeId, u8>,
+            path: &mut Vec<&'static str>,
+        ) -> crate::Result<usize> {
+            match states.get(&def.type_id).copied() {
+                Some(2) => {
+                    return Ok(graph
+                        .iter()
+                        .position(|node| node.type_id == def.type_id)
+                        .expect("discovered module missing"));
+                }
+                Some(1) => {
+                    let mut cycle = path.clone();
+                    cycle.push(def.type_name);
+                    return Err(crate::exception::startup_error(format!(
+                        "circular module import: {}",
+                        cycle.join(" -> ")
+                    )));
+                }
+                _ => {}
+            }
+            states.insert(def.type_id, 1);
+            path.push(def.type_name);
+            let metadata = (def.metadata_fn)();
+            let index = graph.len();
+            graph.push(ModuleNode {
+                type_id: def.type_id,
+                type_name: def.type_name,
+                metadata,
+                imports: vec![],
+            });
+            let imports = std::mem::take(&mut graph[index].metadata.imports);
+            for import in imports {
+                let child = visit(import, graph, states, path)?;
+                graph[index].imports.push(child);
+            }
+            path.pop();
+            states.insert(def.type_id, 2);
+            Ok(index)
         }
-        provider
-            .run_lifecycle_from_container(container, "on_bootstrap", &provider.bootstrap_fn)
-            .await?;
+        let mut nodes = vec![];
+        let mut states = HashMap::new();
+        let root_index = visit(root, &mut nodes, &mut states, &mut vec![])?;
+        // DFS creates parents before children; reverse for imported-first deterministic traversal.
+        let mut ordered = Vec::new();
+        let mut seen = HashSet::new();
+        fn order(
+            index: usize,
+            nodes: &Vec<ModuleNode>,
+            seen: &mut HashSet<usize>,
+            ordered: &mut Vec<usize>,
+        ) {
+            if !seen.insert(index) {
+                return;
+            }
+            for &child in &nodes[index].imports {
+                order(child, nodes, seen, ordered);
+            }
+            ordered.push(index);
+        }
+        order(root_index, &nodes, &mut seen, &mut ordered);
+        let mut remap = HashMap::new();
+        for (new, old) in ordered.iter().enumerate() {
+            remap.insert(*old, new);
+        }
+        let mut slots: Vec<Option<ModuleNode>> = nodes.into_iter().map(Some).collect();
+        let mut result = Vec::with_capacity(slots.len());
+        for old in ordered {
+            let mut node = slots[old]
+                .take()
+                .expect("module graph ordering repeated a node");
+            node.imports = node.imports.into_iter().map(|i| remap[&i]).collect();
+            result.push(node);
+        }
+        let _ = remap[&root_index];
+        Ok(Self { nodes: result })
     }
 
-    for controller in &metadata.controllers {
-        if container.was_overridden(controller.provider.type_id) {
-            continue;
+    fn definitions(&self) -> Vec<ProviderRegistration> {
+        let mut values = vec![];
+        for (module, node) in self.nodes.iter().enumerate() {
+            values.extend(
+                (0..node.metadata.providers.len()).map(|slot| ProviderRegistration {
+                    module,
+                    slot: ProviderSlot::Provider(slot),
+                }),
+            );
+            values.extend(
+                (0..node.metadata.controllers.len()).map(|slot| ProviderRegistration {
+                    module,
+                    slot: ProviderSlot::Controller(slot),
+                }),
+            );
+            for slot in 0..node.metadata.gateways.len() {
+                values.push(ProviderRegistration {
+                    module,
+                    slot: ProviderSlot::Gateway(slot),
+                });
+            }
         }
-        controller
-            .provider
-            .run_lifecycle_from_container(
+        values
+    }
+    fn def(&self, registration: ProviderRegistration) -> &ProviderDef {
+        match registration.slot {
+            ProviderSlot::Provider(index) => {
+                &self.nodes[registration.module].metadata.providers[index]
+            }
+            ProviderSlot::Controller(index) => {
+                &self.nodes[registration.module].metadata.controllers[index].provider
+            }
+            ProviderSlot::Gateway(index) => {
+                &self.nodes[registration.module].metadata.gateways[index].provider
+            }
+        }
+    }
+    fn local_types(&self, module: usize) -> HashSet<TypeId> {
+        self.definitions()
+            .into_iter()
+            .filter(|r| r.module == module)
+            .map(|r| self.def(r).type_id)
+            .collect()
+    }
+    fn preflight(&self, container: &Container) -> crate::Result<Vec<ProviderRegistration>> {
+        let definitions = self.definitions();
+        let mut by_type = HashMap::new();
+        for registration in &definitions {
+            let def = self.def(*registration);
+            if let Some(existing) = by_type.insert(def.type_id, *registration) {
+                if !container.has_pending_override(def.type_id)
+                    && !container.was_overridden(def.type_id)
+                {
+                    return Err(crate::exception::startup_error(format!(
+                        "duplicate provider registration for {} in {} and {}",
+                        def.type_name,
+                        self.nodes[existing.module].type_name,
+                        self.nodes[registration.module].type_name
+                    )));
+                }
+            }
+        }
+        let locals: Vec<HashSet<TypeId>> =
+            (0..self.nodes.len()).map(|i| self.local_types(i)).collect();
+        let mut exports = vec![HashSet::new(); self.nodes.len()];
+        for index in 0..self.nodes.len() {
+            let node = &self.nodes[index];
+            for export in &node.metadata.exports {
+                let imported = node
+                    .imports
+                    .iter()
+                    .any(|&child| exports[child].contains(&export.type_id));
+                if !locals[index].contains(&export.type_id) && !imported {
+                    return Err(crate::exception::startup_error(format!(
+                        "module {} cannot export {}: it is neither declared locally nor exported by a direct import",
+                        node.type_name, export.type_name
+                    )));
+                }
+                exports[index].insert(export.type_id);
+            }
+        }
+        let global_exports: HashSet<TypeId> = self
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.metadata.global)
+            .flat_map(|(index, _)| exports[index].iter().copied())
+            .collect();
+        let visible = |module: usize, type_id: TypeId| {
+            locals[module].contains(&type_id)
+                || global_exports.contains(&type_id)
+                || self.nodes[module]
+                    .imports
+                    .iter()
+                    .any(|&child| exports[child].contains(&type_id))
+        };
+        for registration in &definitions {
+            let production = self.def(*registration);
+            let effective = container
+                .pending_override(production.type_id)
+                .unwrap_or(production);
+            for dependency in &effective.dependencies {
+                if dependency.type_id == TypeId::of::<crate::Logger>() {
+                    continue;
+                }
+                if by_type.contains_key(&dependency.type_id) {
+                    if !visible(registration.module, dependency.type_id) {
+                        return Err(crate::exception::startup_error(format!(
+                            "{} depends on {} but it is not visible in module {}; import and export its module",
+                            effective.type_name,
+                            dependency.type_name,
+                            self.nodes[registration.module].type_name
+                        )));
+                    }
+                } else if !container.contains_type_id(dependency.type_id) {
+                    return Err(crate::exception::startup_error(format!(
+                        "missing provider at startup: {} depends on {} but no provider is registered",
+                        effective.type_name, dependency.type_name
+                    )));
+                }
+            }
+        }
+        for (module, node) in self.nodes.iter().enumerate() {
+            for handler in &node.metadata.event_handlers {
+                handler.assert_registered_or_declared(&locals[module])?;
+                if !visible(module, TypeId::of::<crate::EventBus>()) {
+                    return Err(crate::exception::startup_error(format!(
+                        "no provider registered for EventBus in module {}; import EventModule",
+                        node.type_name
+                    )));
+                }
+            }
+        }
+        let mut sorted = vec![];
+        let mut states = HashMap::new();
+        let mut stack = vec![];
+        fn schedule(
+            reg: ProviderRegistration,
+            graph: &ModuleGraph,
+            by_type: &HashMap<TypeId, ProviderRegistration>,
+            container: &Container,
+            states: &mut HashMap<TypeId, u8>,
+            stack: &mut Vec<&'static str>,
+            sorted: &mut Vec<ProviderRegistration>,
+        ) -> crate::Result<()> {
+            let def = graph.def(reg);
+            match states.get(&def.type_id).copied() {
+                Some(2) => return Ok(()),
+                Some(1) => {
+                    let mut cycle = stack.clone();
+                    cycle.push(def.type_name);
+                    return Err(crate::exception::startup_error(format!(
+                        "provider dependency cycle: {}",
+                        cycle.join(" -> ")
+                    )));
+                }
+                _ => {}
+            }
+            states.insert(def.type_id, 1);
+            stack.push(def.type_name);
+            let effective = container.pending_override(def.type_id).unwrap_or(def);
+            for dep in &effective.dependencies {
+                if let Some(next) = by_type.get(&dep.type_id) {
+                    schedule(*next, graph, by_type, container, states, stack, sorted)?;
+                }
+            }
+            stack.pop();
+            states.insert(def.type_id, 2);
+            sorted.push(reg);
+            Ok(())
+        }
+        for registration in definitions {
+            schedule(
+                registration,
+                self,
+                &by_type,
                 container,
-                "on_bootstrap",
-                &controller.provider.bootstrap_fn,
-            )
-            .await?;
+                &mut states,
+                &mut stack,
+                &mut sorted,
+            )?;
+        }
+        Ok(sorted)
     }
+    fn def_by_type(&self, type_id: TypeId) -> Option<&ProviderDef> {
+        self.definitions().into_iter().find_map(|r| {
+            let def = self.def(r);
+            (def.type_id == type_id).then_some(def)
+        })
+    }
+}
 
-    for gateway in &metadata.gateways {
-        if container.was_overridden(gateway.type_id)
-            || container.is_provider_declared(gateway.type_id)
-            || !container.begin_gateway_bootstrap(gateway.type_id)
+async fn initialize_graph(graph: &ModuleGraph, container: &mut Container) -> crate::Result<()> {
+    let order = graph.preflight(container)?;
+    for registration in order {
+        let declared = graph.def(registration);
+        container.mark_provider_declared(declared.type_id);
+        if container.contains_type_id(declared.type_id)
+            || container.was_overridden(declared.type_id)
         {
             continue;
         }
-        gateway
-            .provider
-            .run_lifecycle_from_container(container, "on_bootstrap", &gateway.provider.bootstrap_fn)
-            .await?;
-    }
-
-    Ok(())
-}
-
-pub async fn shutdown_module<M: Module>(container: &Container) -> crate::Result<()> {
-    let metadata = M::register();
-
-    for gateway in metadata.gateways.iter().rev() {
-        if container.was_overridden(gateway.type_id)
-            || container.is_provider_declared(gateway.type_id)
-            || !container.begin_gateway_shutdown(gateway.type_id)
+        let start = Instant::now();
+        let override_def = container.take_pending_override(declared.type_id);
+        if override_def.is_some() {
+            container.mark_override_applied(declared.type_id);
+        }
+        let effective = override_def.as_ref().unwrap_or(declared);
+        let scoped_container =
+            container.scoped_for_provider(effective.type_name, &effective.dependencies);
+        let value = match (effective.build)(&scoped_container).await {
+            Ok(value) => value,
+            Err(error) => {
+                rollback_graph(graph, container).await;
+                return Err(error);
+            }
+        };
+        container.register_erased(effective.type_id, value.clone());
+        if let Err(error) = effective
+            .run_lifecycle(&value, "on_module_init", &effective.init_fn)
+            .await
         {
-            continue;
+            rollback_graph(graph, container).await;
+            return Err(error);
         }
-        gateway
-            .provider
-            .run_lifecycle_from_container(container, "on_shutdown", &gateway.provider.shutdown_fn)
-            .await?;
-    }
-
-    for controller in metadata.controllers.iter().rev() {
-        if container.was_overridden(controller.provider.type_id) {
-            continue;
+        if override_def.is_none() {
+            container.record_initialized_provider(declared.type_id);
         }
-        controller
-            .provider
-            .run_lifecycle_from_container(
-                container,
-                "on_shutdown",
-                &controller.provider.shutdown_fn,
-            )
-            .await?;
+        crate::log_provider_initialized(effective.type_name, start.elapsed());
     }
-
-    for provider in metadata.providers.iter().rev() {
-        if container.was_overridden(provider.type_id) {
-            continue;
+    for node in &graph.nodes {
+        for handler in &node.metadata.event_handlers {
+            if let Err(error) = handler.register(container) {
+                rollback_graph(graph, container).await;
+                return Err(error);
+            }
         }
-        provider
-            .run_lifecycle_from_container(container, "on_shutdown", &provider.shutdown_fn)
-            .await?;
+        crate::log_module_initialized(node.type_name, std::time::Duration::ZERO);
     }
-
-    for import in metadata.imports.iter().rev() {
-        (import.shutdown_fn)(container).await?;
-    }
-
     Ok(())
 }
 
-pub async fn build_container<M: Module>() -> crate::Result<Container> {
+async fn bootstrap_graph(graph: &ModuleGraph, container: &Container) -> crate::Result<()> {
+    let order = graph.preflight(container)?;
+    let initialized: HashSet<TypeId> = container.initialized_provider_types().into_iter().collect();
+    for registration in order {
+        let def = graph.def(registration);
+        if initialized.contains(&def.type_id)
+            && !container.was_overridden(def.type_id)
+            && container.begin_provider_bootstrap(def.type_id)
+        {
+            if let Err(error) = def
+                .run_lifecycle_from_container(container, "on_bootstrap", &def.bootstrap_fn)
+                .await
+            {
+                rollback_graph(graph, container).await;
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn rollback_graph(graph: &ModuleGraph, container: &Container) {
+    for type_id in container.take_initialized_providers().into_iter().rev() {
+        if let Some(def) = graph.def_by_type(type_id) {
+            let _ = def
+                .run_lifecycle_from_container(container, "on_shutdown", &def.shutdown_fn)
+                .await;
+        }
+    }
+}
+
+pub async fn register_module<M: Module + 'static>(container: &mut Container) -> crate::Result<()> {
+    let graph = ModuleGraph::discover::<M>()?;
+    initialize_graph(&graph, container).await
+}
+pub async fn bootstrap_module<M: Module + 'static>(container: &Container) -> crate::Result<()> {
+    let graph = ModuleGraph::discover::<M>()?;
+    bootstrap_graph(&graph, container).await
+}
+pub async fn shutdown_module<M: Module + 'static>(container: &Container) -> crate::Result<()> {
+    let graph = ModuleGraph::discover::<M>()?;
+    let mut first = None;
+    for type_id in container.take_initialized_providers().into_iter().rev() {
+        if let Some(def) = graph.def_by_type(type_id) {
+            if let Err(error) = def
+                .run_lifecycle_from_container(container, "on_shutdown", &def.shutdown_fn)
+                .await
+            {
+                if first.is_none() {
+                    first = Some(error);
+                }
+            }
+        }
+    }
+    first.map_or(Ok(()), Err)
+}
+
+pub async fn build_container<M: Module + 'static>() -> crate::Result<Container> {
     build_container_with_overrides::<M>(ProviderOverrides::new()).await
 }
-
-/// Builds a container after registering framework-owned instance providers.
-///
-/// Runtime adapters use this for handles that must be injectable while normal
-/// module providers are being constructed, but which cannot implement
-/// `Injectable` because their construction also produces runtime state.
 #[doc(hidden)]
-pub async fn build_container_with_setup<M: Module>(
+pub async fn build_container_with_setup<M: Module + 'static>(
     setup: impl FnOnce(&mut Container),
 ) -> crate::Result<Container> {
     crate::log_application_starting();
     let mut container = Container::new();
     setup(&mut container);
-    register_module::<M>(&mut container).await?;
-    validate_module_providers::<M>(&container)?;
-    validate_gateway_paths::<M>()?;
-    bootstrap_module::<M>(&container).await?;
+    if let Err(error) = register_module::<M>(&mut container).await {
+        return Err(error);
+    }
+    if let Err(error) =
+        validate_module_providers::<M>(&container).and_then(|_| validate_gateway_paths::<M>())
+    {
+        let graph = ModuleGraph::discover::<M>()?;
+        rollback_graph(&graph, &container).await;
+        return Err(error);
+    }
+    if let Err(error) = bootstrap_module::<M>(&container).await {
+        return Err(error);
+    }
     Ok(container)
 }
-
-pub async fn build_container_with_overrides<M: Module>(
+pub async fn build_container_with_overrides<M: Module + 'static>(
     overrides: ProviderOverrides,
 ) -> crate::Result<Container> {
     crate::log_application_starting();
     let mut container = Container::new();
     container.seed_overrides(overrides);
-    register_module::<M>(&mut container).await?;
-    container.assert_no_unused_overrides()?;
-    validate_module_providers::<M>(&container)?;
-    validate_gateway_paths::<M>()?;
-    bootstrap_module::<M>(&container).await?;
+    if let Err(error) = register_module::<M>(&mut container).await {
+        return Err(error);
+    }
+    if let Err(error) = container
+        .assert_no_unused_overrides()
+        .and_then(|_| validate_module_providers::<M>(&container))
+        .and_then(|_| validate_gateway_paths::<M>())
+    {
+        let graph = ModuleGraph::discover::<M>()?;
+        rollback_graph(&graph, &container).await;
+        return Err(error);
+    }
+    if let Err(error) = bootstrap_module::<M>(&container).await {
+        return Err(error);
+    }
     Ok(container)
 }
 
-fn validate_gateway_paths<M: Module>() -> crate::Result<()> {
-    let mut paths = std::collections::HashSet::new();
-    let mut duplicate = None;
-    visit_module_gateways::<M>(&mut |gateway| {
-        if !paths.insert((gateway.path, gateway.is_websocket())) {
-            duplicate = Some(gateway.path);
+fn validate_gateway_paths<M: Module + 'static>() -> crate::Result<()> {
+    let graph = ModuleGraph::discover::<M>()?;
+    let mut paths = HashSet::new();
+    for node in &graph.nodes {
+        for gateway in &node.metadata.gateways {
+            if !gateway.path.starts_with('/') {
+                return Err(crate::exception::startup_error(format!(
+                    "websocket gateway path must start with '/': {}",
+                    gateway.path
+                )));
+            }
+            if !paths.insert((gateway.path, gateway.is_websocket())) {
+                return Err(crate::exception::startup_error(format!(
+                    "duplicate gateway path: {}",
+                    gateway.path
+                )));
+            }
         }
-    });
-    if let Some(path) = duplicate {
-        return Err(crate::exception::startup_error(format!(
-            "duplicate gateway path: {path}"
-        )));
+    }
+    Ok(())
+}
+pub fn validate_module_providers<M: Module + 'static>(container: &Container) -> crate::Result<()> {
+    let graph = ModuleGraph::discover::<M>()?;
+    graph.preflight(container)?;
+    for registration in graph.definitions() {
+        graph.def(registration).assert_registered(container)?;
     }
     Ok(())
 }
 
-pub fn validate_module_providers<M: Module>(container: &Container) -> crate::Result<()> {
-    let metadata = M::register();
-
-    for import in &metadata.imports {
-        (import.validate_fn)(container)?;
-    }
-
-    for provider in &metadata.providers {
-        provider.assert_registered(container)?;
-    }
-
-    for controller in &metadata.controllers {
-        controller.provider.assert_registered(container)?;
-    }
-
-    for gateway in &metadata.gateways {
-        gateway.provider.assert_registered(container)?;
-        if !gateway.path.starts_with('/') {
-            return Err(crate::exception::startup_error(format!(
-                "websocket gateway path must start with '/': {}",
-                gateway.path
-            )));
+pub fn register_module_controllers<M: Module + 'static>(any: &mut dyn Any) {
+    if let Ok(graph) = ModuleGraph::discover::<M>() {
+        for node in graph.nodes {
+            for controller in &node.metadata.controllers {
+                (controller.register_fn)(any);
+            }
         }
     }
-
-    for handler in &metadata.event_handlers {
-        handler.assert_registered(container)?;
-    }
-
-    Ok(())
 }
-
-pub fn register_module_controllers<M: Module>(any: &mut dyn Any) {
-    let metadata = M::register();
-
-    for import in &metadata.imports {
-        (import.controller_register_fn)(any)
-    }
-
-    for controller in &metadata.controllers {
-        (controller.register_fn)(any)
-    }
-}
-
-/// Visits controller OpenAPI metadata for `M` and all imported modules.
 #[cfg(feature = "openapi")]
 #[doc(hidden)]
-pub fn visit_module_openapi_routes<M: Module>(
+pub fn visit_module_openapi_routes<M: Module + 'static>(
     visitor: &mut impl FnMut(&crate::openapi::OpenApiRouteDef),
 ) {
-    visit_module_openapi_routes_dyn::<M>(visitor);
-}
-
-#[cfg(feature = "openapi")]
-fn visit_module_openapi_routes_dyn<M: Module>(
-    visitor: &mut dyn FnMut(&crate::openapi::OpenApiRouteDef),
-) {
-    let metadata = M::register();
-    for import in &metadata.imports {
-        (import.openapi_visit_fn)(visitor);
-    }
-    for controller in &metadata.controllers {
-        for route in (controller.openapi_routes_fn)() {
-            visitor(route);
+    if let Ok(graph) = ModuleGraph::discover::<M>() {
+        for node in graph.nodes {
+            for controller in &node.metadata.controllers {
+                for route in (controller.openapi_routes_fn)() {
+                    visitor(route);
+                }
+            }
         }
     }
 }
-
-pub fn visit_module_gateways<M: Module>(visitor: &mut impl FnMut(&GatewayDef)) {
-    visit_module_gateway_defs::<M>(visitor, &mut std::collections::HashSet::new());
-}
-
-fn visit_module_gateway_defs<M: Module>(
-    visitor: &mut dyn FnMut(&GatewayDef),
-    seen: &mut std::collections::HashSet<TypeId>,
-) {
-    let metadata = M::register();
-    for import in metadata.imports {
-        (import.gateway_visit_fn)(visitor, seen);
-    }
-    for gateway in &metadata.gateways {
-        if seen.insert(gateway.type_id) {
-            visitor(gateway);
+pub fn visit_module_gateways<M: Module + 'static>(visitor: &mut impl FnMut(&GatewayDef)) {
+    if let Ok(graph) = ModuleGraph::discover::<M>() {
+        let mut seen = HashSet::new();
+        for node in graph.nodes {
+            for gateway in &node.metadata.gateways {
+                if seen.insert(gateway.type_id) {
+                    visitor(gateway);
+                }
+            }
         }
-    }
-}
-
-#[cfg(test)]
-mod gateway_tests {
-    use super::*;
-    use crate::{Gateway, Result, WebSocketGateway};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    struct FirstGateway;
-    struct SecondGateway;
-    impl Injectable for FirstGateway {
-        fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
-            Box::pin(async { Ok(Self) })
-        }
-    }
-    impl Injectable for SecondGateway {
-        fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
-            Box::pin(async { Ok(Self) })
-        }
-    }
-    impl WebSocketGateway for FirstGateway {}
-    impl Gateway for FirstGateway {
-        fn definition() -> GatewayDef {
-            GatewayDef::websocket::<Self>("/duplicate")
-        }
-    }
-    impl WebSocketGateway for SecondGateway {}
-    impl Gateway for SecondGateway {
-        fn definition() -> GatewayDef {
-            GatewayDef::websocket::<Self>("/duplicate")
-        }
-    }
-
-    struct DuplicateGatewayModule;
-    impl Module for DuplicateGatewayModule {
-        fn register() -> ModuleMetadata {
-            ModuleMetadata::new()
-                .gateway::<FirstGateway>()
-                .gateway::<SecondGateway>()
-        }
-    }
-
-    #[tokio::test]
-    async fn duplicate_gateway_paths_fail_at_startup() {
-        let error = match build_container::<DuplicateGatewayModule>().await {
-            Ok(_) => panic!("duplicate gateway paths should fail"),
-            Err(error) => error,
-        };
-        assert!(error.message.contains("duplicate gateway path"));
-    }
-
-    static BOOTSTRAPS: AtomicUsize = AtomicUsize::new(0);
-    static SHUTDOWNS: AtomicUsize = AtomicUsize::new(0);
-    static INITIALIZATIONS: AtomicUsize = AtomicUsize::new(0);
-    struct DualRegisteredGateway;
-    impl Injectable for DualRegisteredGateway {
-        fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
-            Box::pin(async { Ok(Self) })
-        }
-        fn on_module_init(&self) -> BoxFuture<'_, Result<()>> {
-            Box::pin(async {
-                INITIALIZATIONS.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            })
-        }
-        fn on_bootstrap(&self) -> BoxFuture<'_, Result<()>> {
-            Box::pin(async {
-                BOOTSTRAPS.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            })
-        }
-        fn on_shutdown(&self) -> BoxFuture<'_, Result<()>> {
-            Box::pin(async {
-                SHUTDOWNS.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            })
-        }
-    }
-    impl WebSocketGateway for DualRegisteredGateway {}
-    impl Gateway for DualRegisteredGateway {
-        fn definition() -> GatewayDef {
-            GatewayDef::websocket::<Self>("/dual")
-        }
-    }
-    struct DualRegistrationModule;
-    impl Module for DualRegistrationModule {
-        fn register() -> ModuleMetadata {
-            ModuleMetadata::new()
-                .provider::<DualRegisteredGateway>()
-                .gateway::<DualRegisteredGateway>()
-        }
-    }
-
-    #[tokio::test]
-    async fn provider_and_gateway_registration_runs_lifecycle_once() {
-        BOOTSTRAPS.store(0, Ordering::SeqCst);
-        SHUTDOWNS.store(0, Ordering::SeqCst);
-        INITIALIZATIONS.store(0, Ordering::SeqCst);
-        let container = build_container::<DualRegistrationModule>().await.unwrap();
-        assert_eq!(INITIALIZATIONS.load(Ordering::SeqCst), 1);
-        assert_eq!(BOOTSTRAPS.load(Ordering::SeqCst), 1);
-        shutdown_module::<DualRegistrationModule>(&container)
-            .await
-            .unwrap();
-        assert_eq!(SHUTDOWNS.load(Ordering::SeqCst), 1);
     }
 }

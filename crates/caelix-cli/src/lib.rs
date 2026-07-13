@@ -612,6 +612,7 @@ fn find_caelix_dependency_mut(doc: &mut DocumentMut) -> Option<&mut Item> {
 }
 
 fn generate_new(args: NewArgs, cwd: &Path) -> Result<String> {
+    validate_project_name(&args.name)?;
     let target_dir = cwd.join(&args.name);
     ensure_missing(&target_dir)?;
 
@@ -636,6 +637,31 @@ fn generate_new(args: NewArgs, cwd: &Path) -> Result<String> {
         target_dir.display(),
         target_dir.display()
     ))
+}
+
+/// `caelix new` deliberately accepts a project *component*, never a path.
+/// Keeping this narrower than Cargo's package syntax prevents traversal and
+/// avoids generating identifiers that the generated Rust source cannot use.
+fn validate_project_name(name: &str) -> Result<()> {
+    const RUST_KEYWORDS: &[&str] = &[
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
+        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
+        "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
+        "use", "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do",
+        "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield", "try",
+    ];
+
+    let valid = name.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+        && name
+            .bytes()
+            .skip(1)
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        && !RUST_KEYWORDS.contains(&name);
+    if valid {
+        Ok(())
+    } else {
+        Err(CliError::InvalidName(name.to_owned()))
+    }
 }
 
 fn generate_service(feature: &FeatureName, cwd: &Path) -> Result<String> {
@@ -756,9 +782,9 @@ pub fn render_app_cargo_toml(package_name: &str) -> String {
 
 fn render_app_cargo_toml_for_backend(package_name: &str, backend: BackendChoice) -> String {
     let backend_dependencies = match backend {
-        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.12\"",
+        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.16\"",
         BackendChoice::Axum => {
-            "caelix = { version = \"0.0.12\", default-features = false, features = [\"axum\", \"sqlx\", \"validator\"] }\ntower-http = { version = \"0.6\", features = [\"trace\", \"compression-full\"] }"
+            "caelix = { version = \"0.0.16\", default-features = false, features = [\"axum\", \"sqlx\", \"validator\"] }\ntower-http = { version = \"0.6\", features = [\"trace\", \"compression-full\"] }"
         }
     };
     format!(
@@ -834,7 +860,8 @@ Caelix uses explicit module metadata. Do not rely on filesystem discovery or hid
 - Add `.import::<FeatureModule>()` inside `AppModule::register()`.
 - Register services with `.provider::<Service>()`.
 - Register controllers with `.controller::<Controller>()`.
-- Register async factory values with `.provider_async_factory::<T, _, _>(...)` when construction cannot be expressed as `#[injectable]`.
+- Register async factory values with `.provider_async_factory::<T, _, _>(provider_dependencies![...], ...)` when construction cannot be expressed as `#[injectable]`.
+- Export a service with `.export::<Service>()` before another module may inject it; consumers must import that module unless the service is explicitly exported by a global module.
 
 Example:
 
