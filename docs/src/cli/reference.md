@@ -21,6 +21,8 @@ caelix g module <name>
 
 Creates a feature module, service, and controller below `src/<normalized-name>/`.
 
+Generation requires a `Cargo.toml` in the current directory. It refuses to create files when run outside a Cargo project.
+
 ## `caelix generate service`
 
 ```sh
@@ -30,6 +32,8 @@ caelix g service <name>
 
 Creates `service.rs` and creates `mod.rs` only when missing.
 
+Generation requires a `Cargo.toml` in the current directory.
+
 ## `caelix generate controller`
 
 ```sh
@@ -38,6 +42,8 @@ caelix g controller <name>
 ```
 
 Creates `controller.rs` and creates `mod.rs` only when missing. A matching service is injected only when `src/<feature>/service.rs` already exists.
+
+Generation requires a `Cargo.toml` in the current directory.
 
 If the service does not exist, the controller is generated without a service dependency and the CLI prints a note.
 

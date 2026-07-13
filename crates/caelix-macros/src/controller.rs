@@ -292,6 +292,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut wrappers = Vec::new();
     let mut registrations = Vec::new();
     let mut routes = Vec::new();
+    let mut route_dependencies = Vec::new();
     #[cfg(feature = "openapi")]
     let mut openapi_routes = Vec::new();
     #[cfg(feature = "openapi")]
@@ -427,6 +428,12 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             .iter()
             .chain(method_interceptors.iter())
             .collect::<Vec<_>>();
+        route_dependencies.extend(guard_types.iter().map(|guard| (*guard).clone()));
+        route_dependencies.extend(
+            interceptor_types
+                .iter()
+                .map(|interceptor| (*interceptor).clone()),
+        );
 
         let mut ordered_extractors = extractor_args.iter().collect::<Vec<_>>();
         if matches!(backend, Backend::Axum) {
@@ -732,11 +739,15 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     let openapi_route_functions = quote! { #(#openapi_routes)* };
     #[cfg(not(feature = "openapi"))]
     let openapi_route_functions = quote! {};
+    let route_dependencies = route_dependencies.iter();
     quote! {
         #(#errors)*
         #impl_block
         impl caelix::Controller for #struct_type {
             fn base_path() -> &'static str { #base_path }
+            fn route_dependencies() -> Vec<caelix::ProviderDependency> {
+                vec![#(caelix::ProviderDependency::of::<#route_dependencies>()),*]
+            }
             fn routes() -> &'static [caelix::RouteDef] { &[#(#routes),*] }
             fn register_routes(cfg_any: &mut dyn std::any::Any) { #register_routes }
             #openapi_controller_methods

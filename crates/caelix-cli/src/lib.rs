@@ -29,6 +29,7 @@ pub enum CliError {
         path: PathBuf,
         source: io::Error,
     },
+    MissingCargoManifest(PathBuf),
     AlreadyExists(PathBuf),
     InvalidName(String),
     TomlParse {
@@ -48,6 +49,11 @@ impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::MissingCargoManifest(path) => write!(
+                f,
+                "{} was not found; run `caelix generate` from a Cargo project",
+                path.display()
+            ),
             Self::AlreadyExists(path) => {
                 write!(
                     f,
@@ -235,13 +241,18 @@ fn run_cli(cli: Cli, cwd: &Path) -> Result<CliOutcome> {
 fn run_text_command(cli: Cli, cwd: &Path) -> Result<String> {
     match cli.command {
         Command::New(args) => generate_new(args, cwd),
-        Command::Generate(args) => match args.kind {
-            GenerateKind::Service(args) => generate_service(&FeatureName::parse(args.name)?, cwd),
-            GenerateKind::Controller(args) => {
-                generate_controller(&FeatureName::parse(args.name)?, cwd)
+        Command::Generate(args) => {
+            ensure_cargo_manifest(cwd)?;
+            match args.kind {
+                GenerateKind::Service(args) => {
+                    generate_service(&FeatureName::parse(args.name)?, cwd)
+                }
+                GenerateKind::Controller(args) => {
+                    generate_controller(&FeatureName::parse(args.name)?, cwd)
+                }
+                GenerateKind::Module(args) => generate_module(&FeatureName::parse(args.name)?, cwd),
             }
-            GenerateKind::Module(args) => generate_module(&FeatureName::parse(args.name)?, cwd),
-        },
+        }
         Command::Update => update_caelix_dependency(cwd),
         Command::Run(args) => Ok(format_cargo_run_command(&args.app_args)),
     }
@@ -758,6 +769,15 @@ fn generate_module(feature: &FeatureName, cwd: &Path) -> Result<String> {
     ))
 }
 
+fn ensure_cargo_manifest(cwd: &Path) -> Result<()> {
+    let path = cwd.join("Cargo.toml");
+    if path.is_file() {
+        Ok(())
+    } else {
+        Err(CliError::MissingCargoManifest(path))
+    }
+}
+
 fn src_dir(cwd: &Path) -> PathBuf {
     cwd.join("src")
 }
@@ -914,7 +934,7 @@ Example:
 
 ```rust
 use std::sync::Arc;
-use caelix::{controller, get, injectable, Result};
+use caelix::{controller, injectable, Result};
 use super::UsersService;
 
 #[injectable]
@@ -996,7 +1016,7 @@ pub fn render_controller(feature: &FeatureName, has_service: bool) -> String {
         format!(
             r#"use std::sync::Arc;
 
-use caelix::{{controller, get, injectable, Result}};
+use caelix::{{controller, injectable, Result}};
 
 use super::{service};
 
@@ -1016,7 +1036,7 @@ impl {controller} {{
         )
     } else {
         format!(
-            r#"use caelix::{{controller, get, injectable, Result}};
+            r#"use caelix::{{controller, injectable, Result}};
 
 #[injectable]
 pub struct {controller};

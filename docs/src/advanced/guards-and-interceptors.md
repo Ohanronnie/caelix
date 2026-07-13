@@ -50,6 +50,28 @@ impl AdminController {
 
 Method-level guards are appended after controller-level guards. Guards run before extractors are passed to the controller method. If a guard returns `Ok(false)`, the generated wrapper returns `403 Forbidden` with message `Access denied`. If it returns `Err(HttpException)`, that exception is returned to the client.
 
+Guards and interceptors follow normal module visibility rules. Register them as providers, export them from the module that owns them, and import that module wherever a controller uses them. A global module makes only its explicitly exported guards and interceptors available everywhere.
+
+```rust
+use caelix::{Module, ModuleMetadata};
+
+impl Module for AuthModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new()
+            .provider::<AuthGuard>()
+            .export::<AuthGuard>()
+    }
+}
+
+impl Module for AdminModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new()
+            .import::<AuthModule>()
+            .controller::<AdminController>()
+    }
+}
+```
+
 ## Request Context Enrichment
 
 Guards are a good place to authenticate and attach typed request state:

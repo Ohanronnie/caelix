@@ -238,12 +238,22 @@ pub struct ControllerDef {
 }
 impl ControllerDef {
     pub fn of<C: Controller + Injectable + 'static>() -> Self {
+        let mut provider = ProviderDef::of::<C>();
+        for dependency in C::route_dependencies() {
+            if !provider
+                .dependencies
+                .iter()
+                .any(|existing| existing.type_id == dependency.type_id)
+            {
+                provider.dependencies.push(dependency);
+            }
+        }
         Self {
             register_fn: |any| C::register_routes(any),
             route_log_fn: || crate::log_controller_routes::<C>(),
             #[cfg(feature = "openapi")]
             openapi_routes_fn: || C::openapi_routes(),
-            provider: ProviderDef::of::<C>(),
+            provider,
         }
     }
 }

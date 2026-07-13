@@ -1,6 +1,16 @@
 use std::fs;
 
-use tempfile::tempdir;
+use tempfile::{TempDir, tempdir};
+
+fn cargo_project() -> TempDir {
+    let tmp = tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Cargo.toml"),
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    tmp
+}
 
 #[test]
 fn new_creates_application_structure_with_crates_io_dependency() {
@@ -92,7 +102,7 @@ fn new_accepts_identifier_like_hyphen_and_underscore_names() {
 
 #[test]
 fn generate_service_creates_service_and_refuses_overwrite() {
-    let tmp = tempdir().unwrap();
+    let tmp = cargo_project();
 
     let output = caelix_cli::run_from(["caelix", "g", "service", "users"], tmp.path()).unwrap();
     let service_path = tmp.path().join("src/users/service.rs");
@@ -114,7 +124,7 @@ fn generate_service_creates_service_and_refuses_overwrite() {
 
 #[test]
 fn generate_controller_uses_service_when_present_and_prints_instructions() {
-    let tmp = tempdir().unwrap();
+    let tmp = cargo_project();
     caelix_cli::run_from(["caelix", "g", "service", "users"], tmp.path()).unwrap();
 
     let output =
@@ -122,7 +132,7 @@ fn generate_controller_uses_service_when_present_and_prints_instructions() {
     let controller = fs::read_to_string(tmp.path().join("src/users/controller.rs")).unwrap();
 
     assert!(controller.contains("service: Arc<UsersService>"));
-    assert!(controller.contains("use caelix::{controller, get, injectable, Result};"));
+    assert!(controller.contains("use caelix::{controller, injectable, Result};"));
     assert!(controller.contains("#[controller(\"/users\")]"));
     assert!(controller.contains("Ok(self.service.hello())"));
     assert!(output.contains("Add `.controller::<UsersController>()`"));
@@ -131,20 +141,20 @@ fn generate_controller_uses_service_when_present_and_prints_instructions() {
 
 #[test]
 fn generate_controller_without_service_prints_note() {
-    let tmp = tempdir().unwrap();
+    let tmp = cargo_project();
 
     let output = caelix_cli::run_from(["caelix", "g", "controller", "users"], tmp.path()).unwrap();
     let controller = fs::read_to_string(tmp.path().join("src/users/controller.rs")).unwrap();
 
     assert!(controller.contains("pub struct UsersController;"));
-    assert!(controller.contains("use caelix::{controller, get, injectable, Result};"));
+    assert!(controller.contains("use caelix::{controller, injectable, Result};"));
     assert!(!controller.contains("Arc<UsersService>"));
     assert!(output.contains("generated without a UsersService dependency"));
 }
 
 #[test]
 fn generate_module_creates_complete_feature_folder() {
-    let tmp = tempdir().unwrap();
+    let tmp = cargo_project();
 
     let output =
         caelix_cli::run_from(["caelix", "g", "module", "auth-session"], tmp.path()).unwrap();
@@ -158,7 +168,19 @@ fn generate_module_creates_complete_feature_folder() {
     assert!(module.contains(".controller::<AuthSessionController>()"));
     assert!(service.contains("use caelix::injectable;"));
     assert!(service.contains("pub struct AuthSessionService;"));
-    assert!(controller.contains("use caelix::{controller, get, injectable, Result};"));
+    assert!(controller.contains("use caelix::{controller, injectable, Result};"));
     assert!(controller.contains("#[controller(\"/auth-session\")]"));
     assert!(output.contains("Add `.import::<AuthSessionModule>()`"));
+}
+
+#[test]
+fn generate_requires_a_cargo_manifest() {
+    let tmp = tempdir().unwrap();
+
+    let error = caelix_cli::run_from(["caelix", "g", "service", "users"], tmp.path())
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("Cargo.toml was not found"));
+    assert!(!tmp.path().join("src").exists());
 }
