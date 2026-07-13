@@ -15,7 +15,7 @@ cargo add caelix
 Caelix uses Actix by default. For Axum:
 
 ```toml
-caelix = { version = "0.0.17", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.18", default-features = false, features = ["axum"] }
 ```
 
 ## CLI

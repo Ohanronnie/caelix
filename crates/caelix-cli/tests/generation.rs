@@ -18,7 +18,7 @@ fn new_creates_application_structure_with_crates_io_dependency() {
     assert!(output.contains("Created Caelix application `demo-api`"));
     assert!(cargo_toml.contains("edition = \"2024\""));
     assert!(!cargo_toml.contains("[workspace]"));
-    assert!(cargo_toml.contains("caelix = \"0.0.17\""));
+    assert!(cargo_toml.contains("caelix = \"0.0.18\""));
     assert!(!cargo_toml.contains("path = "));
     assert!(!cargo_toml.contains("caelix-core"));
     assert!(!cargo_toml.contains("caelix-actix"));
