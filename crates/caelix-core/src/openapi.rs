@@ -239,7 +239,7 @@ struct ErrorEnvelope {
 }
 
 /// Builds one immutable OpenAPI 3.1 document from a module and all its imports.
-pub fn build_openapi<M: Module>(config: &OpenApiConfig) -> crate::Result<OpenApi> {
+pub fn build_openapi<M: Module + 'static>(config: &OpenApiConfig) -> crate::Result<OpenApi> {
     let mut openapi = OpenApi::new(
         Info::new(config.title.clone(), config.version.clone()),
         utoipa::openapi::Paths::new(),

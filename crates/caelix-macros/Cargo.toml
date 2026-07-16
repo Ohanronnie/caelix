@@ -20,8 +20,8 @@ openapi = []
 
 [dev-dependencies]
 actix-web = "4.14.0"
-caelix-actix = { path = "../caelix-actix", version = "0.0.17" }
-caelix-core = { path = "../caelix-core", version = "0.0.14" }
+caelix-actix = { path = "../caelix-actix", version = "0.0.18" }
+caelix-core = { path = "../caelix-core", version = "0.0.15" }
 serde = { version = "1.0.228", features = ["derive"] }
 trybuild = "1.0.117"
 
