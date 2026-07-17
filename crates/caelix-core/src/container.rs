@@ -1,3 +1,4 @@
+use crate::{Logger, ProviderDependency, Result};
 use std::{
     any::{Any, TypeId},
     collections::{HashMap, HashSet},
@@ -6,10 +7,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+/// Public Caelix type alias `BoxFuture`.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// Public Caelix extension trait `Injectable`.
 pub trait Injectable: Send + Sync + 'static {
-    fn create(container: &Container) -> BoxFuture<'_, crate::Result<Self>>
+    /// Public Caelix API.
+    fn create(container: &Container) -> BoxFuture<'_, Result<Self>>
     where
         Self: Sized;
 
@@ -18,23 +22,27 @@ pub trait Injectable: Send + Sync + 'static {
     /// `#[injectable]` supplies this automatically. Handwritten implementations
     /// must return `provider_dependencies![...]`; Caelix rejects construction-time
     /// resolution of a provider that is absent from this declaration.
-    fn dependencies() -> Vec<crate::ProviderDependency>
+    fn dependencies() -> Vec<ProviderDependency>
     where
         Self: Sized;
 
-    fn on_module_init(&self) -> BoxFuture<'_, crate::Result<()>> {
+    /// Public Caelix API.
+    fn on_module_init(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async { Ok(()) })
     }
 
-    fn on_bootstrap(&self) -> BoxFuture<'_, crate::Result<()>> {
+    /// Public Caelix API.
+    fn on_bootstrap(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async { Ok(()) })
     }
 
-    fn on_shutdown(&self) -> BoxFuture<'_, crate::Result<()>> {
+    /// Public Caelix API.
+    fn on_shutdown(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async { Ok(()) })
     }
 }
 
+/// Public Caelix type `Container`.
 pub struct Container {
     services: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
     /// Pending provider overrides consumed while registering the module tree.
@@ -69,6 +77,7 @@ impl Clone for Container {
 }
 
 impl Container {
+    /// Runs the `new` public API operation.
     pub fn new() -> Self {
         crate::logging::init_logging();
 
@@ -89,11 +98,13 @@ impl Container {
         }
     }
 
+    /// Runs the `register_instance` public API operation.
     pub fn register_instance<T: Send + Sync + 'static>(&mut self, value: T) {
         self.services.insert(TypeId::of::<T>(), Arc::new(value));
     }
 
-    pub async fn register<T: Injectable>(&mut self) -> crate::Result<()> {
+    /// Runs the `register` public API operation.
+    pub async fn register<T: Injectable>(&mut self) -> Result<()> {
         let instance = T::create(self).await?;
         let instance = Arc::new(instance);
         instance.on_module_init().await.map_err(|err| {
@@ -212,7 +223,8 @@ impl Container {
         )))
     }
 
-    pub fn resolve<T: Send + Sync + 'static>(&self) -> crate::Result<Arc<T>> {
+    /// Runs the `resolve` public API operation.
+    pub fn resolve<T: Send + Sync + 'static>(&self) -> Result<Arc<T>> {
         let type_id = TypeId::of::<T>();
         if let Some(scope) = &self.dependency_scope
             && type_id != TypeId::of::<crate::Logger>()
@@ -240,8 +252,9 @@ impl Container {
         })
     }
 
-    pub fn resolve_logger(&self, context: impl Into<String>) -> Arc<crate::Logger> {
-        Arc::new(crate::Logger::new(context))
+    /// Runs the `resolve_logger` public API operation.
+    pub fn resolve_logger(&self, context: impl Into<String>) -> Arc<Logger> {
+        Arc::new(Logger::new(context))
     }
 }
 

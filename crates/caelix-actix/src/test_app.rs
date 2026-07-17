@@ -14,7 +14,7 @@ use actix_web::{
 };
 use bytes::Bytes;
 use caelix_core::{
-    BoxFuture, Container, Module, ProviderDependency, ProviderOverrides, StatusCode,
+    BoxFuture, Container, Module, ProviderDependency, ProviderOverrides, Result, StatusCode,
     build_container_with_overrides, log_application_started, log_module_routes,
     register_module_controllers, shutdown_module,
 };
@@ -26,7 +26,7 @@ use crate::application::{DEFAULT_BODY_LIMIT_BYTES, configure_caelix_services};
 #[cfg(feature = "openapi")]
 use caelix_core::openapi::{OpenApiConfig, build_openapi};
 
-type CallFuture = Pin<Box<dyn Future<Output = Result<ServiceResponse, Error>>>>;
+type CallFuture = Pin<Box<dyn Future<Output = std::result::Result<ServiceResponse, Error>>>>;
 type CallFn = Box<dyn Fn(Request) -> CallFuture>;
 
 /// In-process Caelix application for integration tests.
@@ -68,36 +68,43 @@ impl TestApplication {
         }
     }
 
+    /// Runs the `get` public API operation.
     pub fn get(&self, path: &str) -> TestRequestBuilder<'_> {
         TestRequestBuilder::new(self, actix_test::TestRequest::get().uri(path))
     }
 
+    /// Runs the `post` public API operation.
     pub fn post(&self, path: &str) -> TestRequestBuilder<'_> {
         TestRequestBuilder::new(self, actix_test::TestRequest::post().uri(path))
     }
 
+    /// Runs the `put` public API operation.
     pub fn put(&self, path: &str) -> TestRequestBuilder<'_> {
         TestRequestBuilder::new(self, actix_test::TestRequest::put().uri(path))
     }
 
+    /// Runs the `patch` public API operation.
     pub fn patch(&self, path: &str) -> TestRequestBuilder<'_> {
         TestRequestBuilder::new(self, actix_test::TestRequest::patch().uri(path))
     }
 
+    /// Runs the `delete` public API operation.
     pub fn delete(&self, path: &str) -> TestRequestBuilder<'_> {
         TestRequestBuilder::new(self, actix_test::TestRequest::delete().uri(path))
     }
 
+    /// Runs the `container` public API operation.
     pub fn container(&self) -> &Arc<Container> {
         &self.container
     }
 
-    pub fn resolve<T: Send + Sync + 'static>(&self) -> caelix_core::Result<Arc<T>> {
+    /// Runs the `resolve` public API operation.
+    pub fn resolve<T: Send + Sync + 'static>(&self) -> Result<Arc<T>> {
         self.container.resolve::<T>()
     }
 
     /// Run module `on_shutdown` hooks. Dropping without this skips shutdown hooks.
-    pub async fn shutdown(self) -> caelix_core::Result<()> {
+    pub async fn shutdown(self) -> Result<()> {
         (self.shutdown_fn)(&self.container).await
     }
 
@@ -135,6 +142,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         self
     }
 
+    /// Runs the `body_limit` public API operation.
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
         self
@@ -142,12 +150,14 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
 
     /// Serves OpenAPI JSON and Swagger UI in the in-process test application.
     #[cfg(feature = "openapi")]
+    /// Runs the `with_openapi` public API operation.
     pub fn with_openapi(mut self, config: OpenApiConfig) -> Self {
         self.openapi = Some(config);
         self
     }
 
-    pub async fn compile(self) -> caelix_core::Result<TestApplication> {
+    /// Runs the `compile` public API operation.
+    pub async fn compile(self) -> Result<TestApplication> {
         let start = std::time::Instant::now();
         let container = build_container_with_overrides::<M>(self.overrides).await?;
         log_module_routes::<M>();
@@ -206,6 +216,7 @@ impl<M: Module + 'static> IntoFuture for TestApplicationBuilder<M> {
     }
 }
 
+/// Public Caelix type `TestRequestBuilder`.
 pub struct TestRequestBuilder<'a> {
     app: &'a TestApplication,
     request: actix_test::TestRequest,
@@ -216,37 +227,44 @@ impl<'a> TestRequestBuilder<'a> {
         Self { app, request }
     }
 
+    /// Runs the `json` public API operation.
     pub fn json(mut self, body: impl Serialize) -> Self {
         self.request = self.request.set_json(body);
         self
     }
 
+    /// Runs the `header` public API operation.
     pub fn header(mut self, name: &str, value: &str) -> Self {
         self.request = self.request.insert_header((name, value));
         self
     }
 
+    /// Runs the `set_payload` public API operation.
     pub fn set_payload(mut self, bytes: impl Into<Bytes>) -> Self {
         self.request = self.request.set_payload(bytes);
         self
     }
 
-    pub async fn send(self) -> caelix_core::Result<TestResponse> {
+    /// Runs the `send` public API operation.
+    pub async fn send(self) -> Result<TestResponse> {
         let response = self.app.call(self.request.to_request()).await?;
         Ok(TestResponse { response })
     }
 }
 
+/// Public Caelix type `TestResponse`.
 pub struct TestResponse {
     response: ServiceResponse,
 }
 
 impl TestResponse {
+    /// Runs the `status` public API operation.
     pub fn status(&self) -> StatusCode {
         StatusCode::from_u16(self.response.status().as_u16())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
     }
 
+    /// Runs the `assert_status` public API operation.
     pub fn assert_status(self, expected: StatusCode) -> Self {
         let actual = self.status();
         assert_eq!(
@@ -256,15 +274,18 @@ impl TestResponse {
         self
     }
 
+    /// Runs the `json` public API operation.
     pub async fn json<T: DeserializeOwned>(self) -> T {
         actix_test::read_body_json(self.response).await
     }
 
+    /// Runs the `body` public API operation.
     pub async fn body(self) -> Bytes {
         actix_test::read_body(self.response).await
     }
 
-    pub async fn text(self) -> caelix_core::Result<String> {
+    /// Runs the `text` public API operation.
+    pub async fn text(self) -> Result<String> {
         let bytes = self.body().await;
         String::from_utf8(bytes.to_vec()).map_err(|err| {
             caelix_core::InternalServerErrorException::new(std::io::Error::other(err))

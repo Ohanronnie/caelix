@@ -1,9 +1,11 @@
+use crate::Result;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
     sync::{Arc, RwLock},
 };
 
+/// Public Caelix type `RequestContext`.
 pub struct RequestContext {
     method: String,
     path: String,
@@ -12,6 +14,7 @@ pub struct RequestContext {
 }
 
 impl RequestContext {
+    /// Runs the `new` public API operation.
     pub fn new(
         method: impl Into<String>,
         path: impl Into<String>,
@@ -28,25 +31,30 @@ impl RequestContext {
         }
     }
 
+    /// Runs the `method` public API operation.
     pub fn method(&self) -> &str {
         &self.method
     }
 
+    /// Runs the `path` public API operation.
     pub fn path(&self) -> &str {
         &self.path
     }
 
+    /// Runs the `header` public API operation.
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .get(&name.to_ascii_lowercase())
             .map(String::as_str)
     }
 
+    /// Runs the `bearer_token` public API operation.
     pub fn bearer_token(&self) -> Option<&str> {
         self.header("authorization")?.strip_prefix("Bearer ")
     }
 
-    pub fn set<T: Send + Sync + 'static>(&self, value: T) -> crate::Result<()> {
+    /// Runs the `set` public API operation.
+    pub fn set<T: Send + Sync + 'static>(&self, value: T) -> Result<()> {
         self.extensions
             .write()
             .map_err(|_| {
@@ -56,7 +64,8 @@ impl RequestContext {
         Ok(())
     }
 
-    pub fn get<T: Send + Sync + 'static>(&self) -> crate::Result<Option<Arc<T>>> {
+    /// Runs the `get` public API operation.
+    pub fn get<T: Send + Sync + 'static>(&self) -> Result<Option<Arc<T>>> {
         let value = self
             .extensions
             .read()

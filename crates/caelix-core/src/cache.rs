@@ -1,6 +1,6 @@
 use crate::{
     BoxFuture, Container, Injectable, InternalServerErrorException, Module, ModuleMetadata,
-    PayloadTooLargeException,
+    PayloadTooLargeException, Result,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -13,16 +13,16 @@ use std::{
 const DEFAULT_MAX_ENTRIES: usize = 1024;
 const DEFAULT_MAX_VALUE_BYTES: usize = 1024 * 1024;
 
+/// Public Caelix extension trait `CacheStore`.
 pub trait CacheStore: Send + Sync + 'static {
-    fn get(&self, key: String) -> BoxFuture<'_, crate::Result<Option<Value>>>;
-    fn set(
-        &self,
-        key: String,
-        value: Value,
-        ttl: Option<Duration>,
-    ) -> BoxFuture<'_, crate::Result<()>>;
-    fn delete(&self, key: String) -> BoxFuture<'_, crate::Result<()>>;
-    fn clear(&self) -> BoxFuture<'_, crate::Result<()>>;
+    /// Public Caelix API.
+    fn get(&self, key: String) -> BoxFuture<'_, Result<Option<Value>>>;
+    /// Public Caelix API.
+    fn set(&self, key: String, value: Value, ttl: Option<Duration>) -> BoxFuture<'_, Result<()>>;
+    /// Public Caelix API.
+    fn delete(&self, key: String) -> BoxFuture<'_, Result<()>>;
+    /// Public Caelix API.
+    fn clear(&self) -> BoxFuture<'_, Result<()>>;
 }
 
 #[derive(Clone)]
@@ -49,9 +49,13 @@ impl CacheEntry {
 }
 
 #[derive(Clone, Debug)]
+/// Public Caelix type `MemoryCacheOptions`.
 pub struct MemoryCacheOptions {
+    /// The `max_entries` value.
     pub max_entries: usize,
+    /// The `max_value_bytes` value.
     pub max_value_bytes: usize,
+    /// The `default_ttl` value.
     pub default_ttl: Option<Duration>,
 }
 
@@ -65,16 +69,19 @@ impl Default for MemoryCacheOptions {
     }
 }
 
+/// Public Caelix type `MemoryCacheStore`.
 pub struct MemoryCacheStore {
     options: MemoryCacheOptions,
     entries: RwLock<HashMap<String, CacheEntry>>,
 }
 
 impl MemoryCacheStore {
+    /// Runs the `new` public API operation.
     pub fn new() -> Self {
         Self::with_options(MemoryCacheOptions::default())
     }
 
+    /// Runs the `with_options` public API operation.
     pub fn with_options(options: MemoryCacheOptions) -> Self {
         Self {
             options,
@@ -82,10 +89,12 @@ impl MemoryCacheStore {
         }
     }
 
+    /// Runs the `len` public API operation.
     pub fn len(&self) -> usize {
         self.entries.read().map_or(0, |entries| entries.len())
     }
 
+    /// Runs the `is_empty` public API operation.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -203,16 +212,19 @@ impl CacheStore for MemoryCacheStore {
     }
 }
 
+/// Public Caelix type `Cache`.
 pub struct Cache {
     store: Arc<dyn CacheStore>,
 }
 
 impl Cache {
+    /// Runs the `new` public API operation.
     pub fn new(store: Arc<dyn CacheStore>) -> Self {
         Self { store }
     }
 
-    pub async fn get<T>(&self, key: impl Into<String>) -> crate::Result<Option<T>>
+    /// Runs the `get` public API operation.
+    pub async fn get<T>(&self, key: impl Into<String>) -> Result<Option<T>>
     where
         T: DeserializeOwned,
     {
@@ -225,31 +237,34 @@ impl Cache {
             .map_err(InternalServerErrorException::new)
     }
 
-    pub async fn set<T>(&self, key: impl Into<String>, value: T) -> crate::Result<()>
+    /// Runs the `set` public API operation.
+    pub async fn set<T>(&self, key: impl Into<String>, value: T) -> Result<()>
     where
         T: Serialize,
     {
         self.set_with_optional_ttl(key, value, None).await
     }
 
+    /// Runs the `set_with_ttl` public API operation.
     pub async fn set_with_ttl<T>(
         &self,
         key: impl Into<String>,
         value: T,
         ttl: Duration,
-    ) -> crate::Result<()>
+    ) -> Result<()>
     where
         T: Serialize,
     {
         self.set_with_optional_ttl(key, value, Some(ttl)).await
     }
 
+    /// Runs the `set_with_optional_ttl` public API operation.
     pub async fn set_with_optional_ttl<T>(
         &self,
         key: impl Into<String>,
         value: T,
         ttl: Option<Duration>,
-    ) -> crate::Result<()>
+    ) -> Result<()>
     where
         T: Serialize,
     {
@@ -257,11 +272,13 @@ impl Cache {
         self.store.set(key.into(), value, ttl).await
     }
 
-    pub async fn delete(&self, key: impl Into<String>) -> crate::Result<()> {
+    /// Runs the `delete` public API operation.
+    pub async fn delete(&self, key: impl Into<String>) -> Result<()> {
         self.store.delete(key.into()).await
     }
 
-    pub async fn clear(&self) -> crate::Result<()> {
+    /// Runs the `clear` public API operation.
+    pub async fn clear(&self) -> Result<()> {
         self.store.clear().await
     }
 }
@@ -279,6 +296,7 @@ impl Injectable for Cache {
     }
 }
 
+/// Public Caelix type `CacheModule`.
 pub struct CacheModule;
 
 impl Module for CacheModule {

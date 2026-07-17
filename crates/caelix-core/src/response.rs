@@ -16,11 +16,14 @@ pub type BoxBodyStream = Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>>;
 
 /// Response body: fully buffered, or a live stream of chunks.
 pub enum ResponseBody {
+    /// Public Caelix API.
     Buffered(Vec<u8>),
+    /// Public Caelix API.
     Streaming(BoxBodyStream),
 }
 
 impl ResponseBody {
+    /// Runs the `as_buffered` public API operation.
     pub fn as_buffered(&self) -> Option<&[u8]> {
         match self {
             ResponseBody::Buffered(bytes) => Some(bytes.as_slice()),
@@ -28,6 +31,7 @@ impl ResponseBody {
         }
     }
 
+    /// Runs the `as_buffered_mut` public API operation.
     pub fn as_buffered_mut(&mut self) -> Option<&mut Vec<u8>> {
         match self {
             ResponseBody::Buffered(bytes) => Some(bytes),
@@ -35,10 +39,12 @@ impl ResponseBody {
         }
     }
 
+    /// Runs the `is_streaming` public API operation.
     pub fn is_streaming(&self) -> bool {
         matches!(self, ResponseBody::Streaming(_))
     }
 
+    /// Runs the `is_empty` public API operation.
     pub fn is_empty(&self) -> bool {
         match self {
             ResponseBody::Buffered(bytes) => bytes.is_empty(),
@@ -47,9 +53,13 @@ impl ResponseBody {
     }
 }
 
+/// Public Caelix type `HttpResponse`.
 pub struct HttpResponse {
+    /// The `status` value.
     pub status: StatusCode,
+    /// The `body` value.
     pub body: ResponseBody,
+    /// The `content_type` value.
     pub content_type: &'static str,
     /// Extra response headers applied by the HTTP adapter.
     ///
@@ -60,6 +70,7 @@ pub struct HttpResponse {
 }
 
 impl HttpResponse {
+    /// Runs the `new` public API operation.
     pub fn new(status: StatusCode, body: Vec<u8>, content_type: &'static str) -> Self {
         Self {
             status,
@@ -78,10 +89,12 @@ impl HttpResponse {
         }
     }
 
+    /// Runs the `text` public API operation.
     pub fn text(status: StatusCode, body: impl Into<String>) -> Self {
         Self::new(status, body.into().into_bytes(), "text/plain")
     }
 
+    /// Runs the `bytes` public API operation.
     pub fn bytes(status: StatusCode, body: impl Into<Vec<u8>>) -> Self {
         Self::new(status, body.into(), "application/octet-stream")
     }
@@ -104,7 +117,9 @@ impl HttpResponse {
     }
 }
 
+/// Public Caelix extension trait `IntoCaelixResponse`.
 pub trait IntoCaelixResponse {
+    /// Public Caelix API.
     fn into_response(self) -> HttpResponse;
 }
 
@@ -112,8 +127,11 @@ pub trait IntoCaelixResponse {
 /// used by `Response::Raw` so a handler can return e.g. `Response<()>`
 /// while still sending an arbitrary JSON/text/bytes payload.
 pub enum Body {
+    /// Public Caelix API.
     Json(Vec<u8>),
+    /// Public Caelix API.
     Text(String),
+    /// Public Caelix API.
     Bytes(Vec<u8>),
 }
 
@@ -130,26 +148,35 @@ impl Body {
     }
 }
 
+/// Public Caelix enumeration `Response`.
 pub enum Response<T> {
+    /// Public Caelix API.
     Body(T),
+    /// Public Caelix API.
     WithStatus(StatusCode, T),
+    /// Public Caelix API.
     Raw(StatusCode, Body),
+    /// Public Caelix API.
     Empty,
 }
 
 impl Response<()> {
+    /// Runs the `no_content` public API operation.
     pub fn no_content() -> Self {
         Response::Empty
     }
 
+    /// Runs the `text` public API operation.
     pub fn text(status: StatusCode, value: impl Into<String>) -> Self {
         Response::Raw(status, Body::Text(value.into()))
     }
 
+    /// Runs the `bytes` public API operation.
     pub fn bytes(status: StatusCode, value: impl Into<Vec<u8>>) -> Self {
         Response::Raw(status, Body::Bytes(value.into()))
     }
 
+    /// Runs the `json` public API operation.
     pub fn json(status: StatusCode, value: impl serde::Serialize) -> Self {
         let bytes = match serde_json::to_vec(&value) {
             Ok(bytes) => bytes,

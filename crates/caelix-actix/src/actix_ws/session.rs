@@ -27,6 +27,7 @@ const MAX_CLOSE_REASON_BYTES: usize = MAX_CONTROL_PAYLOAD_BYTES - 2;
 /// This type can be used to send messages into the WebSocket.
 /// It also implements [`Sink<Message>`](futures_sink::Sink) for integration with sink-based APIs.
 #[derive(Clone)]
+/// Public Caelix type `Session`.
 pub struct Session {
     inner: Option<PollSender<Message>>,
     closed: Arc<AtomicBool>,
@@ -34,6 +35,7 @@ pub struct Session {
 
 /// The error representing a closed websocket session
 #[derive(Debug)]
+/// Public Caelix type `Closed`.
 pub struct Closed;
 
 impl fmt::Display for Closed {

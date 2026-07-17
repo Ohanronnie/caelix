@@ -12,19 +12,22 @@ use actix_web::{
 use caelix_core::openapi::{OpenApiConfig, build_openapi};
 use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpException, HttpResponse as CaelixHttpResponse,
-    IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException, ResponseBody,
+    IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException, ResponseBody, Result,
     build_container, http_request_logging_enabled, log_application_started, log_http_request,
     log_http_request_info, log_listening, log_module_routes, register_module_controllers,
     shutdown_module,
 };
 use futures_util::StreamExt;
 
+/// Public Caelix constant `DEFAULT_BODY_LIMIT_BYTES`.
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
 
 #[cfg(feature = "openapi")]
 #[derive(Clone)]
 pub(crate) struct OpenApiServices {
+    /// The `config` value.
     pub config: OpenApiConfig,
+    /// The `document` value.
     pub document: String,
 }
 
@@ -42,6 +45,7 @@ enum AccessLogFormat {
 ///
 /// `Logging::default()` enables Caelix's asynchronous HTTP access log.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Public Caelix type `Logging`.
 pub struct Logging {
     access_log: bool,
     access_log_format: AccessLogFormat,
@@ -74,6 +78,7 @@ impl Logging {
         self
     }
 
+    /// Runs the `access_log_enabled` public API operation.
     pub fn access_log_enabled(&self) -> bool {
         self.access_log
     }
@@ -83,6 +88,7 @@ impl Logging {
     }
 }
 
+/// Runs the `to_actix_response` public API operation.
 pub fn to_actix_response(response: CaelixHttpResponse) -> HttpResponse {
     // Caelix core uses http 1.x while Actix 4 still builds responses with http 0.2.
     let status = actix_web::http::StatusCode::from_u16(response.status.as_u16())
@@ -109,6 +115,7 @@ pub fn to_actix_response(response: CaelixHttpResponse) -> HttpResponse {
     }
 }
 
+/// Public Caelix type `Application`.
 pub struct Application {
     container: Arc<Container>,
     configure_fn: fn(&mut web::ServiceConfig),
@@ -315,7 +322,8 @@ fn swagger_ui_html(json_path: &str) -> String {
 }
 
 impl Application {
-    pub async fn new<M: Module + 'static>() -> caelix_core::Result<Self> {
+    /// Runs the `new` public API operation.
+    pub async fn new<M: Module + 'static>() -> Result<Self> {
         let start = Instant::now();
         let container = build_container::<M>().await?;
         log_module_routes::<M>();
@@ -338,16 +346,19 @@ impl Application {
         })
     }
 
+    /// Runs the `body_limit` public API operation.
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
         self
     }
 
+    /// Runs the `websocket_max_message_size` public API operation.
     pub fn websocket_max_message_size(mut self, bytes: usize) -> Self {
         self.websocket_max_message_size = bytes.max(1);
         self
     }
 
+    /// Runs the `workers` public API operation.
     pub fn workers(mut self, workers: usize) -> Self {
         self.workers = workers.max(1);
         self
@@ -365,7 +376,8 @@ impl Application {
 
     /// Generates and serves OpenAPI JSON plus Swagger UI for this application.
     #[cfg(feature = "openapi")]
-    pub fn with_openapi(mut self, config: OpenApiConfig) -> caelix_core::Result<Self> {
+    /// Runs the `with_openapi` public API operation.
+    pub fn with_openapi(mut self, config: OpenApiConfig) -> Result<Self> {
         let document = (self.openapi_build_fn)(&config)?;
         self.openapi = Some(OpenApiServices {
             config,
@@ -388,6 +400,7 @@ impl Application {
         (self.shutdown_fn)(&self.container).await
     }
 
+    /// Runs the `listen` public API operation.
     pub async fn listen(self, addr: &str) -> std::io::Result<()> {
         let container = self.container.clone();
         let configure_fn = self.configure_fn;

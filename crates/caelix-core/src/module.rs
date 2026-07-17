@@ -1,6 +1,6 @@
 use crate::{
     BoxFuture, Container, Controller, EventHandler, EventHandlerDef, Injectable,
-    RegisterableEventHandler, WebSocketGateway,
+    RegisterableEventHandler, Result, WebSocketGateway,
 };
 use std::{
     any::{Any, TypeId},
@@ -19,12 +19,14 @@ type LifecycleFn =
 
 /// Metadata for one resolved provider dependency.
 #[derive(Clone, Copy)]
+/// Public Caelix type `ProviderDependency`.
 pub struct ProviderDependency {
     type_id: TypeId,
     type_name: &'static str,
 }
 
 impl ProviderDependency {
+    /// Runs the `of` public API operation.
     pub fn of<T: Send + Sync + 'static>() -> Self {
         Self {
             type_id: TypeId::of::<T>(),
@@ -38,6 +40,12 @@ impl ProviderDependency {
 }
 
 /// Declares provider dependencies for manual `Injectable` implementations and factories.
+/// Builds the explicit dependency list required by a handwritten
+/// [`Injectable`](crate::Injectable) implementation.
+///
+/// Pass zero or more provider types, for example
+/// `provider_dependencies![UserRepository, Logger]`. The returned metadata is
+/// used during module visibility validation before the provider is constructed.
 #[macro_export]
 macro_rules! provider_dependencies {
     ($($dependency:ty),* $(,)?) => {
@@ -45,6 +53,7 @@ macro_rules! provider_dependencies {
     };
 }
 
+/// Public Caelix type `ProviderDef`.
 pub struct ProviderDef {
     type_id: TypeId,
     type_name: &'static str,
@@ -56,6 +65,7 @@ pub struct ProviderDef {
 }
 
 impl ProviderDef {
+    /// Runs the `of` public API operation.
     pub fn of<T: Injectable>() -> Self {
         Self {
             type_id: TypeId::of::<T>(),
@@ -97,6 +107,7 @@ impl ProviderDef {
         }
     }
 
+    /// Runs the `async_factory` public API operation.
     pub fn async_factory<T, Fut, E>(
         dependencies: Vec<ProviderDependency>,
         factory: impl Fn(Arc<Container>) -> Fut + Send + Sync + 'static,
@@ -129,9 +140,11 @@ impl ProviderDef {
         }
     }
 
+    /// Runs the `type_id` public API operation.
     pub fn type_id(&self) -> TypeId {
         self.type_id
     }
+    /// Runs the `type_name` public API operation.
     pub fn type_name(&self) -> &'static str {
         self.type_name
     }
@@ -173,20 +186,24 @@ impl ProviderDef {
     }
 }
 
+/// Public Caelix type `ProviderOverrides`.
 pub struct ProviderOverrides {
     defs: HashMap<TypeId, ProviderDef>,
 }
 impl ProviderOverrides {
+    /// Runs the `new` public API operation.
     pub fn new() -> Self {
         Self {
             defs: HashMap::new(),
         }
     }
+    /// Runs the `insert_instance` public API operation.
     pub fn insert_instance<T: Send + Sync + 'static>(mut self, value: T) -> Self {
         self.defs
             .insert(TypeId::of::<T>(), ProviderDef::instance(value));
         self
     }
+    /// Runs the `insert_factory` public API operation.
     pub fn insert_factory<T, Fut, E>(
         mut self,
         dependencies: Vec<ProviderDependency>,
@@ -203,6 +220,7 @@ impl ProviderOverrides {
         );
         self
     }
+    /// Runs the `insert` public API operation.
     pub fn insert(mut self, def: ProviderDef) -> Self {
         self.defs.insert(def.type_id, def);
         self
@@ -229,14 +247,18 @@ fn noop_lifecycle() -> LifecycleFn {
     Box::new(|_| Box::pin(async { Ok(()) }))
 }
 
+/// Public Caelix type `ControllerDef`.
 pub struct ControllerDef {
+    /// The `register_fn` value.
     pub register_fn: fn(&mut dyn Any),
+    /// The `route_log_fn` value.
     pub route_log_fn: fn(),
     #[cfg(feature = "openapi")]
     pub(crate) openapi_routes_fn: fn() -> &'static [crate::openapi::OpenApiRouteDef],
     provider: ProviderDef,
 }
 impl ControllerDef {
+    /// Runs the `of` public API operation.
     pub fn of<C: Controller + Injectable + 'static>() -> Self {
         let mut provider = ProviderDef::of::<C>();
         for dependency in C::route_dependencies() {
@@ -258,8 +280,11 @@ impl ControllerDef {
     }
 }
 
+/// Public Caelix type `GatewayDef`.
 pub struct GatewayDef {
+    /// The `path` value.
     pub path: &'static str,
+    /// The `type_id` value.
     pub type_id: TypeId,
     provider: ProviderDef,
     kind: GatewayKind,
@@ -269,10 +294,11 @@ enum GatewayKind {
         resolve_fn: fn(&Container) -> crate::Result<Arc<dyn WebSocketGateway>>,
     },
     SocketIo {
-        register_fn: fn(&Container, &dyn Any) -> crate::Result<()>,
+        register_fn: fn(&Container, &dyn Any) -> Result<()>,
     },
 }
 impl GatewayDef {
+    /// Runs the `websocket` public API operation.
     pub fn websocket<G: WebSocketGateway>(path: &'static str) -> Self {
         Self {
             path,
@@ -295,7 +321,8 @@ impl GatewayDef {
             kind: GatewayKind::SocketIo { register_fn },
         }
     }
-    pub fn resolve(&self, container: &Container) -> crate::Result<Arc<dyn WebSocketGateway>> {
+    /// Runs the `resolve` public API operation.
+    pub fn resolve(&self, container: &Container) -> Result<Arc<dyn WebSocketGateway>> {
         match self.kind {
             GatewayKind::WebSocket { resolve_fn } => resolve_fn(container),
             GatewayKind::SocketIo { .. } => Err(crate::exception::startup_error(format!(
@@ -309,18 +336,20 @@ impl GatewayDef {
         matches!(self.kind, GatewayKind::WebSocket { .. })
     }
     #[doc(hidden)]
-    pub fn register_socket_io(&self, container: &Container, handle: &dyn Any) -> crate::Result<()> {
+    pub fn register_socket_io(&self, container: &Container, handle: &dyn Any) -> Result<()> {
         match self.kind {
             GatewayKind::WebSocket { .. } => Ok(()),
             GatewayKind::SocketIo { register_fn } => register_fn(container, handle),
         }
     }
 }
+/// Public Caelix extension trait `Gateway`.
 pub trait Gateway: Injectable {
     #[doc(hidden)]
     fn definition() -> GatewayDef;
 }
 
+/// Public Caelix type `ModuleDef`.
 pub struct ModuleDef {
     type_id: TypeId,
     type_name: &'static str,
@@ -328,6 +357,7 @@ pub struct ModuleDef {
     pub(crate) route_log_fn: fn(),
 }
 impl ModuleDef {
+    /// Runs the `of` public API operation.
     pub fn of<M: Module + 'static>() -> Self {
         Self {
             type_id: TypeId::of::<M>(),
@@ -337,20 +367,29 @@ impl ModuleDef {
         }
     }
 }
+/// Public Caelix extension trait `Module`.
 pub trait Module {
+    /// Public Caelix API.
     fn register() -> ModuleMetadata;
 }
 
+/// Public Caelix type `ModuleMetadata`.
 pub struct ModuleMetadata {
+    /// The `imports` value.
     pub imports: Vec<ModuleDef>,
+    /// The `providers` value.
     pub providers: Vec<ProviderDef>,
+    /// The `controllers` value.
     pub controllers: Vec<ControllerDef>,
+    /// The `event_handlers` value.
     pub event_handlers: Vec<EventHandlerDef>,
+    /// The `gateways` value.
     pub gateways: Vec<GatewayDef>,
     exports: Vec<ProviderDependency>,
     global: bool,
 }
 impl ModuleMetadata {
+    /// Runs the `new` public API operation.
     pub fn new() -> Self {
         Self {
             imports: vec![],
@@ -368,14 +407,17 @@ impl ModuleMetadata {
         metadata.global = true;
         metadata
     }
+    /// Runs the `import` public API operation.
     pub fn import<M: Module + 'static>(mut self) -> Self {
         self.imports.push(ModuleDef::of::<M>());
         self
     }
+    /// Runs the `provider` public API operation.
     pub fn provider<T: Injectable>(mut self) -> Self {
         self.providers.push(ProviderDef::of::<T>());
         self
     }
+    /// Runs the `provider_async_factory` public API operation.
     pub fn provider_async_factory<T, Fut, E>(
         mut self,
         dependencies: Vec<ProviderDependency>,
@@ -392,14 +434,17 @@ impl ModuleMetadata {
         ));
         self
     }
+    /// Runs the `controller` public API operation.
     pub fn controller<C: Controller + Injectable + 'static>(mut self) -> Self {
         self.controllers.push(ControllerDef::of::<C>());
         self
     }
+    /// Runs the `gateway` public API operation.
     pub fn gateway<G: Gateway>(mut self) -> Self {
         self.gateways.push(G::definition());
         self
     }
+    /// Runs the `event_handler` public API operation.
     pub fn event_handler<H>(mut self) -> Self
     where
         H: RegisterableEventHandler + EventHandler<H::Event>,
@@ -407,6 +452,7 @@ impl ModuleMetadata {
         self.event_handlers.push(EventHandlerDef::of::<H>());
         self
     }
+    /// Runs the `event_handler_for` public API operation.
     pub fn event_handler_for<E, H>(mut self) -> Self
     where
         E: Clone + Send + Sync + 'static,
@@ -807,15 +853,18 @@ async fn rollback_graph(graph: &ModuleGraph, container: &Container) {
     }
 }
 
-pub async fn register_module<M: Module + 'static>(container: &mut Container) -> crate::Result<()> {
+/// Runs the `register_module` public API operation.
+pub async fn register_module<M: Module + 'static>(container: &mut Container) -> Result<()> {
     let graph = ModuleGraph::discover::<M>()?;
     initialize_graph(&graph, container).await
 }
-pub async fn bootstrap_module<M: Module + 'static>(container: &Container) -> crate::Result<()> {
+/// Runs the `bootstrap_module` public API operation.
+pub async fn bootstrap_module<M: Module + 'static>(container: &Container) -> Result<()> {
     let graph = ModuleGraph::discover::<M>()?;
     bootstrap_graph(&graph, container).await
 }
-pub async fn shutdown_module<M: Module + 'static>(container: &Container) -> crate::Result<()> {
+/// Runs the `shutdown_module` public API operation.
+pub async fn shutdown_module<M: Module + 'static>(container: &Container) -> Result<()> {
     let graph = ModuleGraph::discover::<M>()?;
     let mut first = None;
     for type_id in container.take_initialized_providers().into_iter().rev() {
@@ -833,13 +882,14 @@ pub async fn shutdown_module<M: Module + 'static>(container: &Container) -> crat
     first.map_or(Ok(()), Err)
 }
 
-pub async fn build_container<M: Module + 'static>() -> crate::Result<Container> {
+/// Runs the `build_container` public API operation.
+pub async fn build_container<M: Module + 'static>() -> Result<Container> {
     build_container_with_overrides::<M>(ProviderOverrides::new()).await
 }
 #[doc(hidden)]
 pub async fn build_container_with_setup<M: Module + 'static>(
     setup: impl FnOnce(&mut Container),
-) -> crate::Result<Container> {
+) -> Result<Container> {
     crate::log_application_starting();
     let mut container = Container::new();
     setup(&mut container);
@@ -858,6 +908,7 @@ pub async fn build_container_with_setup<M: Module + 'static>(
     }
     Ok(container)
 }
+/// Runs the `build_container_with_overrides` public API operation.
 pub async fn build_container_with_overrides<M: Module + 'static>(
     overrides: ProviderOverrides,
 ) -> crate::Result<Container> {
@@ -903,7 +954,8 @@ fn validate_gateway_paths<M: Module + 'static>() -> crate::Result<()> {
     }
     Ok(())
 }
-pub fn validate_module_providers<M: Module + 'static>(container: &Container) -> crate::Result<()> {
+/// Runs the `validate_module_providers` public API operation.
+pub fn validate_module_providers<M: Module + 'static>(container: &Container) -> Result<()> {
     let graph = ModuleGraph::discover::<M>()?;
     graph.preflight(container)?;
     for registration in graph.definitions() {
@@ -912,6 +964,7 @@ pub fn validate_module_providers<M: Module + 'static>(container: &Container) -> 
     Ok(())
 }
 
+/// Runs the `register_module_controllers` public API operation.
 pub fn register_module_controllers<M: Module + 'static>(any: &mut dyn Any) {
     if let Ok(graph) = ModuleGraph::discover::<M>() {
         for node in graph.nodes {
@@ -936,6 +989,7 @@ pub fn visit_module_openapi_routes<M: Module + 'static>(
         }
     }
 }
+/// Runs the `visit_module_gateways` public API operation.
 pub fn visit_module_gateways<M: Module + 'static>(visitor: &mut impl FnMut(&GatewayDef)) {
     if let Ok(graph) = ModuleGraph::discover::<M>() {
         let mut seen = HashSet::new();

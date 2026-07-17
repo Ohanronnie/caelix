@@ -46,11 +46,17 @@ static CAELIX_TRACING_SUBSCRIBER: AtomicBool = AtomicBool::new(false);
 static ACCESS_LOG_WRITER: OnceLock<AccessLogWriter> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Public Caelix enumeration `LogLevel`.
 pub enum LogLevel {
+    /// Public Caelix API.
     Info,
+    /// Public Caelix API.
     Log,
+    /// Public Caelix API.
     Warn,
+    /// Public Caelix API.
     Error,
+    /// Public Caelix API.
     Debug,
 }
 
@@ -84,37 +90,45 @@ impl LogLevel {
 }
 
 #[derive(Clone, Debug)]
+/// Public Caelix type `Logger`.
 pub struct Logger {
     context: String,
 }
 
 impl Logger {
+    /// Runs the `new` public API operation.
     pub fn new(context: impl Into<String>) -> Self {
         Self {
             context: short_type_name(&context.into()).to_string(),
         }
     }
 
+    /// Runs the `for_type` public API operation.
     pub fn for_type<T: ?Sized>() -> Self {
         Self::new(std::any::type_name::<T>())
     }
 
+    /// Runs the `context` public API operation.
     pub fn context(&self) -> &str {
         &self.context
     }
 
+    /// Runs the `info` public API operation.
     pub fn info(&self, message: impl AsRef<str>) {
         self.write(LogLevel::Info, message, None);
     }
 
+    /// Runs the `warn` public API operation.
     pub fn warn(&self, message: impl AsRef<str>) {
         self.write(LogLevel::Warn, message, None);
     }
 
+    /// Runs the `error` public API operation.
     pub fn error(&self, message: impl AsRef<str>) {
         self.write(LogLevel::Error, message, None);
     }
 
+    /// Runs the `debug` public API operation.
     pub fn debug(&self, message: impl AsRef<str>) {
         self.write(LogLevel::Debug, message, None);
     }
@@ -251,10 +265,12 @@ impl crate::Injectable for Logger {
     }
 }
 
+/// Runs the `log` public API operation.
 pub fn log(context: &str, level: LogLevel, message: impl AsRef<str>, elapsed: Option<Duration>) {
     Logger::new(context).write(level, message, elapsed);
 }
 
+/// Runs the `log_http_exception` public API operation.
 pub fn log_http_exception(exception: &HttpException) {
     if !exception.status.is_server_error() {
         return;
@@ -412,6 +428,7 @@ impl Visit for MessageVisitor {
     }
 }
 
+/// Runs the `log_application_starting` public API operation.
 pub fn log_application_starting() {
     log(
         "Application",
@@ -421,6 +438,7 @@ pub fn log_application_starting() {
     );
 }
 
+/// Runs the `log_application_started` public API operation.
 pub fn log_application_started(elapsed: Duration) {
     log(
         "Application",
@@ -430,6 +448,7 @@ pub fn log_application_started(elapsed: Duration) {
     );
 }
 
+/// Runs the `log_listening` public API operation.
 pub fn log_listening(addr: &str) {
     log(
         "Application",
@@ -439,6 +458,7 @@ pub fn log_listening(addr: &str) {
     );
 }
 
+/// Runs the `log_module_initialized` public API operation.
 pub fn log_module_initialized(module: &str, elapsed: Duration) {
     log(
         "InstanceLoader",
@@ -448,6 +468,7 @@ pub fn log_module_initialized(module: &str, elapsed: Duration) {
     );
 }
 
+/// Runs the `log_provider_initialized` public API operation.
 pub fn log_provider_initialized(provider: &str, elapsed: Duration) {
     log(
         "ProviderLoader",
@@ -457,6 +478,7 @@ pub fn log_provider_initialized(provider: &str, elapsed: Duration) {
     );
 }
 
+/// Runs the `log_controller_routes` public API operation.
 pub fn log_controller_routes<C: Controller>() {
     let routes = C::routes();
 
@@ -480,6 +502,7 @@ pub fn log_controller_routes<C: Controller>() {
     }
 }
 
+/// Runs the `log_route_mapped` public API operation.
 pub fn log_route_mapped(route: &RouteDef) {
     log(
         "RouterExplorer",
@@ -493,6 +516,7 @@ pub fn log_route_mapped(route: &RouteDef) {
     );
 }
 
+/// Runs the `log_http_request` public API operation.
 pub fn log_http_request(method: &str, path: &str, status: u16, elapsed: Duration) {
     let level = match status {
         500..=599 => LogLevel::Error,
@@ -522,6 +546,7 @@ pub fn log_http_request(method: &str, path: &str, status: u16, elapsed: Duration
 /// This is used by the Actix runtime for `Logging::info()`.
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
+/// Runs the `log_http_request_info` public API operation.
 pub fn log_http_request_info(
     client_address: &str,
     method: &str,
@@ -829,6 +854,7 @@ fn report_dropped_access_logs(stderr: &mut BufWriter<io::StderrLock<'_>>, droppe
     }
 }
 
+/// Runs the `http_request_logging_enabled` public API operation.
 pub fn http_request_logging_enabled() -> bool {
     *HTTP_REQUEST_LOGGING.get_or_init(|| {
         env::var("CAELIX_HTTP_LOG")
@@ -839,6 +865,7 @@ pub fn http_request_logging_enabled() -> bool {
     })
 }
 
+/// Runs the `log_module_routes` public API operation.
 pub fn log_module_routes<M: Module>() {
     let metadata = M::register();
 

@@ -101,6 +101,7 @@ impl MessageStream {
     /// # }
     /// ```
     #[must_use]
+    /// Runs the `max_frame_size` public API operation.
     pub fn max_frame_size(mut self, max_size: usize) -> Self {
         self.codec = self.codec.max_size(max_size);
         self
@@ -119,6 +120,7 @@ impl MessageStream {
     /// # }
     /// ```
     #[must_use]
+    /// Runs the `recv` public API operation.
     pub async fn recv(&mut self) -> Option<Result<Message, ProtocolError>> {
         poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
     }

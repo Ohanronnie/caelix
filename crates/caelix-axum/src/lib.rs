@@ -1,3 +1,6 @@
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+
 //! Axum runtime adapter for Caelix applications.
 
 mod application;
@@ -11,8 +14,11 @@ pub use axum as __axum;
 #[doc(hidden)]
 pub use tokio as __tokio;
 
+/// Re-exported public API.
 pub use application::{
     Application, AxumRequestInfo, AxumRouterBuilder, DEFAULT_BODY_LIMIT_BYTES, to_axum_response,
 };
+/// Re-exported public API.
 pub use test_app::{TestApplication, TestApplicationBuilder, TestRequestBuilder, TestResponse};
+/// Re-exported public API.
 pub use websocket::DEFAULT_WEBSOCKET_MAX_MESSAGE_SIZE;

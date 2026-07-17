@@ -5,15 +5,22 @@ use std::collections::BTreeMap;
 use http::StatusCode;
 
 #[derive(Debug)]
+/// Public Caelix type `HttpException`.
 pub struct HttpException {
+    /// The `status` value.
     pub status: StatusCode,
+    /// The `message` value.
     pub message: String,
+    /// The `error` value.
     pub error: &'static str,
+    /// The `errors` value.
     pub errors: Option<BTreeMap<String, Vec<String>>>,
+    /// The `source` value.
     pub source: Option<anyhow::Error>,
 }
 
 impl HttpException {
+    /// Runs the `new` public API operation.
     pub fn new(status: StatusCode, error: &'static str, message: impl Into<String>) -> Self {
         Self {
             status,
@@ -24,11 +31,13 @@ impl HttpException {
         }
     }
 
+    /// Runs the `with_source` public API operation.
     pub fn with_source(mut self, err: impl Into<anyhow::Error>) -> Self {
         self.source = Some(err.into());
         self
     }
 
+    /// Runs the `with_errors` public API operation.
     pub fn with_errors(mut self, errors: BTreeMap<String, Vec<String>>) -> Self {
         self.errors = Some(errors);
         self
@@ -43,43 +52,55 @@ pub(crate) fn startup_error(message: impl Into<String>) -> HttpException {
     )
 }
 
+/// Public Caelix type `BadRequestException`.
 pub struct BadRequestException;
 impl BadRequestException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::BAD_REQUEST, "Bad Request", message)
     }
 }
 
+/// Public Caelix type `UnauthorizedException`.
 pub struct UnauthorizedException;
 impl UnauthorizedException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::UNAUTHORIZED, "Unauthorized", message)
     }
 }
 
+/// Public Caelix type `PaymentRequiredException`.
 pub struct PaymentRequiredException;
 impl PaymentRequiredException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::PAYMENT_REQUIRED, "Payment Required", message)
     }
 }
 
+/// Public Caelix type `ForbiddenException`.
 pub struct ForbiddenException;
 impl ForbiddenException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::FORBIDDEN, "Forbidden", message)
     }
 }
 
+/// Public Caelix type `NotFoundException`.
 pub struct NotFoundException;
 impl NotFoundException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::NOT_FOUND, "Not Found", message)
     }
 }
 
+/// Public Caelix type `MethodNotAllowedException`.
 pub struct MethodNotAllowedException;
 impl MethodNotAllowedException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -89,15 +110,19 @@ impl MethodNotAllowedException {
     }
 }
 
+/// Public Caelix type `NotAcceptableException`.
 pub struct NotAcceptableException;
 impl NotAcceptableException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::NOT_ACCEPTABLE, "Not Acceptable", message)
     }
 }
 
+/// Public Caelix type `ProxyAuthenticationRequiredException`.
 pub struct ProxyAuthenticationRequiredException;
 impl ProxyAuthenticationRequiredException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::PROXY_AUTHENTICATION_REQUIRED,
@@ -107,36 +132,46 @@ impl ProxyAuthenticationRequiredException {
     }
 }
 
+/// Public Caelix type `RequestTimeoutException`.
 pub struct RequestTimeoutException;
 impl RequestTimeoutException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::REQUEST_TIMEOUT, "Request Timeout", message)
     }
 }
 
+/// Public Caelix type `ConflictException`.
 pub struct ConflictException;
 impl ConflictException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::CONFLICT, "Conflict", message)
     }
 }
 
+/// Public Caelix type `GoneException`.
 pub struct GoneException;
 impl GoneException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::GONE, "Gone", message)
     }
 }
 
+/// Public Caelix type `LengthRequiredException`.
 pub struct LengthRequiredException;
 impl LengthRequiredException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::LENGTH_REQUIRED, "Length Required", message)
     }
 }
 
+/// Public Caelix type `PreconditionFailedException`.
 pub struct PreconditionFailedException;
 impl PreconditionFailedException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::PRECONDITION_FAILED,
@@ -146,22 +181,28 @@ impl PreconditionFailedException {
     }
 }
 
+/// Public Caelix type `PayloadTooLargeException`.
 pub struct PayloadTooLargeException;
 impl PayloadTooLargeException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large", message)
     }
 }
 
+/// Public Caelix type `UriTooLongException`.
 pub struct UriTooLongException;
 impl UriTooLongException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::URI_TOO_LONG, "URI Too Long", message)
     }
 }
 
+/// Public Caelix type `UnsupportedMediaTypeException`.
 pub struct UnsupportedMediaTypeException;
 impl UnsupportedMediaTypeException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -171,8 +212,10 @@ impl UnsupportedMediaTypeException {
     }
 }
 
+/// Public Caelix type `RangeNotSatisfiableException`.
 pub struct RangeNotSatisfiableException;
 impl RangeNotSatisfiableException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::RANGE_NOT_SATISFIABLE,
@@ -182,8 +225,10 @@ impl RangeNotSatisfiableException {
     }
 }
 
+/// Public Caelix type `ExpectationFailedException`.
 pub struct ExpectationFailedException;
 impl ExpectationFailedException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::EXPECTATION_FAILED,
@@ -193,15 +238,19 @@ impl ExpectationFailedException {
     }
 }
 
+/// Public Caelix type `ImATeapotException`.
 pub struct ImATeapotException;
 impl ImATeapotException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::IM_A_TEAPOT, "I'm a teapot", message)
     }
 }
 
+/// Public Caelix type `MisdirectedRequestException`.
 pub struct MisdirectedRequestException;
 impl MisdirectedRequestException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::MISDIRECTED_REQUEST,
@@ -211,8 +260,10 @@ impl MisdirectedRequestException {
     }
 }
 
+/// Public Caelix type `UnprocessableEntityException`.
 pub struct UnprocessableEntityException;
 impl UnprocessableEntityException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -222,36 +273,46 @@ impl UnprocessableEntityException {
     }
 }
 
+/// Public Caelix type `LockedException`.
 pub struct LockedException;
 impl LockedException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::LOCKED, "Locked", message)
     }
 }
 
+/// Public Caelix type `FailedDependencyException`.
 pub struct FailedDependencyException;
 impl FailedDependencyException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::FAILED_DEPENDENCY, "Failed Dependency", message)
     }
 }
 
+/// Public Caelix type `TooEarlyException`.
 pub struct TooEarlyException;
 impl TooEarlyException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::TOO_EARLY, "Too Early", message)
     }
 }
 
+/// Public Caelix type `UpgradeRequiredException`.
 pub struct UpgradeRequiredException;
 impl UpgradeRequiredException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::UPGRADE_REQUIRED, "Upgrade Required", message)
     }
 }
 
+/// Public Caelix type `PreconditionRequiredException`.
 pub struct PreconditionRequiredException;
 impl PreconditionRequiredException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::PRECONDITION_REQUIRED,
@@ -261,15 +322,19 @@ impl PreconditionRequiredException {
     }
 }
 
+/// Public Caelix type `TooManyRequestsException`.
 pub struct TooManyRequestsException;
 impl TooManyRequestsException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::TOO_MANY_REQUESTS, "Too Many Requests", message)
     }
 }
 
+/// Public Caelix type `RequestHeaderFieldsTooLargeException`.
 pub struct RequestHeaderFieldsTooLargeException;
 impl RequestHeaderFieldsTooLargeException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
@@ -279,8 +344,10 @@ impl RequestHeaderFieldsTooLargeException {
     }
 }
 
+/// Public Caelix type `UnavailableForLegalReasonsException`.
 pub struct UnavailableForLegalReasonsException;
 impl UnavailableForLegalReasonsException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS,
@@ -290,8 +357,10 @@ impl UnavailableForLegalReasonsException {
     }
 }
 
+/// Public Caelix type `InternalServerErrorException`.
 pub struct InternalServerErrorException;
 impl InternalServerErrorException {
+    /// Runs the `new` public API operation.
     pub fn new(err: impl Into<anyhow::Error>) -> HttpException {
         HttpException::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -430,22 +499,28 @@ fn validation_param(error: &validator::ValidationError, name: &str) -> Option<St
     }
 }
 
+/// Public Caelix type `NotImplementedException`.
 pub struct NotImplementedException;
 impl NotImplementedException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::NOT_IMPLEMENTED, "Not Implemented", message)
     }
 }
 
+/// Public Caelix type `BadGatewayException`.
 pub struct BadGatewayException;
 impl BadGatewayException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::BAD_GATEWAY, "Bad Gateway", message)
     }
 }
 
+/// Public Caelix type `ServiceUnavailableException`.
 pub struct ServiceUnavailableException;
 impl ServiceUnavailableException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -455,15 +530,19 @@ impl ServiceUnavailableException {
     }
 }
 
+/// Public Caelix type `GatewayTimeoutException`.
 pub struct GatewayTimeoutException;
 impl GatewayTimeoutException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::GATEWAY_TIMEOUT, "Gateway Timeout", message)
     }
 }
 
+/// Public Caelix type `HttpVersionNotSupportedException`.
 pub struct HttpVersionNotSupportedException;
 impl HttpVersionNotSupportedException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::HTTP_VERSION_NOT_SUPPORTED,
@@ -473,8 +552,10 @@ impl HttpVersionNotSupportedException {
     }
 }
 
+/// Public Caelix type `VariantAlsoNegotiatesException`.
 pub struct VariantAlsoNegotiatesException;
 impl VariantAlsoNegotiatesException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::VARIANT_ALSO_NEGOTIATES,
@@ -484,8 +565,10 @@ impl VariantAlsoNegotiatesException {
     }
 }
 
+/// Public Caelix type `InsufficientStorageException`.
 pub struct InsufficientStorageException;
 impl InsufficientStorageException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::INSUFFICIENT_STORAGE,
@@ -495,22 +578,28 @@ impl InsufficientStorageException {
     }
 }
 
+/// Public Caelix type `LoopDetectedException`.
 pub struct LoopDetectedException;
 impl LoopDetectedException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::LOOP_DETECTED, "Loop Detected", message)
     }
 }
 
+/// Public Caelix type `NotExtendedException`.
 pub struct NotExtendedException;
 impl NotExtendedException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(StatusCode::NOT_EXTENDED, "Not Extended", message)
     }
 }
 
+/// Public Caelix type `NetworkAuthenticationRequiredException`.
 pub struct NetworkAuthenticationRequiredException;
 impl NetworkAuthenticationRequiredException {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> HttpException {
         HttpException::new(
             StatusCode::NETWORK_AUTHENTICATION_REQUIRED,

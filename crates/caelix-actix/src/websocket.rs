@@ -18,6 +18,7 @@ use tokio::sync::Mutex;
 
 use crate::actix_ws;
 
+/// Public Caelix constant `DEFAULT_WEBSOCKET_MAX_MESSAGE_SIZE`.
 pub const DEFAULT_WEBSOCKET_MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 
 enum Fragment {

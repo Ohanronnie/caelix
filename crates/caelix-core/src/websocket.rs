@@ -11,23 +11,38 @@ use std::{
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Public Caelix enumeration `WebSocketCloseCode`.
 pub enum WebSocketCloseCode {
+    /// Public Caelix API.
     Normal,
+    /// Public Caelix API.
     GoingAway,
+    /// Public Caelix API.
     Protocol,
+    /// Public Caelix API.
     Unsupported,
+    /// Public Caelix API.
     InvalidData,
+    /// Public Caelix API.
     Policy,
+    /// Public Caelix API.
     MessageTooBig,
+    /// Public Caelix API.
     Internal,
+    /// Public Caelix API.
     Restart,
+    /// Public Caelix API.
     TryAgainLater,
+    /// Public Caelix API.
     MandatoryExtension,
+    /// Public Caelix API.
     BadGateway,
+    /// Public Caelix API.
     Other(u16),
 }
 
 impl WebSocketCloseCode {
+    /// Runs the `as_u16` public API operation.
     pub fn as_u16(self) -> u16 {
         match self {
             Self::Normal => 1000,
@@ -45,6 +60,7 @@ impl WebSocketCloseCode {
             Self::Other(code) => code,
         }
     }
+    /// Runs the `from_u16` public API operation.
     pub fn from_u16(code: u16) -> Option<Self> {
         Some(match code {
             1000 => Self::Normal,
@@ -63,20 +79,26 @@ impl WebSocketCloseCode {
             _ => return None,
         })
     }
+    /// Runs the `is_valid` public API operation.
     pub fn is_valid(self) -> bool {
         Self::from_u16(self.as_u16()).is_some()
     }
+    /// Runs the `is_server_sendable` public API operation.
     pub fn is_server_sendable(self) -> bool {
         self.is_valid() && self != Self::MandatoryExtension
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Public Caelix type `WebSocketCloseFrame`.
 pub struct WebSocketCloseFrame {
+    /// The `code` value.
     pub code: WebSocketCloseCode,
+    /// The `reason` value.
     pub reason: String,
 }
 impl WebSocketCloseFrame {
+    /// Runs the `new` public API operation.
     pub fn new(code: WebSocketCloseCode, reason: impl Into<String>) -> Self {
         Self {
             code,
@@ -86,6 +108,7 @@ impl WebSocketCloseFrame {
 }
 
 #[derive(Clone, Debug)]
+/// Public Caelix type `WebSocketRequest`.
 pub struct WebSocketRequest {
     path: String,
     query: String,
@@ -93,6 +116,7 @@ pub struct WebSocketRequest {
     headers: BTreeMap<String, String>,
 }
 impl WebSocketRequest {
+    /// Runs the `new` public API operation.
     pub fn new(
         path: impl Into<String>,
         query: impl Into<String>,
@@ -106,30 +130,37 @@ impl WebSocketRequest {
             headers,
         }
     }
+    /// Runs the `path` public API operation.
     pub fn path(&self) -> &str {
         &self.path
     }
+    /// Runs the `query_string` public API operation.
     pub fn query_string(&self) -> &str {
         &self.query
     }
+    /// Runs the `peer_addr` public API operation.
     pub fn peer_addr(&self) -> Option<SocketAddr> {
         self.peer_addr
     }
+    /// Runs the `header` public API operation.
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .get(&name.to_ascii_lowercase())
             .map(String::as_str)
     }
+    /// Runs the `headers` public API operation.
     pub fn headers(&self) -> &BTreeMap<String, String> {
         &self.headers
     }
 }
 
 #[derive(Clone, Debug)]
+/// Public Caelix type `WebSocketError`.
 pub struct WebSocketError {
     message: String,
 }
 impl WebSocketError {
+    /// Runs the `new` public API operation.
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -145,14 +176,20 @@ impl std::error::Error for WebSocketError {}
 
 #[doc(hidden)]
 pub trait WebSocketTransport: Send + Sync {
+    /// Public Caelix API.
     fn send_text(&self, text: String) -> BoxFuture<'_, Result<()>>;
+    /// Public Caelix API.
     fn send_binary(&self, data: Bytes) -> BoxFuture<'_, Result<()>>;
+    /// Public Caelix API.
     fn ping(&self, data: Bytes) -> BoxFuture<'_, Result<()>>;
+    /// Public Caelix API.
     fn pong(&self, data: Bytes) -> BoxFuture<'_, Result<()>>;
+    /// Public Caelix API.
     fn close(&self, frame: Option<WebSocketCloseFrame>) -> BoxFuture<'_, Result<()>>;
 }
 
 #[derive(Clone)]
+/// Public Caelix type `WebSocketSession`.
 pub struct WebSocketSession {
     id: String,
     open: Arc<AtomicBool>,
@@ -173,28 +210,35 @@ impl WebSocketSession {
             close_frame: Arc::new(std::sync::Mutex::new(None)),
         }
     }
+    /// Runs the `id` public API operation.
     pub fn id(&self) -> &str {
         &self.id
     }
+    /// Runs the `is_open` public API operation.
     pub fn is_open(&self) -> bool {
         self.open.load(Ordering::Acquire)
     }
+    /// Runs the `send_text` public API operation.
     pub async fn send_text(&self, text: impl Into<String>) -> Result<()> {
         self.ensure_open()?;
         self.transport.send_text(text.into()).await
     }
+    /// Runs the `send_binary` public API operation.
     pub async fn send_binary(&self, data: impl Into<Bytes>) -> Result<()> {
         self.ensure_open()?;
         self.transport.send_binary(data.into()).await
     }
+    /// Runs the `ping` public API operation.
     pub async fn ping(&self, data: impl Into<Bytes>) -> Result<()> {
         self.ensure_open()?;
         self.transport.ping(data.into()).await
     }
+    /// Runs the `pong` public API operation.
     pub async fn pong(&self, data: impl Into<Bytes>) -> Result<()> {
         self.ensure_open()?;
         self.transport.pong(data.into()).await
     }
+    /// Runs the `close` public API operation.
     pub async fn close(&self, frame: Option<WebSocketCloseFrame>) -> Result<()> {
         *self
             .close_frame
@@ -222,7 +266,9 @@ impl WebSocketSession {
     }
 }
 
+/// Public Caelix extension trait `WebSocketGateway`.
 pub trait WebSocketGateway: Injectable {
+    /// Public Caelix API.
     fn on_connect(
         &self,
         _session: Arc<WebSocketSession>,
@@ -230,9 +276,11 @@ pub trait WebSocketGateway: Injectable {
     ) -> BoxFuture<'_, Result<()>> {
         Box::pin(async { Ok(()) })
     }
+    /// Public Caelix API.
     fn on_text(&self, _session: Arc<WebSocketSession>, _text: String) -> BoxFuture<'_, Result<()>> {
         Box::pin(async { Ok(()) })
     }
+    /// Public Caelix API.
     fn on_binary(
         &self,
         _session: Arc<WebSocketSession>,
@@ -240,6 +288,7 @@ pub trait WebSocketGateway: Injectable {
     ) -> BoxFuture<'_, Result<()>> {
         Box::pin(async { Ok(()) })
     }
+    /// Public Caelix API.
     fn on_error(
         &self,
         _session: Arc<WebSocketSession>,
@@ -247,6 +296,7 @@ pub trait WebSocketGateway: Injectable {
     ) -> BoxFuture<'_, ()> {
         Box::pin(async {})
     }
+    /// Public Caelix API.
     fn on_close(
         &self,
         _session: Arc<WebSocketSession>,
@@ -269,6 +319,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// Public Caelix API.
     fn close_codes_round_trip_without_corruption() {
         for code in [1000, 1012, 1013, 3000, 3999, 4000, 4999] {
             assert_eq!(WebSocketCloseCode::from_u16(code).unwrap().as_u16(), code);
@@ -276,6 +327,7 @@ mod tests {
     }
 
     #[test]
+    /// Public Caelix API.
     fn prohibited_wire_close_codes_are_rejected() {
         for code in [0, 999, 1004, 1005, 1006, 1015, 2000, 2999, 5000] {
             assert_eq!(WebSocketCloseCode::from_u16(code), None);

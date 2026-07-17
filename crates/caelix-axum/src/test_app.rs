@@ -14,7 +14,7 @@ use axum::{
 use bytes::Bytes;
 use caelix_core::{
     BoxFuture, Container, IntoCaelixResponse, Module, ProviderDependency, ProviderOverrides,
-    StatusCode, build_container_with_overrides, log_application_started, log_module_routes,
+    Result, StatusCode, build_container_with_overrides, log_application_started, log_module_routes,
     register_module_controllers, shutdown_module,
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -56,36 +56,43 @@ impl TestApplication {
         }
     }
 
+    /// Runs the `get` public API operation.
     pub fn get(&self, path: &str) -> TestRequestBuilder<'_> {
         TestRequestBuilder::new(self, Method::GET, path)
     }
 
+    /// Runs the `post` public API operation.
     pub fn post(&self, path: &str) -> TestRequestBuilder<'_> {
         TestRequestBuilder::new(self, Method::POST, path)
     }
 
+    /// Runs the `put` public API operation.
     pub fn put(&self, path: &str) -> TestRequestBuilder<'_> {
         TestRequestBuilder::new(self, Method::PUT, path)
     }
 
+    /// Runs the `patch` public API operation.
     pub fn patch(&self, path: &str) -> TestRequestBuilder<'_> {
         TestRequestBuilder::new(self, Method::PATCH, path)
     }
 
+    /// Runs the `delete` public API operation.
     pub fn delete(&self, path: &str) -> TestRequestBuilder<'_> {
         TestRequestBuilder::new(self, Method::DELETE, path)
     }
 
+    /// Runs the `container` public API operation.
     pub fn container(&self) -> &Arc<Container> {
         &self.container
     }
 
-    pub fn resolve<T: Send + Sync + 'static>(&self) -> caelix_core::Result<Arc<T>> {
+    /// Runs the `resolve` public API operation.
+    pub fn resolve<T: Send + Sync + 'static>(&self) -> Result<Arc<T>> {
         self.container.resolve::<T>()
     }
 
     /// Run module `on_shutdown` hooks. Dropping without this skips shutdown hooks.
-    pub async fn shutdown(self) -> caelix_core::Result<()> {
+    pub async fn shutdown(self) -> Result<()> {
         (self.shutdown_fn)(&self.container).await
     }
 
@@ -130,6 +137,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         self
     }
 
+    /// Runs the `body_limit` public API operation.
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
         self
@@ -137,12 +145,14 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
 
     /// Serves OpenAPI JSON and Swagger UI in the in-process test application.
     #[cfg(feature = "openapi")]
+    /// Runs the `with_openapi` public API operation.
     pub fn with_openapi(mut self, config: OpenApiConfig) -> Self {
         self.openapi = Some(config);
         self
     }
 
-    pub async fn compile(self) -> caelix_core::Result<TestApplication> {
+    /// Runs the `compile` public API operation.
+    pub async fn compile(self) -> Result<TestApplication> {
         let start = std::time::Instant::now();
         let container = build_container_with_overrides::<M>(self.overrides).await?;
         log_module_routes::<M>();
@@ -196,6 +206,7 @@ impl<M: Module + 'static> IntoFuture for TestApplicationBuilder<M> {
     }
 }
 
+/// Public Caelix type `TestRequestBuilder`.
 pub struct TestRequestBuilder<'a> {
     app: &'a TestApplication,
     request: Request<Body>,
@@ -211,6 +222,7 @@ impl<'a> TestRequestBuilder<'a> {
         Self { app, request }
     }
 
+    /// Runs the `json` public API operation.
     pub fn json(mut self, body: impl Serialize) -> Self {
         let body = serde_json::to_vec(&body).expect("test request JSON serialization failed");
         self.request.headers_mut().insert(
@@ -221,6 +233,7 @@ impl<'a> TestRequestBuilder<'a> {
         self
     }
 
+    /// Runs the `header` public API operation.
     pub fn header(mut self, name: &str, value: &str) -> Self {
         let name = HeaderName::from_bytes(name.as_bytes()).expect("invalid test request header");
         let value = HeaderValue::from_str(value).expect("invalid test request header value");
@@ -228,26 +241,31 @@ impl<'a> TestRequestBuilder<'a> {
         self
     }
 
+    /// Runs the `set_payload` public API operation.
     pub fn set_payload(mut self, bytes: impl Into<Bytes>) -> Self {
         *self.request.body_mut() = Body::from(bytes.into());
         self
     }
 
-    pub async fn send(self) -> caelix_core::Result<TestResponse> {
+    /// Runs the `send` public API operation.
+    pub async fn send(self) -> Result<TestResponse> {
         self.app.call(self.request).await
     }
 }
 
+/// Public Caelix type `TestResponse`.
 pub struct TestResponse {
     response: Response,
 }
 
 impl TestResponse {
+    /// Runs the `status` public API operation.
     pub fn status(&self) -> StatusCode {
         StatusCode::from_u16(self.response.status().as_u16())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
     }
 
+    /// Runs the `assert_status` public API operation.
     pub fn assert_status(self, expected: StatusCode) -> Self {
         let actual = self.status();
         assert_eq!(
@@ -257,18 +275,21 @@ impl TestResponse {
         self
     }
 
+    /// Runs the `json` public API operation.
     pub async fn json<T: DeserializeOwned>(self) -> T {
         let bytes = self.body().await;
         serde_json::from_slice(&bytes).expect("test response was not valid JSON")
     }
 
+    /// Runs the `body` public API operation.
     pub async fn body(self) -> Bytes {
         axum::body::to_bytes(self.response.into_body(), usize::MAX)
             .await
             .expect("failed to read test response body")
     }
 
-    pub async fn text(self) -> caelix_core::Result<String> {
+    /// Runs the `text` public API operation.
+    pub async fn text(self) -> Result<String> {
         let bytes = self.body().await;
         String::from_utf8(bytes.to_vec()).map_err(|err| {
             caelix_core::InternalServerErrorException::new(std::io::Error::other(err))
@@ -372,7 +393,9 @@ mod tests {
     struct NestedGreetingModule;
     impl Module for NestedGreetingModule {
         fn register() -> ModuleMetadata {
-            ModuleMetadata::new().provider::<GreetingService>()
+            ModuleMetadata::new()
+                .provider::<GreetingService>()
+                .export::<GreetingService>()
         }
     }
 

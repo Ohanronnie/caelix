@@ -18,7 +18,9 @@ const EVENT_BROADCAST_CAPACITY: usize = 256;
     label = "missing `impl EventHandler<{E}> for {Self}`",
     note = "add `impl EventHandler<{E}> for {Self}` or use the correct event type in `.event_handler_for::<Event, Handler>()`"
 )]
+/// Public Caelix extension trait `EventHandler`.
 pub trait EventHandler<E>: Send + Sync + 'static {
+    /// Public Caelix API.
     fn handle(&self, event: E) -> BoxFuture<'_, Result<()>>;
 }
 
@@ -27,9 +29,12 @@ pub trait EventHandler<E>: Send + Sync + 'static {
     label = "missing `impl RegisterableEventHandler for {Self}`",
     note = "add `impl RegisterableEventHandler for {Self} {{ type Event = YourEvent; }}` or use `.event_handler_for::<YourEvent, {Self}>()`"
 )]
+/// Public Caelix extension trait `RegisterableEventHandler`.
 pub trait RegisterableEventHandler: Injectable {
+    /// Public Caelix API.
     type Event: Clone + Send + Sync + 'static;
 
+    /// Public Caelix API.
     fn register_into(handler: Arc<Self>, bus: &EventBus) -> Result<()>
     where
         Self: Sized + EventHandler<Self::Event>,
@@ -71,12 +76,14 @@ struct EventChannel<E> {
     tx: broadcast::Sender<E>,
 }
 
+/// Public Caelix type `EventBus`.
 pub struct EventBus {
     handlers: RwLock<HashMap<TypeId, Vec<Arc<dyn ErasedHandler>>>>,
     broadcasts: RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
 }
 
 impl EventBus {
+    /// Runs the `new` public API operation.
     pub fn new() -> Self {
         Self {
             handlers: RwLock::new(HashMap::new()),
@@ -84,6 +91,7 @@ impl EventBus {
         }
     }
 
+    /// Runs the `register` public API operation.
     pub fn register<E, H>(&self, handler: Arc<H>) -> Result<()>
     where
         E: Clone + Send + Sync + 'static,
@@ -209,6 +217,7 @@ impl EventBus {
         Ok(())
     }
 
+    /// Runs the `handler_count` public API operation.
     pub fn handler_count<E>(&self) -> Result<usize>
     where
         E: Clone + Send + Sync + 'static,
@@ -238,6 +247,7 @@ impl Injectable for EventBus {
     }
 }
 
+/// Public Caelix type `EventModule`.
 pub struct EventModule;
 
 impl Module for EventModule {
@@ -248,6 +258,7 @@ impl Module for EventModule {
     }
 }
 
+/// Public Caelix type `EventHandlerDef`.
 pub struct EventHandlerDef {
     type_id: TypeId,
     type_name: &'static str,

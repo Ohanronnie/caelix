@@ -19,12 +19,13 @@ use caelix_core::openapi::{OpenApiConfig, build_openapi};
 use caelix_core::visit_module_gateways;
 use caelix_core::{
     BoxFuture, Container, HttpResponse as CaelixHttpResponse, IntoCaelixResponse, Module,
-    NotFoundException, ResponseBody, log_application_started, log_listening, log_module_routes,
-    register_module_controllers, shutdown_module,
+    NotFoundException, ResponseBody, Result, log_application_started, log_listening,
+    log_module_routes, register_module_controllers, shutdown_module,
 };
 use futures_util::StreamExt;
 use tower::{Layer, Service};
 
+/// Public Caelix constant `DEFAULT_BODY_LIMIT_BYTES`.
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
 
 #[cfg(feature = "openapi")]
@@ -44,12 +45,15 @@ pub struct AxumRequestInfo {
 }
 
 impl AxumRequestInfo {
+    /// Runs the `method` public API operation.
     pub fn method(&self) -> &Method {
         &self.method
     }
+    /// Runs the `path` public API operation.
     pub fn path(&self) -> &str {
         self.uri.path()
     }
+    /// Runs the `headers` public API operation.
     pub fn headers(&self) -> &HeaderMap {
         &self.headers
     }
@@ -61,7 +65,10 @@ where
 {
     type Rejection = Infallible;
 
-    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        _: &S,
+    ) -> std::result::Result<Self, Self::Rejection> {
         Ok(Self {
             method: parts.method.clone(),
             uri: parts.uri.clone(),
@@ -80,12 +87,14 @@ pub struct AxumRouterBuilder {
 }
 
 impl AxumRouterBuilder {
+    /// Runs the `new` public API operation.
     pub fn new() -> Self {
         Self {
             router: Router::new(),
         }
     }
 
+    /// Runs the `route` public API operation.
     pub fn route(
         &mut self,
         path: &str,
@@ -94,6 +103,7 @@ impl AxumRouterBuilder {
         self.router = std::mem::take(&mut self.router).route(path, method_router);
     }
 
+    /// Runs the `into_router` public API operation.
     pub fn into_router(self, container: Arc<Container>) -> Router {
         self.router.with_state(container)
     }
@@ -138,6 +148,7 @@ pub fn to_axum_response(response: CaelixHttpResponse) -> Response {
 
 type RouterLayer = Box<dyn FnOnce(Router) -> Router + Send>;
 
+/// Public Caelix type `Application`.
 pub struct Application {
     container: Arc<Container>,
     configure_fn: fn(&mut dyn std::any::Any),
@@ -156,7 +167,8 @@ pub struct Application {
 }
 
 impl Application {
-    pub async fn new<M: Module + 'static>() -> caelix_core::Result<Self> {
+    /// Runs the `new` public API operation.
+    pub async fn new<M: Module + 'static>() -> Result<Self> {
         let start = Instant::now();
         #[cfg(not(feature = "socketio"))]
         let container = build_container::<M>().await?;
@@ -191,6 +203,7 @@ impl Application {
         })
     }
 
+    /// Runs the `body_limit` public API operation.
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
         self
@@ -198,7 +211,8 @@ impl Application {
 
     /// Generates and serves OpenAPI JSON plus Swagger UI for this application.
     #[cfg(feature = "openapi")]
-    pub fn with_openapi(mut self, config: OpenApiConfig) -> caelix_core::Result<Self> {
+    /// Runs the `with_openapi` public API operation.
+    pub fn with_openapi(mut self, config: OpenApiConfig) -> Result<Self> {
         let document = (self.openapi_build_fn)(&config)?;
         self.openapi = Some(OpenApiServices {
             config,
@@ -232,6 +246,7 @@ impl Application {
     /// an injectable provider. This method only exists when the `socketio`
     /// feature is enabled, which itself requires the Axum backend.
     #[cfg(feature = "socketio")]
+    /// Runs the `with_socket_io` public API operation.
     pub fn with_socket_io<M: Module + 'static>(mut self) -> Self {
         let handle = self
             .container
@@ -249,6 +264,7 @@ impl Application {
         self.layer(layer)
     }
 
+    /// Runs the `into_router` public API operation.
     pub fn into_router(self) -> Router {
         let mut routes = AxumRouterBuilder::new();
         (self.configure_fn)(&mut routes);
@@ -283,6 +299,7 @@ impl Application {
         (self.shutdown_fn)(&self.container).await
     }
 
+    /// Runs the `listen` public API operation.
     pub async fn listen(self, addr: &str) -> std::io::Result<()> {
         log_listening(addr);
         let listener = match tokio::net::TcpListener::bind(addr).await {

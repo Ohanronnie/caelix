@@ -1,6 +1,6 @@
 //! OpenAPI document construction shared by Caelix runtime adapters.
 
-use crate::{HttpException, Module, StatusCode};
+use crate::{HttpException, Module, Result, StatusCode};
 use std::collections::BTreeMap;
 /// `utoipa` OpenAPI security component types, re-exported for configuration.
 pub use utoipa::openapi::security;
@@ -17,13 +17,21 @@ pub use utoipa::{self, IntoParams, PartialSchema, ToSchema};
 
 /// A documentation-only security requirement for one controller route.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Public Caelix enumeration `Security`.
 pub enum Security {
+    /// Public Caelix API.
     BearerAuth,
+    /// Public Caelix API.
     ApiKeyAuth,
+    /// Public Caelix API.
     CookieAuth,
+    /// Public Caelix API.
     OAuth2(&'static [&'static str]),
+    /// Public Caelix API.
     Custom {
+        /// OpenAPI security-scheme name registered in [`OpenApiConfig`].
         name: &'static str,
+        /// OAuth-style scopes required by the operation.
         scopes: &'static [&'static str],
     },
 }
@@ -55,17 +63,23 @@ struct ConfiguredSecurityScheme {
     kind: ConfiguredSecurityKind,
 }
 
-/// Opt-in OpenAPI configuration for an [`Application`](crate::Application).
+/// Opt-in OpenAPI configuration for a runtime `Application`.
 #[derive(Clone, Eq, PartialEq)]
+/// Public Caelix type `OpenApiConfig`.
 pub struct OpenApiConfig {
+    /// The `title` value.
     pub title: String,
+    /// The `version` value.
     pub version: String,
+    /// The `json_path` value.
     pub json_path: String,
+    /// The `ui_path` value.
     pub ui_path: String,
     security_schemes: BTreeMap<String, ConfiguredSecurityScheme>,
 }
 
 impl OpenApiConfig {
+    /// Runs the `new` public API operation.
     pub fn new(title: impl Into<String>, version: impl Into<String>) -> Self {
         Self {
             title: title.into(),
@@ -169,12 +183,15 @@ fn normalize_path(mut path: String) -> String {
 /// Metadata attached by the controller macro to one documented route.
 #[doc(hidden)]
 pub struct OpenApiRouteDef {
+    /// The `document` value.
     pub document: fn(&mut OpenApi),
 }
 
 /// Describes an exception marker that can appear in `#[errors(...)]`.
 pub trait OpenApiError {
+    /// Public Caelix API.
     fn status() -> StatusCode;
+    /// Public Caelix API.
     fn description() -> &'static str {
         "Error response"
     }
@@ -239,7 +256,7 @@ struct ErrorEnvelope {
 }
 
 /// Builds one immutable OpenAPI 3.1 document from a module and all its imports.
-pub fn build_openapi<M: Module + 'static>(config: &OpenApiConfig) -> crate::Result<OpenApi> {
+pub fn build_openapi<M: Module + 'static>(config: &OpenApiConfig) -> Result<OpenApi> {
     let mut openapi = OpenApi::new(
         Info::new(config.title.clone(), config.version.clone()),
         utoipa::openapi::Paths::new(),

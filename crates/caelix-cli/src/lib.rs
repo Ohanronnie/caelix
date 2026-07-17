@@ -1,3 +1,8 @@
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+
+//! Library implementation for the Caelix command-line generator.
+
 use std::{
     env,
     ffi::OsString,
@@ -15,33 +20,54 @@ use notify::RecursiveMode;
 use notify_debouncer_mini::new_debouncer;
 use toml_edit::{DocumentMut, Item, Value};
 
+/// Public Caelix type alias `Result`.
 pub type Result<T> = std::result::Result<T, CliError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Public Caelix enumeration `CliOutcome`.
 pub enum CliOutcome {
+    /// Public Caelix API.
     Output(String),
+    /// Public Caelix API.
     Exit(i32),
 }
 
 #[derive(Debug)]
+/// Public Caelix enumeration `CliError`.
 pub enum CliError {
+    /// Public Caelix API.
     Io {
+        /// Filesystem path involved in the failed operation.
         path: PathBuf,
+        /// I/O error returned by the operating system.
         source: io::Error,
     },
+    /// Public Caelix API.
     MissingCargoManifest(PathBuf),
+    /// Public Caelix API.
     AlreadyExists(PathBuf),
+    /// Public Caelix API.
     InvalidName(String),
+    /// Public Caelix API.
     TomlParse {
+        /// Manifest path whose TOML could not be parsed.
         path: PathBuf,
+        /// Parser error returned for the manifest contents.
         source: toml_edit::TomlError,
     },
+    /// Public Caelix API.
     MissingDependency(String),
+    /// Public Caelix API.
     UnsupportedDependencyFormat(String),
+    /// Public Caelix API.
     CratesIo(reqwest::Error),
+    /// Public Caelix API.
     CratesIoResponse,
+    /// Public Caelix API.
     CargoUpdateFailed(Option<i32>),
+    /// Public Caelix API.
     Watcher(String),
+    /// Public Caelix API.
     SignalHandler(ctrlc::Error),
 }
 
@@ -154,6 +180,7 @@ struct NameArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Public Caelix type `FeatureName`.
 pub struct FeatureName {
     raw: String,
     module_name: String,
@@ -162,6 +189,7 @@ pub struct FeatureName {
 }
 
 impl FeatureName {
+    /// Runs the `parse` public API operation.
     pub fn parse(name: impl Into<String>) -> Result<Self> {
         let raw = name.into();
         let trimmed = raw.trim();
@@ -192,27 +220,33 @@ impl FeatureName {
         })
     }
 
+    /// Runs the `module_name` public API operation.
     pub fn module_name(&self) -> &str {
         &self.module_name
     }
 
+    /// Runs the `route_path` public API operation.
     pub fn route_path(&self) -> &str {
         &self.route_path
     }
 
+    /// Runs the `service_type` public API operation.
     pub fn service_type(&self) -> String {
         format!("{}Service", self.type_prefix)
     }
 
+    /// Runs the `controller_type` public API operation.
     pub fn controller_type(&self) -> String {
         format!("{}Controller", self.type_prefix)
     }
 
+    /// Runs the `module_type` public API operation.
     pub fn module_type(&self) -> String {
         format!("{}Module", self.type_prefix)
     }
 }
 
+/// Runs the `run_from_env` public API operation.
 pub fn run_from_env() -> Result<CliOutcome> {
     let cwd = env::current_dir().map_err(|source| CliError::Io {
         path: PathBuf::from("."),
@@ -222,6 +256,7 @@ pub fn run_from_env() -> Result<CliOutcome> {
     run_cli(cli, cwd.as_path())
 }
 
+/// Runs the `run_from` public API operation.
 pub fn run_from<I, T>(args: I, cwd: impl AsRef<Path>) -> Result<String>
 where
     I: IntoIterator<Item = T>,
@@ -796,6 +831,7 @@ fn package_name_for_path(path: &Path, fallback: &str) -> Result<String> {
     Ok(name.to_kebab_case())
 }
 
+/// Runs the `render_app_cargo_toml` public API operation.
 pub fn render_app_cargo_toml(package_name: &str) -> String {
     render_app_cargo_toml_for_backend(package_name, BackendChoice::Actix)
 }
@@ -990,6 +1026,7 @@ Cache support is explicit service-level caching.
 "#
 }
 
+/// Runs the `render_service` public API operation.
 pub fn render_service(feature: &FeatureName) -> String {
     let service = feature.service_type();
     format!(
@@ -1007,6 +1044,7 @@ impl {service} {{
     )
 }
 
+/// Runs the `render_controller` public API operation.
 pub fn render_controller(feature: &FeatureName, has_service: bool) -> String {
     let controller = feature.controller_type();
     let route = feature.route_path();
@@ -1088,6 +1126,7 @@ pub use service::{service};
     }
 }
 
+/// Runs the `render_feature_module` public API operation.
 pub fn render_feature_module(feature: &FeatureName) -> String {
     let module = feature.module_type();
     let service = feature.service_type();
