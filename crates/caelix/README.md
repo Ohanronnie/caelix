@@ -9,7 +9,7 @@ cargo add caelix
 Actix is enabled by default. For Axum:
 
 ```toml
-caelix = { version = "0.0.19", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.22", default-features = false, features = ["axum"] }
 ```
 
 [Documentation](https://ohanronnie.github.io/caelix/) · [API docs](https://docs.rs/caelix) · [crates.io](https://crates.io/crates/caelix) · [GitHub](https://github.com/Ohanronnie/caelix)

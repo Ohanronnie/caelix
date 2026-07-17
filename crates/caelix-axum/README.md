@@ -5,7 +5,7 @@ Axum runtime adapter for the [Caelix](https://github.com/Ohanronnie/caelix) Rust
 Use it through the [`caelix`](https://crates.io/crates/caelix) facade with the `axum` feature:
 
 ```toml
-caelix = { version = "0.0.19", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.22", default-features = false, features = ["axum"] }
 ```
 
 [Guide](https://ohanronnie.github.io/caelix/) · [API docs](https://docs.rs/caelix-axum) · [crates.io](https://crates.io/crates/caelix-axum) · [GitHub](https://github.com/Ohanronnie/caelix)

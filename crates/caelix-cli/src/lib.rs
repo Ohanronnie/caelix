@@ -134,6 +134,8 @@ enum Command {
     Update,
     /// Run the current Caelix application
     Run(RunArgs),
+    /// Check compilation and validate Caelix module metadata
+    Doctor,
 }
 
 #[derive(Args, Debug)]
@@ -269,6 +271,7 @@ where
 fn run_cli(cli: Cli, cwd: &Path) -> Result<CliOutcome> {
     match cli.command {
         Command::Run(args) => run_application(args, cwd).map(CliOutcome::Exit),
+        Command::Doctor => run_doctor(cwd).map(CliOutcome::Exit),
         command => run_text_command(Cli { command }, cwd).map(CliOutcome::Output),
     }
 }
@@ -290,7 +293,43 @@ fn run_text_command(cli: Cli, cwd: &Path) -> Result<String> {
         }
         Command::Update => update_caelix_dependency(cwd),
         Command::Run(args) => Ok(format_cargo_run_command(&args.app_args)),
+        Command::Doctor => {
+            ensure_cargo_manifest(cwd)?;
+            Ok(format_cargo_doctor_command())
+        }
     }
+}
+
+fn run_doctor(cwd: &Path) -> Result<i32> {
+    ensure_cargo_manifest(cwd)?;
+
+    println!("Checking application...");
+    let check_status = cargo_check_command(cwd)
+        .status()
+        .map_err(|source| CliError::Io {
+            path: cwd.to_path_buf(),
+            source,
+        })?;
+    if !check_status.success() {
+        eprintln!("Doctor failed: the application does not compile.");
+        return Ok(check_status.code().unwrap_or(1));
+    }
+
+    println!("Compilation passed.");
+    println!("Validating Caelix module metadata...");
+    let doctor_status = cargo_doctor_command(cwd)
+        .status()
+        .map_err(|source| CliError::Io {
+            path: cwd.to_path_buf(),
+            source,
+        })?;
+    if !doctor_status.success() {
+        eprintln!("Doctor failed: Caelix module metadata is invalid.");
+        return Ok(doctor_status.code().unwrap_or(1));
+    }
+
+    println!("Caelix doctor passed.");
+    Ok(0)
 }
 
 fn run_application(args: RunArgs, cwd: &Path) -> Result<i32> {
@@ -454,6 +493,18 @@ fn cargo_run_command(cwd: &Path, app_args: &[OsString]) -> ProcessCommand {
     command
 }
 
+fn cargo_check_command(cwd: &Path) -> ProcessCommand {
+    let mut command = ProcessCommand::new("cargo");
+    command.arg("check").current_dir(cwd);
+    command
+}
+
+fn cargo_doctor_command(cwd: &Path) -> ProcessCommand {
+    let mut command = ProcessCommand::new("cargo");
+    command.args(["run", "--bin", "doctor"]).current_dir(cwd);
+    command
+}
+
 fn clear_screen() -> Result<()> {
     let mut stdout = io::stdout();
     stdout
@@ -480,6 +531,10 @@ fn format_cargo_run_command(app_args: &[OsString]) -> String {
     }
 
     format!("{}\n", parts.join(" "))
+}
+
+fn format_cargo_doctor_command() -> String {
+    "cargo check\ncargo run --bin doctor\n".to_string()
 }
 
 fn update_caelix_dependency(cwd: &Path) -> Result<String> {
@@ -669,11 +724,19 @@ fn generate_new(args: NewArgs, cwd: &Path) -> Result<String> {
         path: target_dir.join("src"),
         source,
     })?;
+    fs::create_dir_all(target_dir.join("src/bin")).map_err(|source| CliError::Io {
+        path: target_dir.join("src/bin"),
+        source,
+    })?;
 
     let cargo_toml = render_app_cargo_toml_for_backend(&package_name, args.backend);
     create_file(target_dir.join("Cargo.toml"), &cargo_toml)?;
     create_file(target_dir.join("AGENTS.md"), render_agents_md())?;
     create_file(target_dir.join("src/main.rs"), &render_main_rs(&crate_name))?;
+    create_file(
+        target_dir.join("src/bin/doctor.rs"),
+        &render_doctor_rs(&crate_name),
+    )?;
     create_file(target_dir.join("src/lib.rs"), render_lib_rs())?;
     create_file(target_dir.join("src/app.rs"), render_app_rs())?;
 
@@ -838,9 +901,9 @@ pub fn render_app_cargo_toml(package_name: &str) -> String {
 
 fn render_app_cargo_toml_for_backend(package_name: &str, backend: BackendChoice) -> String {
     let backend_dependencies = match backend {
-        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.19\"",
+        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.22\"",
         BackendChoice::Axum => {
-            "caelix = { version = \"0.0.19\", default-features = false, features = [\"axum\", \"sqlx\", \"validator\"] }\ntower-http = { version = \"0.6\", features = [\"trace\", \"compression-full\"] }"
+            "caelix = { version = \"0.0.22\", default-features = false, features = [\"axum\", \"sqlx\", \"validator\"] }\ntower-http = { version = \"0.6\", features = [\"trace\", \"compression-full\"] }"
         }
     };
     format!(
@@ -874,6 +937,20 @@ async fn main() -> std::io::Result<()> {{
     )
 }
 
+fn render_doctor_rs(crate_name: &str) -> String {
+    format!(
+        r#"use {crate_name}::AppModule;
+
+#[caelix::main]
+async fn main() -> std::io::Result<()> {{
+    caelix::validate_module::<AppModule>()
+        .map_err(|err| std::io::Error::other(err.message))
+}}
+"#,
+        crate_name = crate_name
+    )
+}
+
 fn render_lib_rs() -> &'static str {
     "pub mod app;\n\npub use app::AppModule;\n"
 }
@@ -901,6 +978,7 @@ For fuller documentation, refer to https://ohanronnie.github.io/caelix/.
 ## App Structure
 
 - `src/main.rs` starts the selected Caelix runtime with `Application::new::<AppModule>()`.
+- `src/bin/doctor.rs` validates the root module metadata for `caelix doctor` without starting the application.
 - `src/lib.rs` exports the root `AppModule` and should declare feature modules with `pub mod feature_name;`.
 - `src/app.rs` owns the root `AppModule`.
 - Feature folders usually contain `mod.rs`, `service.rs`, and `controller.rs`.
@@ -1021,6 +1099,7 @@ Cache support is explicit service-level caching.
 ## Checks
 
 - Run `cargo test` after code changes when feasible.
+- Run `caelix doctor` to compile the application and validate module metadata without constructing providers or binding a port.
 - Keep public app code using the `caelix` facade (`use caelix::...`) instead of internal Caelix crate paths.
 - When using CLI-generated files, keep the manual registration steps in the command output aligned with `src/lib.rs` and `src/app.rs`.
 "#
@@ -1238,6 +1317,8 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    static DOCTOR_FIXTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn feature_name_converts_to_rust_and_route_names() {
         let feature = FeatureName::parse("auth-session").unwrap();
@@ -1311,6 +1392,134 @@ mod tests {
         let output = run_from(["caelix", "run"], ".").unwrap();
 
         assert_eq!(output, "cargo run\n");
+    }
+
+    #[test]
+    fn doctor_command_checks_then_runs_the_doctor_binary() {
+        let tmp = tempdir().unwrap();
+        fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\n",
+        )
+        .unwrap();
+
+        let output = run_from(["caelix", "doctor"], tmp.path()).unwrap();
+
+        assert_eq!(output, "cargo check\ncargo run --bin doctor\n");
+    }
+
+    fn doctor_fixture(app_rs: &str) -> tempfile::TempDir {
+        let fixture = tempdir().unwrap();
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let caelix = workspace.join("crates/caelix");
+        let target = workspace.join("target");
+        let quote_toml_path = |path: &Path| path.display().to_string().replace('\\', "\\\\");
+
+        fs::create_dir_all(fixture.path().join("src/bin")).unwrap();
+        fs::create_dir_all(fixture.path().join(".cargo")).unwrap();
+        fs::write(
+            fixture.path().join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"doctor-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\ncaelix = {{ path = \"{}\" }}\n",
+                quote_toml_path(&caelix)
+            ),
+        )
+        .unwrap();
+        fs::write(
+            fixture.path().join(".cargo/config.toml"),
+            format!(
+                "[net]\noffline = true\n\n[build]\ntarget-dir = \"{}\"\n",
+                quote_toml_path(&target)
+            ),
+        )
+        .unwrap();
+        fs::write(
+            fixture.path().join("src/lib.rs"),
+            "pub mod app;\npub use app::AppModule;\n",
+        )
+        .unwrap();
+        fs::write(fixture.path().join("src/app.rs"), app_rs).unwrap();
+        fs::write(
+            fixture.path().join("src/bin/doctor.rs"),
+            render_doctor_rs("doctor_fixture"),
+        )
+        .unwrap();
+
+        fixture
+    }
+
+    #[test]
+    fn doctor_validates_without_constructing_providers_or_starting_a_listener() {
+        let _lock = DOCTOR_FIXTURE_LOCK.lock().unwrap();
+        let fixture = doctor_fixture(
+            r#"use caelix::{BoxFuture, Container, Injectable, Module, ModuleMetadata, Result};
+
+pub struct ConstructorMustNotRun;
+
+impl Injectable for ConstructorMustNotRun {
+    fn dependencies() -> Vec<caelix::ProviderDependency> {
+        caelix::provider_dependencies![]
+    }
+
+    fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async { panic!("doctor must not construct providers") })
+    }
+}
+
+pub struct AppModule;
+
+impl Module for AppModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().provider::<ConstructorMustNotRun>()
+    }
+}
+"#,
+        );
+
+        assert_eq!(run_doctor(fixture.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn doctor_returns_non_zero_for_invalid_metadata_after_successful_compilation() {
+        let _lock = DOCTOR_FIXTURE_LOCK.lock().unwrap();
+        let fixture = doctor_fixture(
+            r#"use caelix::{BoxFuture, Container, Injectable, Module, ModuleMetadata, Result};
+
+pub struct MissingDependency;
+pub struct Consumer;
+
+impl Injectable for Consumer {
+    fn dependencies() -> Vec<caelix::ProviderDependency> {
+        caelix::provider_dependencies![MissingDependency]
+    }
+
+    fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async { Ok(Self) })
+    }
+}
+
+pub struct AppModule;
+
+impl Module for AppModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().provider::<Consumer>()
+    }
+}
+"#,
+        );
+
+        assert_ne!(run_doctor(fixture.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn doctor_returns_non_zero_when_compilation_fails() {
+        let _lock = DOCTOR_FIXTURE_LOCK.lock().unwrap();
+        let fixture = doctor_fixture("this is not valid Rust");
+
+        assert_ne!(run_doctor(fixture.path()).unwrap(), 0);
     }
 
     #[test]

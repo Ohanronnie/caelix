@@ -10,7 +10,15 @@ Pass `--backend axum` to generate an Axum-backed app. The default is Actix.
 
 Creates a new Caelix application directory named `<name>`.
 
-The command creates `Cargo.toml`, `AGENTS.md`, `src/main.rs`, `src/lib.rs`, and `src/app.rs`. The package name comes from the target directory and is converted to kebab case.
+The command creates `Cargo.toml`, `AGENTS.md`, `src/main.rs`, `src/bin/doctor.rs`, `src/lib.rs`, and `src/app.rs`. The package name comes from the target directory and is converted to kebab case.
+
+## `caelix doctor`
+
+```sh
+caelix doctor
+```
+
+Runs `cargo check`, then `cargo run --bin doctor` in the current Cargo project. The doctor binary validates Caelix module metadata without creating providers, invoking async factories or lifecycle hooks, contacting external services, or binding network sockets. It returns a non-zero exit status if compilation or metadata validation fails.
 
 ## `caelix generate module`
 

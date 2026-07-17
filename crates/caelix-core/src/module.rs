@@ -624,15 +624,21 @@ impl ModuleGraph {
             .map(|r| self.def(r).type_id)
             .collect()
     }
-    fn preflight(&self, container: &Container) -> crate::Result<Vec<ProviderRegistration>> {
+    /// Validates the module graph and returns providers in construction order.
+    ///
+    /// Passing `None` performs metadata-only validation. A container is only
+    /// needed during application startup, when provider overrides and values
+    /// registered by application setup may satisfy declarations.
+    fn preflight(&self, container: Option<&Container>) -> crate::Result<Vec<ProviderRegistration>> {
         let definitions = self.definitions();
         let mut by_type = HashMap::new();
         for registration in &definitions {
             let def = self.def(*registration);
             if let Some(existing) = by_type.insert(def.type_id, *registration) {
-                if !container.has_pending_override(def.type_id)
-                    && !container.was_overridden(def.type_id)
-                {
+                if !container.is_some_and(|container| {
+                    container.has_pending_override(def.type_id)
+                        || container.was_overridden(def.type_id)
+                }) {
                     return Err(crate::exception::startup_error(format!(
                         "duplicate provider registration for {} in {} and {}",
                         def.type_name,
@@ -679,7 +685,7 @@ impl ModuleGraph {
         for registration in &definitions {
             let production = self.def(*registration);
             let effective = container
-                .pending_override(production.type_id)
+                .and_then(|container| container.pending_override(production.type_id))
                 .unwrap_or(production);
             for dependency in &effective.dependencies {
                 if dependency.type_id == TypeId::of::<crate::Logger>() {
@@ -694,7 +700,9 @@ impl ModuleGraph {
                             self.nodes[registration.module].type_name
                         )));
                     }
-                } else if !container.contains_type_id(dependency.type_id) {
+                } else if !container
+                    .is_some_and(|container| container.contains_type_id(dependency.type_id))
+                {
                     return Err(crate::exception::startup_error(format!(
                         "missing provider at startup: {} depends on {} but no provider is registered",
                         effective.type_name, dependency.type_name
@@ -720,7 +728,7 @@ impl ModuleGraph {
             reg: ProviderRegistration,
             graph: &ModuleGraph,
             by_type: &HashMap<TypeId, ProviderRegistration>,
-            container: &Container,
+            container: Option<&Container>,
             states: &mut HashMap<TypeId, u8>,
             stack: &mut Vec<&'static str>,
             sorted: &mut Vec<ProviderRegistration>,
@@ -740,7 +748,9 @@ impl ModuleGraph {
             }
             states.insert(def.type_id, 1);
             stack.push(def.type_name);
-            let effective = container.pending_override(def.type_id).unwrap_or(def);
+            let effective = container
+                .and_then(|container| container.pending_override(def.type_id))
+                .unwrap_or(def);
             for dep in &effective.dependencies {
                 if let Some(next) = by_type.get(&dep.type_id) {
                     schedule(*next, graph, by_type, container, states, stack, sorted)?;
@@ -773,7 +783,7 @@ impl ModuleGraph {
 }
 
 async fn initialize_graph(graph: &ModuleGraph, container: &mut Container) -> crate::Result<()> {
-    let order = graph.preflight(container)?;
+    let order = graph.preflight(Some(container))?;
     for registration in order {
         let declared = graph.def(registration);
         container.mark_provider_declared(declared.type_id);
@@ -823,7 +833,7 @@ async fn initialize_graph(graph: &ModuleGraph, container: &mut Container) -> cra
 }
 
 async fn bootstrap_graph(graph: &ModuleGraph, container: &Container) -> crate::Result<()> {
-    let order = graph.preflight(container)?;
+    let order = graph.preflight(Some(container))?;
     let initialized: HashSet<TypeId> = container.initialized_provider_types().into_iter().collect();
     for registration in order {
         let def = graph.def(registration);
@@ -933,8 +943,7 @@ pub async fn build_container_with_overrides<M: Module + 'static>(
     Ok(container)
 }
 
-fn validate_gateway_paths<M: Module + 'static>() -> crate::Result<()> {
-    let graph = ModuleGraph::discover::<M>()?;
+fn validate_gateway_paths_in_graph(graph: &ModuleGraph) -> crate::Result<()> {
     let mut paths = HashSet::new();
     for node in &graph.nodes {
         for gateway in &node.metadata.gateways {
@@ -954,10 +963,27 @@ fn validate_gateway_paths<M: Module + 'static>() -> crate::Result<()> {
     }
     Ok(())
 }
+
+fn validate_gateway_paths<M: Module + 'static>() -> crate::Result<()> {
+    validate_gateway_paths_in_graph(&ModuleGraph::discover::<M>()?)
+}
+
+/// Validates a module's metadata without constructing providers or starting an application.
+///
+/// This checks module imports, provider declarations and dependencies, exports,
+/// event-handler declarations, and WebSocket gateway paths. It intentionally
+/// does not invoke provider constructors or factories, lifecycle hooks, external
+/// services, or network listeners.
+pub fn validate_module<M: Module + 'static>() -> Result<()> {
+    let graph = ModuleGraph::discover::<M>()?;
+    graph.preflight(None)?;
+    validate_gateway_paths_in_graph(&graph)
+}
+
 /// Runs the `validate_module_providers` public API operation.
 pub fn validate_module_providers<M: Module + 'static>(container: &Container) -> Result<()> {
     let graph = ModuleGraph::discover::<M>()?;
-    graph.preflight(container)?;
+    graph.preflight(Some(container))?;
     for registration in graph.definitions() {
         graph.def(registration).assert_registered(container)?;
     }

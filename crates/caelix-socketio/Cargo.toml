@@ -1,6 +1,6 @@
 [package]
 name = "caelix-socketio"
-version = "0.0.19"
+version = "0.0.20"
 edition = "2024"
 description = "Socket.IO integration for the Axum Caelix runtime."
 license = "MIT"
@@ -10,6 +10,6 @@ documentation = "https://docs.rs/caelix-socketio"
 readme = "README.md"
 
 [dependencies]
-caelix-core = { path = "../caelix-core", version = "0.0.16" }
+caelix-core = { path = "../caelix-core", version = "0.0.17" }
 serde = { version = "1.0.228", features = ["derive"] }
 socketioxide = "=0.18.5"
