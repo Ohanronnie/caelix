@@ -2,10 +2,11 @@ use proc_macro::TokenStream;
 #[cfg(feature = "openapi")]
 use quote::ToTokens;
 use quote::{format_ident, quote};
+use syn::Meta;
 #[cfg(feature = "openapi")]
-use syn::{Expr, Meta, spanned::Spanned};
+use syn::spanned::Spanned;
 use syn::{
-    FnArg, ImplItem, ItemImpl, LitStr, Pat, Token, Type, parse::Parser, parse_macro_input,
+    Expr, FnArg, ImplItem, ItemImpl, LitStr, Pat, Token, Type, parse::Parser, parse_macro_input,
     punctuated::Punctuated,
 };
 
@@ -14,6 +15,83 @@ enum Extractor {
     Body,
     Query,
     User,
+    Multipart,
+    File,
+    Files,
+}
+
+fn parse_upload_field_name(attr: &syn::Attribute, default: &syn::Ident) -> syn::Result<LitStr> {
+    if matches!(attr.meta, Meta::Path(_)) {
+        return Ok(LitStr::new(&default.to_string(), default.span()));
+    }
+    let list = attr.meta.require_list()?;
+    let values = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(list.tokens.clone())?;
+    if values.len() != 1 {
+        return Err(syn::Error::new_spanned(
+            attr,
+            "file extractor accepts only `name = \"...\"`",
+        ));
+    }
+    let Some(Meta::NameValue(value)) = values.first() else {
+        return Err(syn::Error::new_spanned(
+            attr,
+            "file extractor accepts only `name = \"...\"`",
+        ));
+    };
+    if !value.path.is_ident("name") {
+        return Err(syn::Error::new_spanned(
+            value,
+            "file extractor accepts only `name = \"...\"`",
+        ));
+    }
+    string_lit(&value.value)
+}
+
+fn string_lit(expr: &Expr) -> syn::Result<LitStr> {
+    match expr {
+        Expr::Lit(value) => match &value.lit {
+            syn::Lit::Str(value) => Ok(value.clone()),
+            _ => Err(syn::Error::new_spanned(expr, "expected a string literal")),
+        },
+        _ => Err(syn::Error::new_spanned(expr, "expected a string literal")),
+    }
+}
+
+fn is_named_type(ty: &Type, name: &str) -> bool {
+    matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == name))
+}
+
+fn is_option_uploaded_file(ty: &Type) -> bool {
+    let Type::Path(path) = ty else { return false };
+    let Some(segment) = path.path.segments.last() else {
+        return false;
+    };
+    if segment.ident != "Option" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return false;
+    };
+    arguments.args.iter().any(|argument| matches!(argument, syn::GenericArgument::Type(inner) if is_named_type(inner, "UploadedFile")))
+}
+
+fn is_vec_uploaded_file(ty: &Type) -> bool {
+    let Type::Path(path) = ty else { return false };
+    let Some(segment) = path.path.segments.last() else {
+        return false;
+    };
+    if segment.ident != "Vec" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return false;
+    };
+    arguments.args.iter().any(|argument| matches!(argument, syn::GenericArgument::Type(inner) if is_named_type(inner, "UploadedFile")))
+}
+
+fn payload_slot_ident(name: &syn::Ident) -> syn::Ident {
+    let name = name.to_string();
+    format_ident!("__caelix_payload_{}", name.trim_start_matches('_'))
 }
 
 #[allow(dead_code)]
@@ -303,6 +381,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
         let mut route: Option<(&str, String)> = None;
         let mut method_guards = Vec::new();
         let mut method_interceptors = Vec::new();
+        let mut upload_limit: Option<Expr> = None;
         #[cfg(feature = "openapi")]
         let mut documented_headers = Vec::new();
         #[cfg(feature = "openapi")]
@@ -332,6 +411,26 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 match parse_type_list(attr) {
                     Ok(types) => method_interceptors.extend(types),
                     Err(err) => errors.push(err.to_compile_error()),
+                }
+                false
+            } else if attr.path().is_ident("upload") {
+                let parsed = attr.meta.require_list().and_then(|list| {
+                    Punctuated::<Meta, Token![,]>::parse_terminated.parse2(list.tokens.clone())
+                });
+                match parsed {
+                    Ok(values) if values.len() == 1 => match values.first() {
+                        Some(Meta::NameValue(value)) if value.path.is_ident("limit") => {
+                            upload_limit = Some(value.value.clone());
+                        }
+                        _ => errors.push(
+                            syn::Error::new_spanned(attr, "upload requires `limit = ...`")
+                                .to_compile_error(),
+                        ),
+                    },
+                    _ => errors.push(
+                        syn::Error::new_spanned(attr, "upload requires `limit = ...`")
+                            .to_compile_error(),
+                    ),
                 }
                 false
             } else if attr.path().is_ident("request_header") {
@@ -372,6 +471,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             if let FnArg::Typed(pat_type) = input {
                 let mut found: Option<Extractor> = None;
                 let mut needs_validation = false;
+                let mut file_name = None;
                 pat_type.attrs.retain(|attr| {
                     if attr.path().is_ident("param") {
                         found = Some(Extractor::Param);
@@ -384,6 +484,29 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         false
                     } else if attr.path().is_ident("user") {
                         found = Some(Extractor::User);
+                        false
+                    } else if attr.path().is_ident("multipart") {
+                        found = Some(Extractor::Multipart);
+                        false
+                    } else if attr.path().is_ident("file") {
+                        found = Some(Extractor::File);
+                        // The identifier is not available until after retain;
+                        // parse the explicit name below when possible.
+                        if !matches!(attr.meta, Meta::Path(_)) {
+                            match parse_upload_field_name(attr, &format_ident!("__caelix_file")) {
+                                Ok(name) => file_name = Some(name),
+                                Err(err) => errors.push(err.to_compile_error()),
+                            }
+                        }
+                        false
+                    } else if attr.path().is_ident("files") {
+                        found = Some(Extractor::Files);
+                        if !matches!(attr.meta, Meta::Path(_)) {
+                            match parse_upload_field_name(attr, &format_ident!("__caelix_files")) {
+                                Ok(name) => file_name = Some(name),
+                                Err(err) => errors.push(err.to_compile_error()),
+                            }
+                        }
                         false
                     } else if attr.path().is_ident("validate") {
                         needs_validation = true;
@@ -406,11 +529,42 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             continue;
                         }
                     };
+                    if matches!(extractor, Extractor::File)
+                        && !(is_named_type(&pat_type.ty, "UploadedFile")
+                            || is_option_uploaded_file(&pat_type.ty))
+                    {
+                        errors.push(
+                            syn::Error::new_spanned(
+                                &pat_type.ty,
+                                "#[file] requires UploadedFile or Option<UploadedFile>",
+                            )
+                            .to_compile_error(),
+                        );
+                    }
+                    if matches!(extractor, Extractor::Files) && !is_vec_uploaded_file(&pat_type.ty)
+                    {
+                        errors.push(
+                            syn::Error::new_spanned(
+                                &pat_type.ty,
+                                "#[files] requires Vec<UploadedFile>",
+                            )
+                            .to_compile_error(),
+                        );
+                    }
+                    let file_name =
+                        if matches!(extractor, Extractor::File | Extractor::Files) {
+                            Some(file_name.unwrap_or_else(|| {
+                                LitStr::new(&arg_name.to_string(), arg_name.span())
+                            }))
+                        } else {
+                            None
+                        };
                     extractor_args.push((
                         extractor,
                         arg_name,
                         pat_type.ty.clone(),
                         needs_validation,
+                        file_name,
                     ));
                 }
             }
@@ -437,42 +591,186 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
         let mut ordered_extractors = extractor_args.iter().collect::<Vec<_>>();
         if matches!(backend, Backend::Axum) {
-            ordered_extractors.sort_by_key(|(extractor, _, _, _)| match extractor {
+            ordered_extractors.sort_by_key(|(extractor, _, _, _, _)| match extractor {
                 Extractor::Param | Extractor::Query | Extractor::User => 0,
-                Extractor::Body => 1,
+                Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files => 1,
             });
+        }
+        let has_payload = extractor_args.iter().any(|(extractor, _, _, _, _)| {
+            matches!(
+                extractor,
+                Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files
+            )
+        });
+        let multipart_count = extractor_args
+            .iter()
+            .filter(|(extractor, _, _, _, _)| matches!(extractor, Extractor::Multipart))
+            .count();
+        if multipart_count > 0
+            && extractor_args.iter().any(|(extractor, _, _, _, _)| {
+                matches!(
+                    extractor,
+                    Extractor::Body | Extractor::File | Extractor::Files
+                )
+            })
+        {
+            errors.push(
+                syn::Error::new_spanned(
+                    &method.sig,
+                    "#[multipart] cannot be combined with #[body], #[file], or #[files]",
+                )
+                .to_compile_error(),
+            );
         }
         let wrapper_params = ordered_extractors
             .iter()
-            .filter_map(|(extractor, name, ty, _)| match (backend, extractor) {
+            .filter_map(|(extractor, name, ty, _, _)| match (backend, extractor) {
                 (_, Extractor::User) => None,
                 (Backend::Actix, Extractor::Param) => {
                     Some(quote! { #name: caelix::__actix_web::web::Path<#ty> })
                 }
-                (Backend::Actix, Extractor::Body) => {
-                    Some(quote! { #name: caelix::__actix_web::web::Json<#ty> })
-                }
+                (
+                    Backend::Actix,
+                    Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files,
+                ) => None,
                 (Backend::Actix, Extractor::Query) => {
                     Some(quote! { #name: caelix::__actix_web::web::Query<#ty> })
                 }
                 (Backend::Axum, Extractor::Param) => {
                     Some(quote! { #name: caelix::__axum::extract::Path<#ty> })
                 }
-                (Backend::Axum, Extractor::Body) => {
-                    Some(quote! { #name: caelix::__axum::extract::Json<#ty> })
-                }
+                (
+                    Backend::Axum,
+                    Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files,
+                ) => None,
                 (Backend::Axum, Extractor::Query) => {
                     Some(quote! { #name: caelix::__axum::extract::Query<#ty> })
                 }
             })
             .collect::<Vec<_>>();
+        let mut wrapper_params = wrapper_params;
+        if has_payload {
+            wrapper_params.push(quote! { __caelix_payload: caelix::RequestPayload });
+        }
 
-        let call_args = extractor_args.iter().map(|(extractor, name, ty, needs_validation)| {
+        let body_extractors = extractor_args
+            .iter()
+            .filter(|(extractor, _, _, _, _)| matches!(extractor, Extractor::Body))
+            .collect::<Vec<_>>();
+        if body_extractors.len() > 1 {
+            errors.push(
+                syn::Error::new_spanned(&method.sig, "a route may have only one #[body] argument")
+                    .to_compile_error(),
+            );
+        }
+        let force_multipart = extractor_args.iter().any(|(extractor, _, ty, _, _)| {
+            matches!(extractor, Extractor::Multipart | Extractor::Files)
+                || (matches!(extractor, Extractor::File) && !is_option_uploaded_file(ty))
+        });
+        let route_limit = upload_limit
+            .as_ref()
+            .map(|limit| quote! { Some((#limit) as usize) })
+            .unwrap_or_else(|| quote! { None });
+        let payload_slots = extractor_args
+            .iter()
+            .filter_map(|(extractor, name, ty, _, _)| {
+                matches!(
+                    extractor,
+                    Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files
+                )
+                .then(|| {
+                    let slot = payload_slot_ident(name);
+                    quote! { let mut #slot: Option<#ty> = None; }
+                })
+            })
+            .collect::<Vec<_>>();
+        let multipart_assignments = extractor_args.iter().filter_map(|(extractor, name, ty, _, field_name)| {
+            let slot = payload_slot_ident(name);
+            match extractor {
+            Extractor::Body => Some(quote! { #slot = Some(__caelix_form.deserialize::<#ty>()?); }),
+            Extractor::File => {
+                let field_name = field_name.as_ref().expect("file fields have names");
+                if is_option_uploaded_file(ty) {
+                    Some(quote! { #slot = Some(__caelix_form.take_file(#field_name)?); })
+                } else {
+                    Some(quote! {
+                        #slot = Some(__caelix_form.take_file(#field_name)?
+                            .ok_or_else(|| caelix::BadRequestException::new(format!("missing required file field `{}`", #field_name)))?);
+                    })
+                }
+            }
+            Extractor::Files => {
+                let field_name = field_name.as_ref().expect("file fields have names");
+                Some(quote! { #slot = Some(__caelix_form.take_files(#field_name)); })
+            }
+            _ => None,
+        }}).collect::<Vec<_>>();
+        let json_assignments = extractor_args
+            .iter()
+            .filter_map(|(extractor, name, ty, _, _)| {
+                let slot = payload_slot_ident(name);
+                match extractor {
+                    Extractor::Body => {
+                        Some(quote! { #slot = Some(__caelix_payload.json::<#ty>()?); })
+                    }
+                    Extractor::File if is_option_uploaded_file(ty) => {
+                        Some(quote! { #slot = Some(None); })
+                    }
+                    _ => None,
+                }
+            })
+            .collect::<Vec<_>>();
+        let multipart_direct_assignment =
+            extractor_args
+                .iter()
+                .find_map(|(extractor, name, _ty, _, _)| {
+                    let slot = payload_slot_ident(name);
+                    matches!(extractor, Extractor::Multipart).then(
+                    || quote! { #slot = Some(__caelix_payload.multipart(#route_limit).await?); },
+                )
+                });
+        let payload_values = extractor_args.iter().filter_map(|(extractor, name, _, _, _)| {
+            matches!(extractor, Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files).then(|| {
+                let slot = payload_slot_ident(name);
+                quote! { let #name = #slot.expect("multipart payload extractor must be initialized"); }
+            })
+        }).collect::<Vec<_>>();
+        let payload_setup = if has_payload {
+            if let Some(assignment) = multipart_direct_assignment {
+                quote! {
+                    #(#payload_slots)*
+                    if !__caelix_payload.is_multipart() {
+                        return Err(caelix::UnsupportedMediaTypeException::new("multipart/form-data is required"));
+                    }
+                    #assignment
+                    #(#payload_values)*
+                }
+            } else {
+                quote! {
+                    #(#payload_slots)*
+                    if __caelix_payload.is_multipart() {
+                        let mut __caelix_form = __caelix_payload.multipart(#route_limit).await?;
+                        #(#multipart_assignments)*
+                    } else {
+                        if #force_multipart || !__caelix_payload.is_json_or_missing_content_type() {
+                            return Err(caelix::UnsupportedMediaTypeException::new("unsupported request content type"));
+                        }
+                        #(#json_assignments)*
+                    }
+                    #(#payload_values)*
+                }
+            }
+        } else {
+            quote! {}
+        };
+
+        let call_args = extractor_args.iter().map(|(extractor, name, ty, needs_validation, _)| {
             let base = match extractor {
-                Extractor::Param | Extractor::Body | Extractor::Query => match backend {
+                Extractor::Param | Extractor::Query => match backend {
                     Backend::Actix => quote! { #name.into_inner() },
                     Backend::Axum => quote! { #name.0 },
                 },
+                Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files => quote! { #name },
                 Extractor::User => quote! {
                     request_context.get::<#ty>()?
                         .map(|value| (*value).clone())
@@ -503,7 +801,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             || !interceptor_types.is_empty()
             || extractor_args
                 .iter()
-                .any(|(extractor, _, _, _)| matches!(extractor, Extractor::User));
+                .any(|(extractor, _, _, _, _)| matches!(extractor, Extractor::User));
         let (request_headers, request_method, request_path) = match backend {
             Backend::Actix => (
                 quote! { req.headers() },
@@ -545,6 +843,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 Err(err) => { caelix::log_http_exception(&err); return #response_adapter(caelix::IntoCaelixResponse::into_response(err)); }
             };
             let next = caelix::Next::new(move || Box::pin(async move {
+                #payload_setup
                 let value = controller.#method_name(#(#call_args),*).await?;
                 Ok(caelix::IntoCaelixResponse::into_response(value))
             }));
@@ -560,6 +859,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 Err(err) => { caelix::log_http_exception(&err); return #response_adapter(caelix::IntoCaelixResponse::into_response(err)); }
             };
             let result = async move {
+                #payload_setup
                 let value = controller.#method_name(#(#call_args),*).await?;
                 Ok(caelix::IntoCaelixResponse::into_response(value))
             }.await;
@@ -619,10 +919,10 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             openapi_document_functions.push(openapi_name.clone());
             let summary = method_summary(&method.attrs)
                 .map(|summary| quote! { operation.summary = Some(#summary.to_string()); });
-            let body = extractor_args.iter().find_map(|(extractor, _, ty, _)| {
+            let body = extractor_args.iter().find_map(|(extractor, _, ty, _, _)| {
                 matches!(extractor, Extractor::Body).then(|| ty.clone())
             });
-            let extractor_parameters = extractor_args.iter().filter_map(|(extractor, name, ty, _)| {
+            let extractor_parameters = extractor_args.iter().filter_map(|(extractor, name, ty, _, _)| {
                 let parameter_in = match extractor {
                     Extractor::Param => quote! { caelix::openapi::utoipa::openapi::path::ParameterIn::Path },
                     Extractor::Query => quote! { caelix::openapi::utoipa::openapi::path::ParameterIn::Query },
@@ -648,9 +948,61 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     ));
                 }
             });
-            let request_body = body.map(|body| quote! {
-                operation.request_body = Some(caelix::openapi::request_body(caelix::openapi::schema_ref::<#body>(openapi)));
-            });
+            let multipart_files = extractor_args
+                .iter()
+                .filter_map(|(extractor, _name, ty, _, field_name)| match extractor {
+                    Extractor::File => {
+                        let field_name = field_name.as_ref().expect("file fields have names");
+                        let required = !is_option_uploaded_file(ty);
+                        Some(quote! { (#field_name, false, #required) })
+                    }
+                    Extractor::Files => {
+                        let field_name = field_name.as_ref().expect("file fields have names");
+                        Some(quote! { (#field_name, true, true) })
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let has_direct_multipart = extractor_args
+                .iter()
+                .any(|(extractor, _, _, _, _)| matches!(extractor, Extractor::Multipart));
+            let all_files_optional = extractor_args
+                .iter()
+                .filter(|(extractor, _, _, _, _)| {
+                    matches!(extractor, Extractor::File | Extractor::Files)
+                })
+                .all(|(extractor, _, ty, _, _)| {
+                    matches!(extractor, Extractor::File) && is_option_uploaded_file(ty)
+                });
+            let request_body = if has_direct_multipart {
+                quote! {
+                    operation.request_body = Some(caelix::openapi::multipart_request_body(None, &[]));
+                }
+            } else if !multipart_files.is_empty() {
+                match body {
+                    Some(body) if all_files_optional => quote! {
+                        let mut request = caelix::openapi::request_body(caelix::openapi::schema_ref::<#body>(openapi));
+                        let multipart = caelix::openapi::multipart_request_body(Some(caelix::openapi::schema_ref::<#body>(openapi)), &[#(#multipart_files),*]);
+                        request.content.extend(multipart.content);
+                        operation.request_body = Some(request);
+                    },
+                    Some(body) => quote! {
+                        operation.request_body = Some(caelix::openapi::multipart_request_body(Some(caelix::openapi::schema_ref::<#body>(openapi)), &[#(#multipart_files),*]));
+                    },
+                    None => quote! {
+                        operation.request_body = Some(caelix::openapi::multipart_request_body(None, &[#(#multipart_files),*]));
+                    },
+                }
+            } else if let Some(body) = body {
+                quote! {
+                    let mut request = caelix::openapi::request_body(caelix::openapi::schema_ref::<#body>(openapi));
+                    let multipart = caelix::openapi::multipart_request_body(Some(caelix::openapi::schema_ref::<#body>(openapi)), &[]);
+                    request.content.extend(multipart.content);
+                    operation.request_body = Some(request);
+                }
+            } else {
+                quote! {}
+            };
             let inferred = inferred_response_type(&method.sig.output);
             let (status, content_type, response_body, response_headers) =
                 if let Some(spec) = response_spec {

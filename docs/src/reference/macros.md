@@ -62,8 +62,29 @@ Extractor attributes:
 - `#[param]`
 - `#[query]`
 - `#[body]`
+- `#[file]`
+- `#[files]`
+- `#[multipart]`
 - `#[user]`
 - `#[validate]`
+
+### Bodies and uploads
+
+`#[body]` accepts `application/json`, omitted content type, and
+`multipart/form-data`. JSON and multipart text fields both decode into the
+declared type. Add `#[validate]` to run `validator::Validate` after either
+decode path.
+
+`#[file] name: UploadedFile` requires exactly one named multipart file; use
+`Option<UploadedFile>` when it may be absent. `#[files] files: Vec<UploadedFile>`
+collects repeated file parts. File fields default to their argument name and
+accept `name = "..."`, for example `#[file(name = "avatar")] avatar:
+UploadedFile`.
+
+`#[multipart] form: MultipartForm` provides direct full-form access and is
+intentionally incompatible with `#[body]`, `#[file]`, and `#[files]` on the
+same route. Use `#[upload(limit = bytes)]` on a route to set a stricter
+multipart body limit than the application limit.
 
 Example:
 
@@ -88,7 +109,11 @@ impl UsersController {
 }
 ```
 
-`#[param]`, `#[query]`, and `#[body]` become Actix `Path<T>`, `Query<T>`, and `Json<T>` extractor parameters in the generated route handler. `#[user]` reads `RequestContext::get::<T>()` and returns `401 Unauthorized` if the typed value is missing.
+`#[param]` and `#[query]` use the selected runtime's native path and query
+extractors. Body and upload routes use Caelix's shared negotiated request
+wrapper so the same controller source works on Actix and Axum. `#[user]` reads
+`RequestContext::get::<T>()` and returns `401 Unauthorized` if the typed value
+is missing.
 
 Invalid extractor pattern:
 

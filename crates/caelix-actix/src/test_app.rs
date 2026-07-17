@@ -15,7 +15,7 @@ use actix_web::{
 use bytes::Bytes;
 use caelix_core::{
     BoxFuture, Container, Module, ProviderDependency, ProviderOverrides, Result, StatusCode,
-    build_container_with_overrides, log_application_started, log_module_routes,
+    UploadConfig, build_container_with_overrides, log_application_started, log_module_routes,
     register_module_controllers, shutdown_module,
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -44,6 +44,7 @@ pub struct TestApplication {
 pub struct TestApplicationBuilder<M> {
     overrides: ProviderOverrides,
     body_limit: usize,
+    upload_config: UploadConfig,
     #[cfg(feature = "openapi")]
     openapi: Option<OpenApiConfig>,
     _module: PhantomData<M>,
@@ -62,6 +63,7 @@ impl TestApplication {
         TestApplicationBuilder {
             overrides: ProviderOverrides::new(),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            upload_config: UploadConfig::default(),
             #[cfg(feature = "openapi")]
             openapi: None,
             _module: PhantomData,
@@ -148,6 +150,12 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         self
     }
 
+    /// Changes the directory used to stage multipart uploads in this test application.
+    pub fn upload_temp_dir(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.upload_config = self.upload_config.upload_temp_dir(path);
+        self
+    }
+
     /// Serves OpenAPI JSON and Swagger UI in the in-process test application.
     #[cfg(feature = "openapi")]
     /// Runs the `with_openapi` public API operation.
@@ -165,6 +173,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
 
         let container = Arc::new(container);
         let body_limit = self.body_limit;
+        let upload_config = self.upload_config;
         let configure_fn: fn(&mut web::ServiceConfig) = |cfg| register_module_controllers::<M>(cfg);
         #[cfg(feature = "openapi")]
         let openapi = match self.openapi {
@@ -181,7 +190,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         let app = App::new()
             .app_data(web::Data::from(container.clone()))
             .configure(move |cfg| {
-                configure_caelix_services(cfg, body_limit, configure_fn, {
+                configure_caelix_services(cfg, body_limit, upload_config.clone(), configure_fn, {
                     #[cfg(feature = "openapi")]
                     {
                         openapi.as_ref()

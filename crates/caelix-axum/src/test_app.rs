@@ -14,13 +14,17 @@ use axum::{
 use bytes::Bytes;
 use caelix_core::{
     BoxFuture, Container, IntoCaelixResponse, Module, ProviderDependency, ProviderOverrides,
-    Result, StatusCode, build_container_with_overrides, log_application_started, log_module_routes,
-    register_module_controllers, shutdown_module,
+    Result, StatusCode, UploadConfig, build_container_with_overrides, log_application_started,
+    log_module_routes, register_module_controllers, shutdown_module,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use tower::ServiceExt;
 
-use crate::{AxumRouterBuilder, application::DEFAULT_BODY_LIMIT_BYTES, to_axum_response};
+use crate::{
+    AxumRouterBuilder,
+    application::{DEFAULT_BODY_LIMIT_BYTES, UploadRuntimeConfig},
+    to_axum_response,
+};
 #[cfg(feature = "openapi")]
 use caelix_core::openapi::{OpenApiConfig, build_openapi};
 
@@ -39,6 +43,7 @@ pub struct TestApplication {
 pub struct TestApplicationBuilder<M> {
     overrides: ProviderOverrides,
     body_limit: usize,
+    upload_config: UploadConfig,
     #[cfg(feature = "openapi")]
     openapi: Option<OpenApiConfig>,
     _module: PhantomData<M>,
@@ -50,6 +55,7 @@ impl TestApplication {
         TestApplicationBuilder {
             overrides: ProviderOverrides::new(),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            upload_config: UploadConfig::default(),
             #[cfg(feature = "openapi")]
             openapi: None,
             _module: PhantomData,
@@ -143,6 +149,12 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         self
     }
 
+    /// Changes the directory used to stage multipart uploads in this test application.
+    pub fn upload_temp_dir(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.upload_config = self.upload_config.upload_temp_dir(path);
+        self
+    }
+
     /// Serves OpenAPI JSON and Swagger UI in the in-process test application.
     #[cfg(feature = "openapi")]
     /// Runs the `with_openapi` public API operation.
@@ -177,6 +189,10 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
                 document.to_json().expect("OpenAPI document must serialize"),
             );
         }
+        router = router.layer(axum::Extension(UploadRuntimeConfig {
+            config: self.upload_config,
+            body_limit: self.body_limit,
+        }));
         router = router.layer(axum::extract::DefaultBodyLimit::max(self.body_limit));
         router = router.fallback(|request: Request<Body>| async move {
             to_axum_response(

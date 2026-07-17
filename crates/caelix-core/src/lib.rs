@@ -20,6 +20,7 @@ mod module;
 pub mod openapi;
 mod response;
 mod result;
+mod upload;
 mod websocket;
 
 /// Re-exported public API.
@@ -52,6 +53,8 @@ pub use module::*;
 pub use response::*;
 /// Re-exported public API.
 pub use result::Result;
+/// Re-exported public API.
+pub use upload::*;
 /// Re-exported public API.
 pub use websocket::*;
 

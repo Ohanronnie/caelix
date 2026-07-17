@@ -16,7 +16,7 @@ and enables `axum` explicitly:
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.11", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.23", default-features = false, features = ["axum"] }
 ```
 
 The `actix` and `axum` features are mutually exclusive. Most applications
@@ -26,7 +26,7 @@ as `axum::serve` or `tokio::net::TcpListener`:
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.11", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.23", default-features = false, features = ["axum"] }
 axum = "0.8.8"
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread"] }
 ```
@@ -94,8 +94,10 @@ let app = Application::new::<AppModule>()
 app.listen("127.0.0.1:3000").await?;
 ```
 
-The default HTTP body limit is 1 MiB. It applies to body-consuming Axum
-extractors such as `#[body]`, and `body_limit` changes the limit in bytes.
+The default HTTP body limit is 1 MiB. It applies to body-consuming Caelix
+routes including JSON bodies and multipart uploads, and `body_limit` changes
+the limit in bytes. Configure `upload_temp_dir(path)` when multipart file
+staging must use an application-specific directory.
 The value is applied through Axum's `DefaultBodyLimit` layer when the router
 is built.
 
@@ -111,7 +113,10 @@ extractor attributes to Axum extractors internally:
 | --- | --- | --- |
 | `#[param]` | `axum::extract::Path<T>` | Route parameters such as `{id}` |
 | `#[query]` | `axum::extract::Query<T>` | Query-string values |
-| `#[body]` | `axum::extract::Json<T>` | JSON request body |
+| `#[body]` | Caelix negotiated request wrapper | JSON or typed multipart text fields |
+| `#[file]` | Caelix multipart file binding | One required or optional `UploadedFile` |
+| `#[files]` | Caelix multipart file binding | Repeated `Vec<UploadedFile>` field |
+| `#[multipart]` | Caelix multipart form binding | Direct `MultipartForm` access |
 | `#[user]` | `RequestContext` lookup | A typed value installed by a guard or interceptor |
 
 The controller method receives the inner value (`T`), not `Path<T>`,
@@ -211,11 +216,14 @@ the same `RequestContext` and can transform the framework-neutral
 
 ### Extractor failures
 
-Path, query, and JSON extraction happens in Axum before the generated handler
-body runs. A malformed path value, invalid query value, invalid JSON document,
-or body-limit rejection is therefore an Axum extractor rejection. A Caelix
-exception returned by the controller, guard, interceptor, or provider is
-converted through Caelix's response adapter.
+Path and query extraction happen in Axum before the generated handler body
+runs. Caelix handles JSON and multipart body extraction through its shared
+negotiated wrapper, yielding the same `400`, `413`, and `415` response
+categories as the Actix adapter. A Caelix exception returned by the controller,
+guard, interceptor, or provider is converted through Caelix's response adapter.
+
+See [Multipart Uploads](multipart-uploads.md) for field binding, limits,
+validation, and file persistence.
 
 Use `#[validate]` when the value was successfully deserialized but its fields
 need application-level validation:

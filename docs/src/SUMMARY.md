@@ -30,6 +30,7 @@
 - [WebSockets](advanced/websockets.md)
 - [Service-Level Cache](advanced/cache.md)
 - [Application Runtime](advanced/application-runtime.md)
+- [Multipart Uploads](advanced/multipart-uploads.md)
 - [Axum and Tower](advanced/axum.md)
 
 # Recipes

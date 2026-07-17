@@ -5,7 +5,7 @@ use axum::http::header;
 use axum::{
     Router,
     body::Body,
-    extract::FromRequestParts,
+    extract::{Extension, FromRequestParts},
     http::{HeaderMap, Method, Request, Uri, request::Parts},
     response::Response,
 };
@@ -19,7 +19,7 @@ use caelix_core::openapi::{OpenApiConfig, build_openapi};
 use caelix_core::visit_module_gateways;
 use caelix_core::{
     BoxFuture, Container, HttpResponse as CaelixHttpResponse, IntoCaelixResponse, Module,
-    NotFoundException, ResponseBody, Result, log_application_started, log_listening,
+    NotFoundException, ResponseBody, Result, UploadConfig, log_application_started, log_listening,
     log_module_routes, register_module_controllers, shutdown_module,
 };
 use futures_util::StreamExt;
@@ -27,6 +27,22 @@ use tower::{Layer, Service};
 
 /// Public Caelix constant `DEFAULT_BODY_LIMIT_BYTES`.
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+
+/// Application-scoped multipart storage and limit configuration.
+#[derive(Clone)]
+pub(crate) struct UploadRuntimeConfig {
+    pub(crate) config: UploadConfig,
+    pub(crate) body_limit: usize,
+}
+
+impl Default for UploadRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            config: UploadConfig::default(),
+            body_limit: DEFAULT_BODY_LIMIT_BYTES,
+        }
+    }
+}
 
 #[cfg(feature = "openapi")]
 #[derive(Clone)]
@@ -155,6 +171,7 @@ pub struct Application {
     gateway_configure_fn: fn(&mut AxumRouterBuilder, Arc<Container>, usize),
     shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, caelix_core::Result<()>>,
     body_limit: usize,
+    upload_config: UploadConfig,
     websocket_max_message_size: usize,
     layers: Vec<RouterLayer>,
     #[cfg(feature = "openapi")]
@@ -192,6 +209,7 @@ impl Application {
             },
             shutdown_fn: |container| Box::pin(async move { shutdown_module::<M>(container).await }),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            upload_config: UploadConfig::default(),
             websocket_max_message_size: crate::websocket::DEFAULT_WEBSOCKET_MAX_MESSAGE_SIZE,
             layers: Vec::new(),
             #[cfg(feature = "openapi")]
@@ -206,6 +224,12 @@ impl Application {
     /// Runs the `body_limit` public API operation.
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
+        self
+    }
+
+    /// Changes the directory used to stage multipart uploads before they are persisted.
+    pub fn upload_temp_dir(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.upload_config = self.upload_config.upload_temp_dir(path);
         self
     }
 
@@ -278,6 +302,10 @@ impl Application {
         if let Some(openapi) = self.openapi {
             router = mount_openapi(router, openapi.config, openapi.document);
         }
+        router = router.layer(Extension(UploadRuntimeConfig {
+            config: self.upload_config,
+            body_limit: self.body_limit,
+        }));
         router = router.layer(axum::extract::DefaultBodyLimit::max(self.body_limit));
         router = router.fallback(|request: Request<Body>| async move {
             to_axum_response(

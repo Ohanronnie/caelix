@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "caelix"
-version = "0.0.22"
+version = "0.0.23"
 dependencies = [
  "actix-web",
  "caelix-actix",
@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-actix"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "actix-codec",
  "actix-http",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-axum"
-version = "0.0.21"
+version = "0.0.22"
 dependencies = [
  "axum",
  "bytes",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-cli"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "clap",
  "ctrlc",
@@ -527,7 +527,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-core"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "anyhow",
  "bytes",
@@ -535,7 +535,9 @@ dependencies = [
  "futures-core",
  "futures-util",
  "http 1.4.2",
+ "multer",
  "serde",
+ "serde_html_form",
  "serde_json",
  "sqlx",
  "tokio",
@@ -544,13 +546,14 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trybuild",
+ "url",
  "utoipa",
  "validator",
 ]
 
 [[package]]
 name = "caelix-macros"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "actix-web",
  "caelix-actix",
@@ -564,7 +567,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-socketio"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "caelix-core",
  "serde",
@@ -1729,6 +1732,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "multer"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83e87776546dc87511aa5ee218730c92b666d7264ab6ed41f9d215af9cd5224b"
+dependencies = [
+ "bytes",
+ "encoding_rs",
+ "futures-util",
+ "http 1.4.2",
+ "httparse",
+ "memchr",
+ "mime",
+ "spin",
+ "version_check",
+]
+
+[[package]]
 name = "nix"
 version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2281,6 +2301,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_html_form"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2f2d7ff8a2140333718bb329f5c40fc5f0865b84c426183ce14c97d2ab8154f"
+dependencies = [
+ "form_urlencoded",
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde_core",
+]
+
+[[package]]
 name = "serde_json"
 version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2475,6 +2508,12 @@ dependencies = [
  "serde_json",
  "socketioxide-core",
 ]
+
+[[package]]
+name = "spin"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
 
 [[package]]
 name = "sqlx"

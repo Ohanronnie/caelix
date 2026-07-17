@@ -57,7 +57,9 @@ Supported extractor attributes are:
 
 - `#[param]` for route path parameters.
 - `#[query]` for query strings.
-- `#[body]` for JSON request bodies.
+- `#[body]` for content-negotiated JSON or multipart request bodies.
+- `#[file]` and `#[files]` for multipart file fields.
+- `#[multipart]` for direct access to a complete multipart form.
 - `#[user]` for a typed value previously attached to `RequestContext`.
 - `#[validate]` to call `validator::Validate::validate` on an extracted value.
 
@@ -86,7 +88,10 @@ pub async fn find_in_org(&self, #[param] ids: (i64, i64)) -> Result<UserDto> {
 
 ## Query And Body
 
-`#[query]` maps to Actix's query extractor and `#[body]` maps to JSON.
+`#[query]` maps to the selected runtime's query extractor. `#[body]` accepts JSON
+(including requests without a `Content-Type`) and `multipart/form-data`. Multipart
+text fields are decoded with normal Serde form semantics, so numbers, booleans,
+optional values, and repeated fields retain their DTO types.
 
 ```rust
 #[derive(Deserialize)]
@@ -108,6 +113,46 @@ pub async fn create(&self, #[body] input: CreateUserDto) -> Result<Response<User
 ```
 
 Invalid JSON returns `400 Bad Request`. JSON bodies over the configured body limit return `413 Payload Too Large`. Caelix parses `#[body]` requests as JSON even when the client omits the `Content-Type` header.
+
+## Multipart Uploads
+
+Use `UploadedFile` beside a DTO when a route accepts normal form fields and files.
+The file field defaults to the argument name and can be renamed with
+`#[file(name = "avatar")]`. A required single file rejects missing or duplicate
+parts with `400 Bad Request`; `Option<UploadedFile>` is absent as `None`, and
+`Vec<UploadedFile>` collects repeated parts.
+
+```rust
+use caelix::{Response, Result, UploadedFile};
+
+#[post("/profile")]
+async fn update_profile(
+    &self,
+    #[body] input: UpdateProfile,
+    #[file(name = "avatar")] avatar: Option<UploadedFile>,
+) -> Result<Response<Profile>> {
+    if let Some(avatar) = avatar {
+        let bytes = avatar.read_bytes().await?;
+        // Store bytes or persist the upload before returning.
+        let _ = bytes;
+    }
+    Ok(Response::Body(self.profiles.update(input).await?))
+}
+```
+
+Routes with required files only accept `multipart/form-data`. Routes whose files
+are all optional also accept JSON and receive `None` for those file arguments.
+Use `#[files] attachments: Vec<UploadedFile>` for repeated file parts. To manage
+all fields yourself, use `#[multipart] form: MultipartForm`; it exposes `text`,
+`files`, `take_file`, and `take_files`.
+
+Uploaded files are staged in an isolated temporary directory and removed when
+their handle is dropped. `read_bytes()` explicitly loads a file into memory.
+`persist_to(destination)` consumes the handle and never replaces an existing
+destination; call `read_bytes()` first if both operations are needed. Configure
+the staging directory with `Application::upload_temp_dir(path)` and use
+`#[upload(limit = bytes)]` for a lower route-specific multipart limit. Without
+that attribute, `Application::body_limit` is used.
 
 ## Validation
 

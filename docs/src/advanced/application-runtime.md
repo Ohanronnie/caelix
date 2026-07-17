@@ -24,7 +24,7 @@ app.listen("127.0.0.1:8080").await?;
 
 Startup builds the container from module metadata, logs controller routes, runs bootstrap hooks, and stores the adapter route registration function.
 
-## Body Limits
+## Body Limits and Upload Storage
 
 The default JSON body limit is 1 MiB. Override it before `listen`:
 
@@ -37,7 +37,22 @@ Application::new::<AppModule>()
     .await
 ```
 
-Oversized JSON bodies return `413 Payload Too Large`. Invalid JSON returns `400 Bad Request`.
+The same limit applies to multipart controller routes. Oversized JSON or
+multipart bodies return `413 Payload Too Large`; malformed JSON or multipart
+data returns `400 Bad Request`. Configure the isolated directory used to stage
+multipart file parts with `upload_temp_dir`:
+
+```rust
+Application::new::<AppModule>()
+    .await?
+    .body_limit(10 * 1024 * 1024)
+    .upload_temp_dir("/var/tmp/my-service/uploads")
+    .listen("127.0.0.1:8080")
+    .await?;
+```
+
+See [Multipart Uploads](multipart-uploads.md) for route-level upload limits,
+file ownership, and typed form binding.
 
 ## Workers
 
@@ -103,7 +118,7 @@ Shutdown hook errors are converted into `std::io::Error` after the server stops.
 The adapter installs:
 
 - Shared `Arc<Container>` application data.
-- A JSON extractor config with the Caelix body limit, JSON error mapping, and body parsing for `#[body]` routes even when the client omits the `Content-Type` header.
+- Shared request configuration with the Caelix body limit, normalized JSON and multipart errors, typed multipart DTO binding, temporary upload storage, and JSON body parsing for `#[body]` routes even when the client omits the `Content-Type` header.
 - Generated controller routes from module metadata.
 - A request logging wrapper, enabled only when access logging is explicitly requested.
 

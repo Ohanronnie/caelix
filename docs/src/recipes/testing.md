@@ -100,7 +100,20 @@ async fn creates_user_without_database() -> caelix::Result<()> {
 
 Overrides match by `TypeId`. The replacement **must be the same concrete type** `T` that modules register and inject as `Arc<T>`. Typical pattern: give the production type a test constructor (for example `UserRepository::in_memory()`) rather than a separate mock struct type.
 
-You can also use `.override_provider_factory(...)` for async construction, and `.body_limit(n)` to match `Application::body_limit`.
+You can also use `.override_provider_factory(...)` for async construction,
+`.body_limit(n)` to match `Application::body_limit`, and
+`.upload_temp_dir(path)` when an upload test needs an isolated staging directory.
+
+Multipart tests use the raw payload helper with a boundary header:
+
+```rust
+let response = app
+    .post("/uploads")
+    .header("content-type", "multipart/form-data; boundary=test-boundary")
+    .set_payload("--test-boundary\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nReport\r\n--test-boundary--\r\n")
+    .send()
+    .await?;
+```
 
 An override for a type that never appears in the module tree is a startup error.
 

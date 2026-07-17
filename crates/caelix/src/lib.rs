@@ -48,8 +48,8 @@ pub use caelix_actix::__actix_web;
 #[cfg(feature = "actix")]
 /// Re-exported public API.
 pub use caelix_actix::{
-    Application, Logging, TestApplication, TestApplicationBuilder, TestRequestBuilder,
-    TestResponse, to_actix_response,
+    Application, Logging, RequestPayload, TestApplication, TestApplicationBuilder,
+    TestRequestBuilder, TestResponse, to_actix_response,
 };
 
 /// Hidden Axum and Tokio re-exports for generated controller and runtime code.
@@ -60,8 +60,8 @@ pub use caelix_axum::{__axum, __tokio};
 #[cfg(feature = "axum")]
 /// Re-exported public API.
 pub use caelix_axum::{
-    Application, AxumRequestInfo, AxumRouterBuilder, DEFAULT_BODY_LIMIT_BYTES, TestApplication,
-    TestApplicationBuilder, TestRequestBuilder, TestResponse, to_axum_response,
+    Application, AxumRequestInfo, AxumRouterBuilder, DEFAULT_BODY_LIMIT_BYTES, RequestPayload,
+    TestApplication, TestApplicationBuilder, TestRequestBuilder, TestResponse, to_axum_response,
 };
 
 /// Socket.IO APIs, available only with the Axum-selecting `socketio` feature.

@@ -3,7 +3,7 @@
 Enable the `openapi` feature. Caelix re-exports `utoipa`, including `ToSchema`, so no separate dependency is required:
 
 ```toml
-caelix = { version = "0.0.22", features = ["openapi"] }
+caelix = { version = "0.0.23", features = ["openapi"] }
 ```
 
 Opt in when building the application. Caelix serves OpenAPI 3.1 JSON at `/openapi.json` and Swagger UI at `/docs`.
@@ -18,7 +18,16 @@ let app = Application::new::<AppModule>()
 
 `OpenApiConfig::json_path(...)` and `OpenApiConfig::ui_path(...)` customize these paths. They must not collide with controller routes.
 
-Document DTOs with `utoipa::ToSchema`. The controller macro infers JSON request bodies from `#[body]` and successful `200` responses from `Result<T>` and `Result<Response<T>>`.
+Document DTOs with `utoipa::ToSchema`. The controller macro infers JSON request
+bodies from `#[body]`, multipart request bodies from upload routes, and
+successful `200` responses from `Result<T>` and `Result<Response<T>>`.
+
+For a route with `#[body]` and `#[file]`, OpenAPI adds
+`multipart/form-data`: the DTO fields remain schema-backed and file fields are
+binary properties. Required single files are listed as required; optional file
+properties are not. Routes whose files are all optional retain their JSON
+request content type as well. A direct `#[multipart] MultipartForm` route is
+documented as a free-form multipart request body.
 
 ```rust
 use caelix::openapi::{ToSchema, errors, request_header, response, utoipa};

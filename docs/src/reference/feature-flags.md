@@ -3,7 +3,7 @@
 `caelix` enables its current integrations by default:
 
 ```toml
-caelix = "0.0.9"
+caelix = "0.0.23"
 ```
 
 The default features include:
@@ -20,7 +20,7 @@ Actix remains the default backend. To use Axum, disable defaults and select `axu
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.11", default-features = false, features = ["axum", "sqlx", "validator"] }
+caelix = { version = "0.0.23", default-features = false, features = ["axum", "sqlx", "validator"] }
 ```
 
 The same `#[controller]`, route, extractor, guard, interceptor, `#[gateway]`, and
@@ -34,7 +34,7 @@ default Actix-only build. It exposes `caelix::socket_io` and
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.11", default-features = false, features = ["socketio"] }
+caelix = { version = "0.0.23", default-features = false, features = ["socketio"] }
 ```
 
 Example generated dependencies:
@@ -42,6 +42,6 @@ Example generated dependencies:
 ```toml
 [dependencies]
 actix-web = "4.14.0"
-caelix = "0.0.9"
+caelix = "0.0.23"
 serde = { version = "1.0.228", features = ["derive"] }
 ```

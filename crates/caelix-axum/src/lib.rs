@@ -4,6 +4,7 @@
 //! Axum runtime adapter for Caelix applications.
 
 mod application;
+mod request_payload;
 mod test_app;
 mod websocket;
 
@@ -18,6 +19,9 @@ pub use tokio as __tokio;
 pub use application::{
     Application, AxumRequestInfo, AxumRouterBuilder, DEFAULT_BODY_LIMIT_BYTES, to_axum_response,
 };
+/// Re-exported public API used by generated multipart controller wrappers.
+#[doc(hidden)]
+pub use request_payload::RequestPayload;
 /// Re-exported public API.
 pub use test_app::{TestApplication, TestApplicationBuilder, TestRequestBuilder, TestResponse};
 /// Re-exported public API.

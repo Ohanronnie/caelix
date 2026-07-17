@@ -9,7 +9,7 @@ use utoipa::openapi::{
     path::{HttpMethod, Operation, Parameter, ParameterIn},
     request_body::RequestBody,
     response::Response,
-    schema::Schema,
+    schema::{AllOfBuilder, ArrayBuilder, KnownFormat, ObjectBuilder, Schema, SchemaFormat, Type},
 };
 /// Re-exported so applications using Caelix's `openapi` feature do not need a
 /// separate `utoipa` dependency for derives such as `ToSchema`.
@@ -422,6 +422,48 @@ pub fn request_body(schema: RefOr<Schema>) -> RequestBody {
     request
         .content
         .insert("application/json".into(), Content::new(Some(schema)));
+    request
+}
+
+/// Builds a multipart request body from an optional DTO schema and named file
+/// fields. It is used by the controller macro when a route accepts uploads.
+#[doc(hidden)]
+pub fn multipart_request_body(
+    dto_schema: Option<RefOr<Schema>>,
+    files: &[(&str, bool, bool)],
+) -> RequestBody {
+    let mut file_properties = ObjectBuilder::new();
+    for (name, repeated, required) in files {
+        let binary = ObjectBuilder::new()
+            .schema_type(Type::String)
+            .format(Some(SchemaFormat::KnownFormat(KnownFormat::Binary)))
+            .build();
+        let schema: RefOr<Schema> = if *repeated {
+            ArrayBuilder::new().items(binary).build().into()
+        } else {
+            binary.into()
+        };
+        file_properties = file_properties.property(*name, schema);
+        if *required {
+            file_properties = file_properties.required(*name);
+        }
+    }
+    let file_properties: Schema = file_properties.build().into();
+    let schema: RefOr<Schema> = match dto_schema {
+        Some(dto_schema) => Schema::AllOf(
+            AllOfBuilder::new()
+                .item(dto_schema)
+                .item(file_properties)
+                .build(),
+        )
+        .into(),
+        None => file_properties.into(),
+    };
+    let mut request = RequestBody::new();
+    request.required = Some(Required::True);
+    request
+        .content
+        .insert("multipart/form-data".into(), Content::new(Some(schema)));
     request
 }
 
