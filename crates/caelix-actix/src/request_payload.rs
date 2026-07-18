@@ -2,10 +2,9 @@ use std::{collections::BTreeMap, future::Future, pin::Pin};
 
 use actix_web::{FromRequest, HttpRequest, dev::Payload, web};
 use bytes::{Bytes, BytesMut};
-use caelix_core::{
-    BadRequestException, IntoCaelixResponse, MultipartForm, Result, UploadConfig,
-    upload_limit_error,
-};
+use caelix_core::{BadRequestException, IntoCaelixResponse, Result};
+#[cfg(feature = "uploads")]
+use caelix_core::{MultipartForm, UploadConfig, upload_limit_error};
 use futures_util::StreamExt;
 
 use crate::{application::UploadRuntimeConfig, to_actix_response};
@@ -15,10 +14,12 @@ use crate::{application::UploadRuntimeConfig, to_actix_response};
 pub struct RequestPayload {
     content_type: Option<String>,
     body: Bytes,
+    #[cfg(feature = "uploads")]
     upload: UploadRuntimeConfig,
 }
 
 impl RequestPayload {
+    #[cfg(feature = "uploads")]
     /// Returns whether the request declares a multipart body.
     pub fn is_multipart(&self) -> bool {
         self.content_type.as_deref().is_some_and(|value| {
@@ -42,6 +43,7 @@ impl RequestPayload {
         serde_json::from_slice(&self.body).map_err(|error| json_error(&error.to_string()))
     }
 
+    #[cfg(feature = "uploads")]
     /// Parses this request as multipart, using the application or route limit.
     pub async fn multipart(self, route_limit: Option<usize>) -> Result<MultipartForm> {
         let limit = route_limit.unwrap_or(self.upload.body_limit);
@@ -83,23 +85,31 @@ impl FromRequest for RequestPayload {
             .app_data::<web::Data<UploadRuntimeConfig>>()
             .map(|config| config.get_ref().clone())
             .unwrap_or_else(|| UploadRuntimeConfig {
+                #[cfg(feature = "uploads")]
                 config: UploadConfig::default(),
                 body_limit: crate::application::DEFAULT_BODY_LIMIT_BYTES,
             });
+        let body_limit = upload.body_limit;
         let mut payload = payload.take();
         Box::pin(async move {
             let mut body = BytesMut::new();
             while let Some(chunk) = payload.next().await {
                 let chunk = chunk
                     .map_err(|_| actix_error(BadRequestException::new("invalid request body")))?;
-                if body.len().saturating_add(chunk.len()) > upload.body_limit {
-                    return Err(actix_error(upload_limit_error(upload.body_limit)));
+                if body.len().saturating_add(chunk.len()) > body_limit {
+                    #[cfg(feature = "uploads")]
+                    return Err(actix_error(upload_limit_error(body_limit)));
+                    #[cfg(not(feature = "uploads"))]
+                    return Err(actix_error(caelix_core::PayloadTooLargeException::new(
+                        format!("request body exceeds the configured limit of {body_limit} bytes"),
+                    )));
                 }
                 body.extend_from_slice(&chunk);
             }
             Ok(Self {
                 content_type,
                 body: body.freeze(),
+                #[cfg(feature = "uploads")]
                 upload,
             })
         })

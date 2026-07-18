@@ -57,6 +57,55 @@ contract needs a different name:
 #[file(name = "cover_image")] image: UploadedFile
 ```
 
+## File validation
+
+`#[file(...)]` and `#[files(...)]` can validate each staged file before the
+handler runs. `max_size` accepts a whole number with `B`, `KB`, `MB`, `GB`,
+`KiB`, `MiB`, or `GiB`; decimal suffixes use powers of 1,000 and IEC suffixes
+use powers of 1,024. `content_type` is a comma-separated MIME allowlist.
+
+```rust
+#[post("/documents")]
+async fn create(
+    &self,
+    #[file(
+        name = "document",
+        max_size = "10MiB",
+        content_type = "application/pdf, image/png",
+        validate = validate_document,
+    )]
+    document: UploadedFile,
+) -> Result<Response<Document>> {
+    Ok(Response::Body(self.documents.store(document).await?))
+}
+```
+
+Caelix checks, in order: declared size, declared content type, then the
+controller validator. Size violations return `413 Payload Too Large`; MIME
+violations and undetectable files return `400 Bad Request`. MIME validation is
+secure by default: Caelix detects the type from the file's magic bytes and does
+not trust a client filename or part header.
+
+Set `trust_content_type_header = true` only when that header is part of your
+explicit trust boundary. It must accompany `content_type`; header parameters
+such as `charset=utf-8` are ignored. This mode accepts the client declaration
+instead of inspecting file bytes, so it is unsafe for untrusted clients.
+
+Validators must be controller methods with this exact shape:
+
+```rust
+async fn validate_document(&self, file: &UploadedFile) -> Result<()> {
+    self.document_rules.validate(file).await
+}
+```
+
+For reusable rules, inject a service into the controller and forward to it as
+above. A validator receives only its attached file; keep cross-field checks in
+the handler body after every extractor is available. Optional files skip all
+file checks when absent. Repeated files are checked in request order. If any
+check fails, Caelix drops the collected files and all remaining staged files,
+deleting their temporary paths before returning the error response.
+
 `#[validate]` runs after JSON or multipart DTO decoding. A successful multipart
 decode that fails validation returns Caelix's normal `400 Bad Request` validation
 envelope, including its `errors` map.
@@ -176,6 +225,10 @@ An overflow returns `413 Payload Too Large` and includes the effective limit in
 the response message. Storage failures are logged with their details but expose
 only Caelix's standard internal-server-error response to clients. `TestApplication`
 offers the same `.body_limit(...)` and `.upload_temp_dir(...)` configuration.
+
+Upload support is enabled by default. Applications that opt out with
+`default-features = false` can omit the multipart extractor APIs and their
+multipart dependencies entirely.
 
 ## Testing with curl
 

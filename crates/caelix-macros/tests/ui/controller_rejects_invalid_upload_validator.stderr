@@ -1,0 +1,61 @@
+error: upload validator `sync_validator` must be declared as `async fn sync_validator(&self, file: &UploadedFile) -> Result<()>`
+  --> tests/ui/controller_rejects_invalid_upload_validator.rs:21:44
+   |
+21 |     async fn sync(&self, #[file(validate = sync_validator)] upload: UploadedFile) -> Result<String> { Ok(String::new()) }
+   |                                            ^^^^^^^^^^^^^^
+
+error: upload validator `mutable_self` must be declared as `async fn mutable_self(&self, file: &UploadedFile) -> Result<()>`
+  --> tests/ui/controller_rejects_invalid_upload_validator.rs:23:47
+   |
+23 |     async fn mutable(&self, #[file(validate = mutable_self)] upload: UploadedFile) -> Result<String> { Ok(String::new()) }
+   |                                               ^^^^^^^^^^^^
+
+error: upload validator `owned_file` must be declared as `async fn owned_file(&self, file: &UploadedFile) -> Result<()>`
+  --> tests/ui/controller_rejects_invalid_upload_validator.rs:25:45
+   |
+25 |     async fn owned(&self, #[file(validate = owned_file)] upload: UploadedFile) -> Result<String> { Ok(String::new()) }
+   |                                             ^^^^^^^^^^
+
+error: upload validator `wrong_result` must be declared as `async fn wrong_result(&self, file: &UploadedFile) -> Result<()>`
+  --> tests/ui/controller_rejects_invalid_upload_validator.rs:27:46
+   |
+27 |     async fn result(&self, #[file(validate = wrong_result)] upload: UploadedFile) -> Result<String> { Ok(String::new()) }
+   |                                              ^^^^^^^^^^^^
+
+error: upload validator `extra_argument` must be declared as `async fn extra_argument(&self, file: &UploadedFile) -> Result<()>`
+  --> tests/ui/controller_rejects_invalid_upload_validator.rs:29:45
+   |
+29 |     async fn extra(&self, #[file(validate = extra_argument)] upload: UploadedFile) -> Result<String> { Ok(String::new()) }
+   |                                             ^^^^^^^^^^^^^^
+
+warning: unused variable: `upload`
+  --> tests/ui/controller_rejects_invalid_upload_validator.rs:21:61
+   |
+21 |     async fn sync(&self, #[file(validate = sync_validator)] upload: UploadedFile) -> Result<String> { Ok(String::new()) }
+   |                                                             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_upload`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `upload`
+  --> tests/ui/controller_rejects_invalid_upload_validator.rs:23:62
+   |
+23 |     async fn mutable(&self, #[file(validate = mutable_self)] upload: UploadedFile) -> Result<String> { Ok(String::new()) }
+   |                                                              ^^^^^^ help: if this is intentional, prefix it with an underscore: `_upload`
+
+warning: unused variable: `upload`
+  --> tests/ui/controller_rejects_invalid_upload_validator.rs:25:58
+   |
+25 |     async fn owned(&self, #[file(validate = owned_file)] upload: UploadedFile) -> Result<String> { Ok(String::new()) }
+   |                                                          ^^^^^^ help: if this is intentional, prefix it with an underscore: `_upload`
+
+warning: unused variable: `upload`
+  --> tests/ui/controller_rejects_invalid_upload_validator.rs:27:61
+   |
+27 |     async fn result(&self, #[file(validate = wrong_result)] upload: UploadedFile) -> Result<String> { Ok(String::new()) }
+   |                                                             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_upload`
+
+warning: unused variable: `upload`
+  --> tests/ui/controller_rejects_invalid_upload_validator.rs:29:62
+   |
+29 |     async fn extra(&self, #[file(validate = extra_argument)] upload: UploadedFile) -> Result<String> { Ok(String::new()) }
+   |                                                              ^^^^^^ help: if this is intentional, prefix it with an underscore: `_upload`

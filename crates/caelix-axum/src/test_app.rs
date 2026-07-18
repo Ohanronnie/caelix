@@ -12,10 +12,12 @@ use axum::{
     response::Response,
 };
 use bytes::Bytes;
+#[cfg(feature = "uploads")]
+use caelix_core::UploadConfig;
 use caelix_core::{
     BoxFuture, Container, IntoCaelixResponse, Module, ProviderDependency, ProviderOverrides,
-    Result, StatusCode, UploadConfig, build_container_with_overrides, log_application_started,
-    log_module_routes, register_module_controllers, shutdown_module,
+    Result, StatusCode, build_container_with_overrides, log_application_started, log_module_routes,
+    register_module_controllers, shutdown_module,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use tower::ServiceExt;
@@ -43,6 +45,7 @@ pub struct TestApplication {
 pub struct TestApplicationBuilder<M> {
     overrides: ProviderOverrides,
     body_limit: usize,
+    #[cfg(feature = "uploads")]
     upload_config: UploadConfig,
     #[cfg(feature = "openapi")]
     openapi: Option<OpenApiConfig>,
@@ -55,6 +58,7 @@ impl TestApplication {
         TestApplicationBuilder {
             overrides: ProviderOverrides::new(),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            #[cfg(feature = "uploads")]
             upload_config: UploadConfig::default(),
             #[cfg(feature = "openapi")]
             openapi: None,
@@ -149,6 +153,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         self
     }
 
+    #[cfg(feature = "uploads")]
     /// Changes the directory used to stage multipart uploads in this test application.
     pub fn upload_temp_dir(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.upload_config = self.upload_config.upload_temp_dir(path);
@@ -190,6 +195,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
             );
         }
         router = router.layer(axum::Extension(UploadRuntimeConfig {
+            #[cfg(feature = "uploads")]
             config: self.upload_config,
             body_limit: self.body_limit,
         }));

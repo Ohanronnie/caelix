@@ -20,6 +20,7 @@ mod module;
 pub mod openapi;
 mod response;
 mod result;
+#[cfg(feature = "uploads")]
 mod upload;
 mod websocket;
 
@@ -53,6 +54,8 @@ pub use module::*;
 pub use response::*;
 /// Re-exported public API.
 pub use result::Result;
+/// Re-exported public API.
+#[cfg(feature = "uploads")]
 /// Re-exported public API.
 pub use upload::*;
 /// Re-exported public API.

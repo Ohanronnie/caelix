@@ -13,9 +13,11 @@ use actix_web::{
     test as actix_test, web,
 };
 use bytes::Bytes;
+#[cfg(feature = "uploads")]
+use caelix_core::UploadConfig;
 use caelix_core::{
     BoxFuture, Container, Module, ProviderDependency, ProviderOverrides, Result, StatusCode,
-    UploadConfig, build_container_with_overrides, log_application_started, log_module_routes,
+    build_container_with_overrides, log_application_started, log_module_routes,
     register_module_controllers, shutdown_module,
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -44,6 +46,7 @@ pub struct TestApplication {
 pub struct TestApplicationBuilder<M> {
     overrides: ProviderOverrides,
     body_limit: usize,
+    #[cfg(feature = "uploads")]
     upload_config: UploadConfig,
     #[cfg(feature = "openapi")]
     openapi: Option<OpenApiConfig>,
@@ -63,6 +66,7 @@ impl TestApplication {
         TestApplicationBuilder {
             overrides: ProviderOverrides::new(),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            #[cfg(feature = "uploads")]
             upload_config: UploadConfig::default(),
             #[cfg(feature = "openapi")]
             openapi: None,
@@ -150,6 +154,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         self
     }
 
+    #[cfg(feature = "uploads")]
     /// Changes the directory used to stage multipart uploads in this test application.
     pub fn upload_temp_dir(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.upload_config = self.upload_config.upload_temp_dir(path);
@@ -173,6 +178,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
 
         let container = Arc::new(container);
         let body_limit = self.body_limit;
+        #[cfg(feature = "uploads")]
         let upload_config = self.upload_config;
         let configure_fn: fn(&mut web::ServiceConfig) = |cfg| register_module_controllers::<M>(cfg);
         #[cfg(feature = "openapi")]
@@ -190,16 +196,23 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         let app = App::new()
             .app_data(web::Data::from(container.clone()))
             .configure(move |cfg| {
-                configure_caelix_services(cfg, body_limit, upload_config.clone(), configure_fn, {
-                    #[cfg(feature = "openapi")]
+                configure_caelix_services(
+                    cfg,
+                    body_limit,
+                    #[cfg(feature = "uploads")]
+                    upload_config.clone(),
+                    configure_fn,
                     {
-                        openapi.as_ref()
-                    }
-                    #[cfg(not(feature = "openapi"))]
-                    {
-                        None
-                    }
-                })
+                        #[cfg(feature = "openapi")]
+                        {
+                            openapi.as_ref()
+                        }
+                        #[cfg(not(feature = "openapi"))]
+                        {
+                            None
+                        }
+                    },
+                )
             });
 
         let service = Rc::new(actix_test::init_service(app).await);

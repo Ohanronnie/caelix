@@ -6,7 +6,7 @@ use std::{
 
 use bytes::Bytes;
 use futures_util::stream;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     BadRequestException, HttpException, InternalServerErrorException, PayloadTooLargeException,
@@ -80,6 +80,51 @@ impl UploadedFile {
         self.size
     }
 
+    /// Rejects this file when its staged size exceeds `max_size` bytes.
+    pub fn validate_max_size(&self, max_size: u64) -> Result<()> {
+        if self.size > max_size {
+            return Err(PayloadTooLargeException::new(format!(
+                "uploaded file exceeds the declared limit of {max_size} bytes"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validates this file against an allowlist of MIME types.
+    ///
+    /// By default, the type is detected from the staged file's magic bytes.
+    /// Set `trust_content_type_header` only when the client-provided multipart
+    /// content-type header is an intentional part of the application's trust
+    /// boundary.
+    pub async fn validate_content_type(
+        &self,
+        allowed_content_types: &[&str],
+        trust_content_type_header: bool,
+    ) -> Result<()> {
+        let actual = if trust_content_type_header {
+            self.content_type
+                .as_deref()
+                .and_then(normalized_mime_type)
+                .ok_or_else(|| {
+                    BadRequestException::new("uploaded file is missing a valid content type header")
+                })?
+        } else {
+            self.detected_content_type().await?
+        };
+
+        if allowed_content_types
+            .iter()
+            .filter_map(|content_type| normalized_mime_type(content_type))
+            .any(|content_type| content_type == actual)
+        {
+            return Ok(());
+        }
+
+        Err(BadRequestException::new(format!(
+            "uploaded file content type `{actual}` is not allowed"
+        )))
+    }
+
     /// Returns the temporary file path while this handle owns it.
     pub fn temp_path(&self) -> &Path {
         self.temp_path
@@ -125,6 +170,23 @@ impl UploadedFile {
             .map_err(storage_error)?;
         self.temp_path.take();
         Ok(destination)
+    }
+
+    async fn detected_content_type(&self) -> Result<String> {
+        const MIME_SNIFF_BYTES: usize = 8 * 1024;
+
+        let mut file = tokio::fs::File::open(self.temp_path())
+            .await
+            .map_err(storage_error)?;
+        let mut bytes = vec![0; MIME_SNIFF_BYTES];
+        let length = file.read(&mut bytes).await.map_err(storage_error)?;
+        let kind = infer::get(&bytes[..length]).ok_or_else(|| {
+            BadRequestException::new("could not determine uploaded file content type")
+        })?;
+
+        normalized_mime_type(kind.mime_type()).ok_or_else(|| {
+            BadRequestException::new("could not determine uploaded file content type")
+        })
     }
 }
 
@@ -306,4 +368,9 @@ fn limit_error(limit: usize) -> HttpException {
 
 fn storage_error(error: std::io::Error) -> HttpException {
     InternalServerErrorException::new(error)
+}
+
+fn normalized_mime_type(value: &str) -> Option<String> {
+    let value = value.split(';').next()?.trim();
+    (!value.is_empty()).then(|| value.to_ascii_lowercase())
 }

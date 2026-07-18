@@ -8,14 +8,16 @@ use actix_web::{
     http::header,
     web,
 };
+#[cfg(feature = "uploads")]
+use caelix_core::UploadConfig;
 #[cfg(feature = "openapi")]
 use caelix_core::openapi::{OpenApiConfig, build_openapi};
 use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpException, HttpResponse as CaelixHttpResponse,
     IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException, ResponseBody, Result,
-    UploadConfig, build_container, http_request_logging_enabled, log_application_started,
-    log_http_request, log_http_request_info, log_listening, log_module_routes,
-    register_module_controllers, shutdown_module,
+    build_container, http_request_logging_enabled, log_application_started, log_http_request,
+    log_http_request_info, log_listening, log_module_routes, register_module_controllers,
+    shutdown_module,
 };
 use futures_util::StreamExt;
 
@@ -25,6 +27,7 @@ pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
 /// Application-scoped multipart storage and limit configuration.
 #[derive(Clone)]
 pub(crate) struct UploadRuntimeConfig {
+    #[cfg(feature = "uploads")]
     pub(crate) config: UploadConfig,
     pub(crate) body_limit: usize,
 }
@@ -129,6 +132,7 @@ pub struct Application {
     gateway_configure_fn: fn(&mut web::ServiceConfig, Arc<Container>, usize),
     shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, caelix_core::Result<()>>,
     body_limit: usize,
+    #[cfg(feature = "uploads")]
     upload_config: UploadConfig,
     websocket_max_message_size: usize,
     workers: usize,
@@ -269,12 +273,13 @@ fn request_header(request: &HttpRequest, name: &header::HeaderName) -> String {
 pub(crate) fn configure_caelix_services(
     cfg: &mut web::ServiceConfig,
     body_limit: usize,
-    upload_config: UploadConfig,
+    #[cfg(feature = "uploads")] upload_config: UploadConfig,
     configure_fn: fn(&mut web::ServiceConfig),
     openapi: Option<&OpenApiServices>,
 ) {
     cfg.app_data(json_config(body_limit));
     cfg.app_data(web::Data::new(UploadRuntimeConfig {
+        #[cfg(feature = "uploads")]
         config: upload_config,
         body_limit,
     }));
@@ -350,6 +355,7 @@ impl Application {
             },
             shutdown_fn: |container| Box::pin(async move { shutdown_module::<M>(container).await }),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            #[cfg(feature = "uploads")]
             upload_config: UploadConfig::default(),
             websocket_max_message_size: crate::websocket::DEFAULT_WEBSOCKET_MAX_MESSAGE_SIZE,
             workers: num_cpus::get(),
@@ -366,6 +372,7 @@ impl Application {
         self
     }
 
+    #[cfg(feature = "uploads")]
     /// Changes the directory used to stage multipart uploads before they are persisted.
     pub fn upload_temp_dir(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.upload_config = self.upload_config.upload_temp_dir(path);
@@ -411,6 +418,7 @@ impl Application {
         configure_caelix_services(
             cfg,
             self.body_limit,
+            #[cfg(feature = "uploads")]
             self.upload_config.clone(),
             self.configure_fn,
             self.openapi.as_ref(),
@@ -426,6 +434,7 @@ impl Application {
         let container = self.container.clone();
         let configure_fn = self.configure_fn;
         let body_limit = self.body_limit;
+        #[cfg(feature = "uploads")]
         let upload_config = self.upload_config.clone();
         let websocket_max_message_size = self.websocket_max_message_size;
         let gateway_configure_fn = self.gateway_configure_fn;
@@ -462,11 +471,13 @@ impl Application {
                     })
                     .configure({
                         let openapi = openapi_with_logging.clone();
+                        #[cfg(feature = "uploads")]
                         let upload_config = upload_config.clone();
                         move |cfg| {
                             configure_caelix_services(
                                 cfg,
                                 body_limit,
+                                #[cfg(feature = "uploads")]
                                 upload_config.clone(),
                                 configure_fn,
                                 openapi.as_ref(),
@@ -497,11 +508,13 @@ impl Application {
                     .app_data(web::Data::from(container.clone()))
                     .configure({
                         let openapi = openapi.clone();
+                        #[cfg(feature = "uploads")]
                         let upload_config = upload_config.clone();
                         move |cfg| {
                             configure_caelix_services(
                                 cfg,
                                 body_limit,
+                                #[cfg(feature = "uploads")]
                                 upload_config.clone(),
                                 configure_fn,
                                 openapi.as_ref(),

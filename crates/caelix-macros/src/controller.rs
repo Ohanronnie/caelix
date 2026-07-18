@@ -2,6 +2,8 @@ use proc_macro::TokenStream;
 #[cfg(feature = "openapi")]
 use quote::ToTokens;
 use quote::{format_ident, quote};
+#[cfg(feature = "uploads")]
+use std::collections::HashSet;
 use syn::Meta;
 #[cfg(feature = "openapi")]
 use syn::spanned::Spanned;
@@ -20,33 +22,288 @@ enum Extractor {
     Files,
 }
 
-fn parse_upload_field_name(attr: &syn::Attribute, default: &syn::Ident) -> syn::Result<LitStr> {
+#[cfg(feature = "uploads")]
+struct UploadFieldOptions {
+    name: Option<LitStr>,
+    max_size: Option<u64>,
+    content_types: Vec<LitStr>,
+    trust_content_type_header: bool,
+    validator: Option<syn::Ident>,
+}
+
+#[allow(dead_code)]
+struct UploadField {
+    name: LitStr,
+    max_size: Option<u64>,
+    content_types: Vec<LitStr>,
+    trust_content_type_header: bool,
+    validator: Option<syn::Ident>,
+}
+
+#[cfg(feature = "uploads")]
+fn parse_upload_field_options(attr: &syn::Attribute) -> syn::Result<UploadFieldOptions> {
     if matches!(attr.meta, Meta::Path(_)) {
-        return Ok(LitStr::new(&default.to_string(), default.span()));
+        return Ok(UploadFieldOptions {
+            name: None,
+            max_size: None,
+            content_types: Vec::new(),
+            trust_content_type_header: false,
+            validator: None,
+        });
     }
     let list = attr.meta.require_list()?;
     let values = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(list.tokens.clone())?;
-    if values.len() != 1 {
-        return Err(syn::Error::new_spanned(
-            attr,
-            "file extractor accepts only `name = \"...\"`",
-        ));
-    }
-    let Some(Meta::NameValue(value)) = values.first() else {
-        return Err(syn::Error::new_spanned(
-            attr,
-            "file extractor accepts only `name = \"...\"`",
-        ));
+    let mut options = UploadFieldOptions {
+        name: None,
+        max_size: None,
+        content_types: Vec::new(),
+        trust_content_type_header: false,
+        validator: None,
     };
-    if !value.path.is_ident("name") {
+
+    for value in values {
+        let Meta::NameValue(value) = value else {
+            return Err(syn::Error::new_spanned(
+                value,
+                "file extractor arguments must use `name`, `max_size`, `content_type`, `trust_content_type_header`, or `validate`",
+            ));
+        };
+        if value.path.is_ident("name") {
+            if options.name.is_some() {
+                return Err(syn::Error::new_spanned(
+                    value,
+                    "duplicate file extractor `name`",
+                ));
+            }
+            options.name = Some(string_lit(&value.value)?);
+        } else if value.path.is_ident("max_size") {
+            if options.max_size.is_some() {
+                return Err(syn::Error::new_spanned(
+                    value,
+                    "duplicate file extractor `max_size`",
+                ));
+            }
+            options.max_size = Some(parse_upload_size(&string_lit(&value.value)?)?);
+        } else if value.path.is_ident("content_type") {
+            if !options.content_types.is_empty() {
+                return Err(syn::Error::new_spanned(
+                    value,
+                    "duplicate file extractor `content_type`",
+                ));
+            }
+            options.content_types = parse_content_types(&string_lit(&value.value)?)?;
+        } else if value.path.is_ident("trust_content_type_header") {
+            if options.trust_content_type_header {
+                return Err(syn::Error::new_spanned(
+                    value,
+                    "duplicate file extractor `trust_content_type_header`",
+                ));
+            }
+            let Expr::Lit(literal) = &value.value else {
+                return Err(syn::Error::new_spanned(
+                    &value.value,
+                    "trust_content_type_header must be `true`",
+                ));
+            };
+            let syn::Lit::Bool(value) = &literal.lit else {
+                return Err(syn::Error::new_spanned(
+                    literal,
+                    "trust_content_type_header must be `true`",
+                ));
+            };
+            if !value.value {
+                return Err(syn::Error::new_spanned(
+                    value,
+                    "trust_content_type_header must be `true`",
+                ));
+            }
+            options.trust_content_type_header = true;
+        } else if value.path.is_ident("validate") {
+            if options.validator.is_some() {
+                return Err(syn::Error::new_spanned(
+                    value,
+                    "duplicate file extractor `validate`",
+                ));
+            }
+            let Expr::Path(path) = &value.value else {
+                return Err(syn::Error::new_spanned(
+                    &value.value,
+                    "file extractor `validate` must name a controller method",
+                ));
+            };
+            let Some(validator) = path.path.get_ident() else {
+                return Err(syn::Error::new_spanned(
+                    path,
+                    "file extractor `validate` must name a controller method",
+                ));
+            };
+            options.validator = Some(validator.clone());
+        } else {
+            return Err(syn::Error::new_spanned(
+                value,
+                "file extractor arguments must use `name`, `max_size`, `content_type`, `trust_content_type_header`, or `validate`",
+            ));
+        }
+    }
+
+    if options.trust_content_type_header && options.content_types.is_empty() {
         return Err(syn::Error::new_spanned(
-            value,
-            "file extractor accepts only `name = \"...\"`",
+            attr,
+            "trust_content_type_header requires `content_type = \"...\"`",
         ));
     }
-    string_lit(&value.value)
+
+    Ok(options)
 }
 
+#[cfg(feature = "uploads")]
+fn parse_upload_size(value: &LitStr) -> syn::Result<u64> {
+    const UNITS: [(&str, u64); 7] = [
+        ("KiB", 1024),
+        ("MiB", 1024 * 1024),
+        ("GiB", 1024 * 1024 * 1024),
+        ("KB", 1000),
+        ("MB", 1000 * 1000),
+        ("GB", 1000 * 1000 * 1000),
+        ("B", 1),
+    ];
+    let raw = value.value();
+    let Some((digits, multiplier)) = UNITS.iter().find_map(|(suffix, multiplier)| {
+        raw.strip_suffix(suffix).map(|digits| (digits, multiplier))
+    }) else {
+        return Err(syn::Error::new_spanned(
+            value,
+            "max_size must be a whole-number value ending in B, KB, MB, GB, KiB, MiB, or GiB",
+        ));
+    };
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(syn::Error::new_spanned(
+            value,
+            "max_size must be a whole-number value ending in B, KB, MB, GB, KiB, MiB, or GiB",
+        ));
+    }
+    let bytes = digits
+        .parse::<u64>()
+        .ok()
+        .and_then(|bytes| bytes.checked_mul(*multiplier));
+    bytes.ok_or_else(|| {
+        syn::Error::new_spanned(value, "max_size exceeds the maximum supported byte limit")
+    })
+}
+
+#[cfg(feature = "uploads")]
+fn parse_content_types(value: &LitStr) -> syn::Result<Vec<LitStr>> {
+    let mut content_types = Vec::new();
+    for content_type in value.value().split(',') {
+        let normalized = content_type.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            return Err(syn::Error::new_spanned(
+                value,
+                "content_type must not contain empty MIME type entries",
+            ));
+        }
+        if !content_types
+            .iter()
+            .any(|existing: &LitStr| existing.value() == normalized)
+        {
+            content_types.push(LitStr::new(&normalized, value.span()));
+        }
+    }
+    Ok(content_types)
+}
+
+#[cfg(feature = "uploads")]
+fn upload_validator_error(validator: &syn::Ident) -> syn::Error {
+    syn::Error::new_spanned(
+        validator,
+        format!(
+            "upload validator `{validator}` must be declared as `async fn {validator}(&self, file: &UploadedFile) -> Result<()>`"
+        ),
+    )
+}
+
+#[cfg(feature = "uploads")]
+fn is_upload_validator_signature(method: &syn::ImplItemFn) -> bool {
+    if method.sig.asyncness.is_none() || method.sig.inputs.len() != 2 {
+        return false;
+    }
+    let Some(FnArg::Receiver(receiver)) = method.sig.inputs.first() else {
+        return false;
+    };
+    if receiver.reference.is_none() || receiver.mutability.is_some() {
+        return false;
+    }
+    let Some(FnArg::Typed(file)) = method.sig.inputs.iter().nth(1) else {
+        return false;
+    };
+    let Type::Reference(file) = file.ty.as_ref() else {
+        return false;
+    };
+    if file.mutability.is_some() || !is_named_type(file.elem.as_ref(), "UploadedFile") {
+        return false;
+    }
+    let syn::ReturnType::Type(_, output) = &method.sig.output else {
+        return false;
+    };
+    let Type::Path(result) = output.as_ref() else {
+        return false;
+    };
+    let Some(segment) = result.path.segments.last() else {
+        return false;
+    };
+    if segment.ident != "Result" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return false;
+    };
+    arguments.args.len() == 1
+        && matches!(
+            arguments.args.first(),
+            Some(syn::GenericArgument::Type(Type::Tuple(unit))) if unit.elems.is_empty()
+        )
+}
+
+#[cfg(feature = "uploads")]
+fn validate_upload_validator(impl_block: &ItemImpl, validator: &syn::Ident) -> syn::Result<()> {
+    let Some(method) = impl_block.items.iter().find_map(|item| match item {
+        ImplItem::Fn(method) if method.sig.ident == *validator => Some(method),
+        _ => None,
+    }) else {
+        return Err(syn::Error::new_spanned(
+            validator,
+            format!("upload validator `{validator}` was not found on this controller"),
+        ));
+    };
+    if !is_upload_validator_signature(method) {
+        return Err(upload_validator_error(validator));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "uploads")]
+fn upload_validation(upload: &UploadField, file: &syn::Ident) -> proc_macro2::TokenStream {
+    let max_size = upload.max_size.map(|max_size| {
+        quote! { #file.validate_max_size(#max_size)?; }
+    });
+    let content_type = (!upload.content_types.is_empty()).then(|| {
+        let content_types = &upload.content_types;
+        let trust_content_type_header = upload.trust_content_type_header;
+        quote! {
+            #file.validate_content_type(&[#(#content_types),*], #trust_content_type_header).await?;
+        }
+    });
+    let validator = upload.validator.as_ref().map(|validator| {
+        quote! { controller.#validator(&#file).await?; }
+    });
+    quote! {
+        #max_size
+        #content_type
+        #validator
+    }
+}
+
+#[cfg(feature = "uploads")]
 fn string_lit(expr: &Expr) -> syn::Result<LitStr> {
     match expr {
         Expr::Lit(value) => match &value.lit {
@@ -344,6 +601,8 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut controller_guards = Vec::new();
     let mut controller_interceptors = Vec::new();
     let mut errors = Vec::new();
+    #[cfg(feature = "uploads")]
+    let mut invalid_upload_validators = HashSet::new();
 
     impl_block.attrs.retain(|attr| {
         if attr.path().is_ident("use_guard") {
@@ -362,6 +621,28 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             true
         }
     });
+
+    #[cfg(feature = "uploads")]
+    for item in &impl_block.items {
+        let ImplItem::Fn(method) = item else { continue };
+        for input in &method.sig.inputs {
+            let FnArg::Typed(argument) = input else {
+                continue;
+            };
+            for attribute in &argument.attrs {
+                if !(attribute.path().is_ident("file") || attribute.path().is_ident("files")) {
+                    continue;
+                }
+                if let Ok(options) = parse_upload_field_options(attribute)
+                    && let Some(validator) = options.validator
+                    && let Err(error) = validate_upload_validator(&impl_block, &validator)
+                {
+                    invalid_upload_validators.insert(validator.to_string());
+                    errors.push(error.to_compile_error());
+                }
+            }
+        }
+    }
 
     let response_adapter = match backend {
         Backend::Actix => quote! { caelix::to_actix_response },
@@ -414,6 +695,16 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
                 false
             } else if attr.path().is_ident("upload") {
+                #[cfg(not(feature = "uploads"))]
+                {
+                    errors.push(
+                        syn::Error::new_spanned(
+                            attr,
+                            "multipart upload support requires the `uploads` feature",
+                        )
+                        .to_compile_error(),
+                    );
+                }
                 let parsed = attr.meta.require_list().and_then(|list| {
                     Punctuated::<Meta, Token![,]>::parse_terminated.parse2(list.tokens.clone())
                 });
@@ -471,7 +762,8 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             if let FnArg::Typed(pat_type) = input {
                 let mut found: Option<Extractor> = None;
                 let mut needs_validation = false;
-                let mut file_name = None;
+                #[cfg(feature = "uploads")]
+                let mut upload_options = None;
                 pat_type.attrs.retain(|attr| {
                     if attr.path().is_ident("param") {
                         found = Some(Extractor::Param);
@@ -487,25 +779,51 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         false
                     } else if attr.path().is_ident("multipart") {
                         found = Some(Extractor::Multipart);
+                        #[cfg(not(feature = "uploads"))]
+                        {
+                            errors.push(
+                                syn::Error::new_spanned(
+                                    attr,
+                                    "multipart upload support requires the `uploads` feature",
+                                )
+                                .to_compile_error(),
+                            );
+                        }
                         false
                     } else if attr.path().is_ident("file") {
                         found = Some(Extractor::File);
-                        // The identifier is not available until after retain;
-                        // parse the explicit name below when possible.
-                        if !matches!(attr.meta, Meta::Path(_)) {
-                            match parse_upload_field_name(attr, &format_ident!("__caelix_file")) {
-                                Ok(name) => file_name = Some(name),
-                                Err(err) => errors.push(err.to_compile_error()),
-                            }
+                        #[cfg(feature = "uploads")]
+                        match parse_upload_field_options(attr) {
+                            Ok(options) => upload_options = Some(options),
+                            Err(err) => errors.push(err.to_compile_error()),
+                        }
+                        #[cfg(not(feature = "uploads"))]
+                        {
+                            errors.push(
+                                syn::Error::new_spanned(
+                                    attr,
+                                    "multipart upload support requires the `uploads` feature",
+                                )
+                                .to_compile_error(),
+                            );
                         }
                         false
                     } else if attr.path().is_ident("files") {
                         found = Some(Extractor::Files);
-                        if !matches!(attr.meta, Meta::Path(_)) {
-                            match parse_upload_field_name(attr, &format_ident!("__caelix_files")) {
-                                Ok(name) => file_name = Some(name),
-                                Err(err) => errors.push(err.to_compile_error()),
-                            }
+                        #[cfg(feature = "uploads")]
+                        match parse_upload_field_options(attr) {
+                            Ok(options) => upload_options = Some(options),
+                            Err(err) => errors.push(err.to_compile_error()),
+                        }
+                        #[cfg(not(feature = "uploads"))]
+                        {
+                            errors.push(
+                                syn::Error::new_spanned(
+                                    attr,
+                                    "multipart upload support requires the `uploads` feature",
+                                )
+                                .to_compile_error(),
+                            );
                         }
                         false
                     } else if attr.path().is_ident("validate") {
@@ -551,20 +869,41 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             .to_compile_error(),
                         );
                     }
-                    let file_name =
-                        if matches!(extractor, Extractor::File | Extractor::Files) {
-                            Some(file_name.unwrap_or_else(|| {
+                    #[cfg(feature = "uploads")]
+                    let upload = if matches!(extractor, Extractor::File | Extractor::Files) {
+                        let options = upload_options.unwrap_or(UploadFieldOptions {
+                            name: None,
+                            max_size: None,
+                            content_types: Vec::new(),
+                            trust_content_type_header: false,
+                            validator: None,
+                        });
+                        let mut upload = UploadField {
+                            name: options.name.unwrap_or_else(|| {
                                 LitStr::new(&arg_name.to_string(), arg_name.span())
-                            }))
-                        } else {
-                            None
+                            }),
+                            max_size: options.max_size,
+                            content_types: options.content_types,
+                            trust_content_type_header: options.trust_content_type_header,
+                            validator: options.validator,
                         };
+                        if let Some(validator) = &upload.validator {
+                            if invalid_upload_validators.contains(&validator.to_string()) {
+                                upload.validator = None;
+                            }
+                        }
+                        Some(upload)
+                    } else {
+                        None
+                    };
+                    #[cfg(not(feature = "uploads"))]
+                    let upload: Option<UploadField> = None;
                     extractor_args.push((
                         extractor,
                         arg_name,
                         pat_type.ty.clone(),
                         needs_validation,
-                        file_name,
+                        upload,
                     ));
                 }
             }
@@ -663,10 +1002,12 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     .to_compile_error(),
             );
         }
+        #[cfg(feature = "uploads")]
         let force_multipart = extractor_args.iter().any(|(extractor, _, ty, _, _)| {
             matches!(extractor, Extractor::Multipart | Extractor::Files)
                 || (matches!(extractor, Extractor::File) && !is_option_uploaded_file(ty))
         });
+        #[cfg(feature = "uploads")]
         let route_limit = upload_limit
             .as_ref()
             .map(|limit| quote! { Some((#limit) as usize) })
@@ -684,24 +1025,46 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 })
             })
             .collect::<Vec<_>>();
-        let multipart_assignments = extractor_args.iter().filter_map(|(extractor, name, ty, _, field_name)| {
+        #[cfg(feature = "uploads")]
+        let multipart_assignments = extractor_args.iter().filter_map(|(extractor, name, ty, _, upload)| {
             let slot = payload_slot_ident(name);
             match extractor {
             Extractor::Body => Some(quote! { #slot = Some(__caelix_form.deserialize::<#ty>()?); }),
             Extractor::File => {
-                let field_name = field_name.as_ref().expect("file fields have names");
+                let upload = upload.as_ref().expect("file fields have options");
+                let field_name = &upload.name;
+                let file = format_ident!("__caelix_extracted_{}", name);
+                let validation = upload_validation(upload, &file);
                 if is_option_uploaded_file(ty) {
-                    Some(quote! { #slot = Some(__caelix_form.take_file(#field_name)?); })
+                    Some(quote! {
+                        let #file = __caelix_form.take_file(#field_name)?;
+                        if let Some(#file) = #file.as_ref() {
+                            #validation
+                        }
+                        #slot = Some(#file);
+                    })
                 } else {
                     Some(quote! {
-                        #slot = Some(__caelix_form.take_file(#field_name)?
-                            .ok_or_else(|| caelix::BadRequestException::new(format!("missing required file field `{}`", #field_name)))?);
+                        let #file = __caelix_form.take_file(#field_name)?
+                            .ok_or_else(|| caelix::BadRequestException::new(format!("missing required file field `{}`", #field_name)))?;
+                        #validation
+                        #slot = Some(#file);
                     })
                 }
             }
             Extractor::Files => {
-                let field_name = field_name.as_ref().expect("file fields have names");
-                Some(quote! { #slot = Some(__caelix_form.take_files(#field_name)); })
+                let upload = upload.as_ref().expect("file fields have options");
+                let field_name = &upload.name;
+                let files = format_ident!("__caelix_extracted_{}", name);
+                let file = format_ident!("__caelix_file_{}", name);
+                let validation = upload_validation(upload, &file);
+                Some(quote! {
+                    let #files = __caelix_form.take_files(#field_name);
+                    for #file in &#files {
+                        #validation
+                    }
+                    #slot = Some(#files);
+                })
             }
             _ => None,
         }}).collect::<Vec<_>>();
@@ -720,6 +1083,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
             })
             .collect::<Vec<_>>();
+        #[cfg(feature = "uploads")]
         let multipart_direct_assignment =
             extractor_args
                 .iter()
@@ -736,27 +1100,41 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             })
         }).collect::<Vec<_>>();
         let payload_setup = if has_payload {
-            if let Some(assignment) = multipart_direct_assignment {
-                quote! {
-                    #(#payload_slots)*
-                    if !__caelix_payload.is_multipart() {
-                        return Err(caelix::UnsupportedMediaTypeException::new("multipart/form-data is required"));
-                    }
-                    #assignment
-                    #(#payload_values)*
-                }
-            } else {
-                quote! {
-                    #(#payload_slots)*
-                    if __caelix_payload.is_multipart() {
-                        let mut __caelix_form = __caelix_payload.multipart(#route_limit).await?;
-                        #(#multipart_assignments)*
-                    } else {
-                        if #force_multipart || !__caelix_payload.is_json_or_missing_content_type() {
-                            return Err(caelix::UnsupportedMediaTypeException::new("unsupported request content type"));
+            #[cfg(feature = "uploads")]
+            {
+                if let Some(assignment) = multipart_direct_assignment {
+                    quote! {
+                        #(#payload_slots)*
+                        if !__caelix_payload.is_multipart() {
+                            return Err(caelix::UnsupportedMediaTypeException::new("multipart/form-data is required"));
                         }
-                        #(#json_assignments)*
+                        #assignment
+                        #(#payload_values)*
                     }
+                } else {
+                    quote! {
+                        #(#payload_slots)*
+                        if __caelix_payload.is_multipart() {
+                            let mut __caelix_form = __caelix_payload.multipart(#route_limit).await?;
+                            #(#multipart_assignments)*
+                        } else {
+                            if #force_multipart || !__caelix_payload.is_json_or_missing_content_type() {
+                                return Err(caelix::UnsupportedMediaTypeException::new("unsupported request content type"));
+                            }
+                            #(#json_assignments)*
+                        }
+                        #(#payload_values)*
+                    }
+                }
+            }
+            #[cfg(not(feature = "uploads"))]
+            {
+                quote! {
+                    #(#payload_slots)*
+                    if !__caelix_payload.is_json_or_missing_content_type() {
+                        return Err(caelix::UnsupportedMediaTypeException::new("unsupported request content type"));
+                    }
+                    #(#json_assignments)*
                     #(#payload_values)*
                 }
             }
@@ -950,15 +1328,27 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             });
             let multipart_files = extractor_args
                 .iter()
-                .filter_map(|(extractor, _name, ty, _, field_name)| match extractor {
+                .filter_map(|(extractor, _name, ty, _, upload)| match extractor {
                     Extractor::File => {
-                        let field_name = field_name.as_ref().expect("file fields have names");
+                        let upload = upload.as_ref().expect("file fields have options");
+                        let field_name = &upload.name;
                         let required = !is_option_uploaded_file(ty);
-                        Some(quote! { (#field_name, false, #required) })
+                        let max_size = upload
+                            .max_size
+                            .map(|max_size| quote! { Some(#max_size) })
+                            .unwrap_or_else(|| quote! { None });
+                        let content_types = &upload.content_types;
+                        Some(quote! { (#field_name, false, #required, #max_size, &[#(#content_types),*]) })
                     }
                     Extractor::Files => {
-                        let field_name = field_name.as_ref().expect("file fields have names");
-                        Some(quote! { (#field_name, true, true) })
+                        let upload = upload.as_ref().expect("file fields have options");
+                        let field_name = &upload.name;
+                        let max_size = upload
+                            .max_size
+                            .map(|max_size| quote! { Some(#max_size) })
+                            .unwrap_or_else(|| quote! { None });
+                        let content_types = &upload.content_types;
+                        Some(quote! { (#field_name, true, true, #max_size, &[#(#content_types),*]) })
                     }
                     _ => None,
                 })

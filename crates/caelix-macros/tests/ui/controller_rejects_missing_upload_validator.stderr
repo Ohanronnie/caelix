@@ -1,0 +1,13 @@
+error: upload validator `validate_upload` was not found on this controller
+  --> tests/ui/controller_rejects_missing_upload_validator.rs:17:27
+   |
+17 |         #[file(validate = validate_upload)] upload: UploadedFile,
+   |                           ^^^^^^^^^^^^^^^
+
+warning: unused variable: `upload`
+  --> tests/ui/controller_rejects_missing_upload_validator.rs:17:45
+   |
+17 |         #[file(validate = validate_upload)] upload: UploadedFile,
+   |                                             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_upload`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default

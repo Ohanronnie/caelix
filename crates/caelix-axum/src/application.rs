@@ -9,6 +9,8 @@ use axum::{
     http::{HeaderMap, Method, Request, Uri, request::Parts},
     response::Response,
 };
+#[cfg(feature = "uploads")]
+use caelix_core::UploadConfig;
 #[cfg(not(feature = "socketio"))]
 use caelix_core::build_container;
 #[cfg(feature = "socketio")]
@@ -19,7 +21,7 @@ use caelix_core::openapi::{OpenApiConfig, build_openapi};
 use caelix_core::visit_module_gateways;
 use caelix_core::{
     BoxFuture, Container, HttpResponse as CaelixHttpResponse, IntoCaelixResponse, Module,
-    NotFoundException, ResponseBody, Result, UploadConfig, log_application_started, log_listening,
+    NotFoundException, ResponseBody, Result, log_application_started, log_listening,
     log_module_routes, register_module_controllers, shutdown_module,
 };
 use futures_util::StreamExt;
@@ -31,6 +33,7 @@ pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
 /// Application-scoped multipart storage and limit configuration.
 #[derive(Clone)]
 pub(crate) struct UploadRuntimeConfig {
+    #[cfg(feature = "uploads")]
     pub(crate) config: UploadConfig,
     pub(crate) body_limit: usize,
 }
@@ -38,6 +41,7 @@ pub(crate) struct UploadRuntimeConfig {
 impl Default for UploadRuntimeConfig {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "uploads")]
             config: UploadConfig::default(),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
         }
@@ -171,6 +175,7 @@ pub struct Application {
     gateway_configure_fn: fn(&mut AxumRouterBuilder, Arc<Container>, usize),
     shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, caelix_core::Result<()>>,
     body_limit: usize,
+    #[cfg(feature = "uploads")]
     upload_config: UploadConfig,
     websocket_max_message_size: usize,
     layers: Vec<RouterLayer>,
@@ -209,6 +214,7 @@ impl Application {
             },
             shutdown_fn: |container| Box::pin(async move { shutdown_module::<M>(container).await }),
             body_limit: DEFAULT_BODY_LIMIT_BYTES,
+            #[cfg(feature = "uploads")]
             upload_config: UploadConfig::default(),
             websocket_max_message_size: crate::websocket::DEFAULT_WEBSOCKET_MAX_MESSAGE_SIZE,
             layers: Vec::new(),
@@ -227,6 +233,7 @@ impl Application {
         self
     }
 
+    #[cfg(feature = "uploads")]
     /// Changes the directory used to stage multipart uploads before they are persisted.
     pub fn upload_temp_dir(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.upload_config = self.upload_config.upload_temp_dir(path);
@@ -303,6 +310,7 @@ impl Application {
             router = mount_openapi(router, openapi.config, openapi.document);
         }
         router = router.layer(Extension(UploadRuntimeConfig {
+            #[cfg(feature = "uploads")]
             config: self.upload_config,
             body_limit: self.body_limit,
         }));

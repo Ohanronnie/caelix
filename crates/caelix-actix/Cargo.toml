@@ -1,6 +1,6 @@
 [package]
 name = "caelix-actix"
-version = "0.0.21"
+version = "0.0.22"
 edition = "2024"
 description = "Actix Web runtime adapter for Caelix."
 license = "MIT"
@@ -10,7 +10,9 @@ documentation = "https://docs.rs/caelix-actix"
 readme = "README.md"
 
 [features]
+default = ["uploads"]
 openapi = ["caelix-core/openapi"]
+uploads = ["caelix-core/uploads"]
 
 [dependencies]
 actix-http = "3.11.0"
@@ -19,7 +21,7 @@ actix-web = "4.14.0"
 bytes = "1.10.1"
 bytestring = "1.5.0"
 base64 = "0.22.1"
-caelix-core = { path = "../caelix-core", version = "0.0.18" }
+caelix-core = { path = "../caelix-core", version = "0.0.19", default-features = false }
 futures-util = { version = "0.3.31", default-features = false, features = ["std", "sink"] }
 futures-core = "0.3.31"
 futures-sink = "0.3.31"

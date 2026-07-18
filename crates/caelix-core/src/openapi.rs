@@ -430,13 +430,17 @@ pub fn request_body(schema: RefOr<Schema>) -> RequestBody {
 #[doc(hidden)]
 pub fn multipart_request_body(
     dto_schema: Option<RefOr<Schema>>,
-    files: &[(&str, bool, bool)],
+    files: &[(&str, bool, bool, Option<u64>, &[&str])],
 ) -> RequestBody {
     let mut file_properties = ObjectBuilder::new();
-    for (name, repeated, required) in files {
+    for (name, repeated, required, max_size, content_types) in files {
+        let content_type_description = (!content_types.is_empty())
+            .then(|| format!("Allowed MIME types: {}.", content_types.join(", ")));
         let binary = ObjectBuilder::new()
             .schema_type(Type::String)
             .format(Some(SchemaFormat::KnownFormat(KnownFormat::Binary)))
+            .max_length(max_size.and_then(|size| usize::try_from(size).ok()))
+            .description(content_type_description)
             .build();
         let schema: RefOr<Schema> = if *repeated {
             ArrayBuilder::new().items(binary).build().into()
