@@ -1,6 +1,6 @@
 [package]
 name = "caelix"
-version = "0.0.24"
+version = "0.0.25"
 edition = "2024"
 description = "Public Caelix framework crate."
 license = "MIT"
@@ -10,7 +10,7 @@ documentation = "https://docs.rs/caelix"
 readme = "README.md"
 
 [features]
-default = ["actix", "sqlx", "validator", "uploads"]
+default = ["actix"]
 actix = ["dep:caelix-actix", "caelix-macros/actix"]
 axum = ["dep:caelix-axum", "caelix-macros/axum"]
 socketio = ["axum", "caelix-axum/socketio", "dep:caelix-socketio"]
@@ -20,17 +20,21 @@ openapi = ["caelix-core/openapi", "caelix-macros/openapi", "caelix-actix?/openap
 uploads = ["caelix-core/uploads", "caelix-macros/uploads", "caelix-actix?/uploads", "caelix-axum?/uploads"]
 
 [dependencies]
-caelix-actix = { path = "../caelix-actix", version = "0.0.22", optional = true, default-features = false }
-caelix-axum = { path = "../caelix-axum", version = "0.0.23", optional = true, default-features = false }
-caelix-socketio = { path = "../caelix-socketio", version = "0.0.22", optional = true }
-caelix-core = { path = "../caelix-core", version = "0.0.19", default-features = false }
-caelix-macros = { path = "../caelix-macros", version = "0.0.15", default-features = false }
+caelix-actix = { path = "../caelix-actix", version = "0.0.23", optional = true, default-features = false }
+caelix-axum = { path = "../caelix-axum", version = "0.0.24", optional = true, default-features = false }
+caelix-socketio = { path = "../caelix-socketio", version = "0.0.23", optional = true }
+caelix-core = { path = "../caelix-core", version = "0.0.20", default-features = false }
+caelix-macros = { path = "../caelix-macros", version = "0.0.16", default-features = false }
 
 [lib]
 path = "src/lib.rs"
 
+[[example]]
+name = "upload_validation_server"
+required-features = ["actix", "uploads"]
+
 [dev-dependencies]
-actix-web = "4.14.0"
+actix-web = { version = "4.14.0", default-features = false, features = ["macros", "ws"] }
 http-body-util = "0.1.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"

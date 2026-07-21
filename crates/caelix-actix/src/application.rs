@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{
+    collections::BTreeMap,
+    ffi::{OsStr, OsString},
+    sync::Arc,
+    time::Instant,
+};
 
 use actix_web::{
     App, HttpRequest, HttpResponse, HttpServer,
@@ -429,8 +434,47 @@ impl Application {
         (self.shutdown_fn)(&self.container).await
     }
 
+    fn prepare_doctor_runtime(&self) {
+        let container = self.container.clone();
+        let configure_fn = self.configure_fn;
+        let body_limit = self.body_limit;
+        #[cfg(feature = "uploads")]
+        let upload_config = self.upload_config.clone();
+        let websocket_max_message_size = self.websocket_max_message_size;
+        let gateway_configure_fn = self.gateway_configure_fn;
+        let openapi = self.openapi.clone();
+
+        let _app = App::new()
+            .app_data(web::Data::from(container.clone()))
+            .configure({
+                move |cfg| {
+                    configure_caelix_services(
+                        cfg,
+                        body_limit,
+                        #[cfg(feature = "uploads")]
+                        upload_config.clone(),
+                        configure_fn,
+                        openapi.as_ref(),
+                    )
+                }
+            })
+            .configure(move |cfg| {
+                gateway_configure_fn(cfg, container.clone(), websocket_max_message_size)
+            });
+    }
+
     /// Runs the `listen` public API operation.
     pub async fn listen(self, addr: &str) -> std::io::Result<()> {
+        self.listen_with_doctor_mode(addr, has_doctor_argument(std::env::args_os()))
+            .await
+    }
+
+    async fn listen_with_doctor_mode(self, addr: &str, doctor_mode: bool) -> std::io::Result<()> {
+        if doctor_mode {
+            self.prepare_doctor_runtime();
+            return self.shutdown().await.map_err(to_io_error);
+        }
+
         let container = self.container.clone();
         let configure_fn = self.configure_fn;
         let body_limit = self.body_limit;
@@ -546,6 +590,13 @@ impl Application {
     }
 }
 
+fn has_doctor_argument<I>(args: I) -> bool
+where
+    I: IntoIterator<Item = OsString>,
+{
+    args.into_iter().any(|arg| arg == OsStr::new("--doctor"))
+}
+
 fn to_io_error(err: caelix_core::HttpException) -> std::io::Error {
     std::io::Error::other(err.message)
 }
@@ -564,6 +615,11 @@ mod tests {
     use uuid::Uuid;
 
     static SHUTDOWN_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DOCTOR_CONSTRUCTION_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DOCTOR_INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DOCTOR_STARTUP_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DOCTOR_SHUTDOWN_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DOCTOR_ROUTE_CONFIG_COUNT: AtomicUsize = AtomicUsize::new(0);
 
     struct HealthService {
         status: &'static str,
@@ -595,7 +651,17 @@ mod tests {
         }
 
         fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
-            Box::pin(async move { Ok(Self) })
+            Box::pin(async move {
+                DOCTOR_CONSTRUCTION_COUNT.fetch_add(1, Ordering::SeqCst);
+                Ok(Self)
+            })
+        }
+
+        fn on_module_init(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
+            Box::pin(async move {
+                DOCTOR_INIT_COUNT.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
         }
     }
 
@@ -704,6 +770,101 @@ mod tests {
     impl Module for ShutdownModule {
         fn register() -> ModuleMetadata {
             ModuleMetadata::new().provider::<ShutdownService>()
+        }
+    }
+
+    struct DoctorService;
+
+    impl Injectable for DoctorService {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move { Ok(Self) })
+        }
+
+        fn on_bootstrap(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
+            Box::pin(async move {
+                DOCTOR_STARTUP_COUNT.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+
+        fn on_shutdown(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
+            Box::pin(async move {
+                DOCTOR_SHUTDOWN_COUNT.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+    }
+
+    struct DoctorController;
+
+    impl Injectable for DoctorController {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move { Ok(Self) })
+        }
+    }
+
+    impl Controller for DoctorController {
+        fn base_path() -> &'static str {
+            "/doctor"
+        }
+
+        fn register_routes(cfg_any: &mut dyn Any) {
+            DOCTOR_ROUTE_CONFIG_COUNT.fetch_add(1, Ordering::SeqCst);
+            let cfg = cfg_any
+                .downcast_mut::<web::ServiceConfig>()
+                .expect("expected actix ServiceConfig");
+            cfg.route(
+                "/doctor",
+                web::get().to(|| async { HttpResponse::Ok().finish() }),
+            );
+        }
+    }
+
+    struct DoctorModule;
+
+    impl Module for DoctorModule {
+        fn register() -> ModuleMetadata {
+            ModuleMetadata::new()
+                .provider::<DoctorService>()
+                .controller::<DoctorController>()
+        }
+    }
+
+    struct FailingShutdownService;
+
+    impl Injectable for FailingShutdownService {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move { Ok(Self) })
+        }
+
+        fn on_shutdown(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
+            Box::pin(async move {
+                Err(caelix_core::HttpException::new(
+                    caelix_core::StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal Server Error",
+                    "shutdown failed",
+                ))
+            })
+        }
+    }
+
+    struct FailingShutdownModule;
+
+    impl Module for FailingShutdownModule {
+        fn register() -> ModuleMetadata {
+            ModuleMetadata::new().provider::<FailingShutdownService>()
         }
     }
 
@@ -979,6 +1140,7 @@ mod tests {
             configure_caelix_services(
                 cfg,
                 DEFAULT_BODY_LIMIT_BYTES,
+                #[cfg(feature = "uploads")]
                 UploadConfig::default(),
                 |_| {},
                 None,
@@ -1012,6 +1174,59 @@ mod tests {
         application.shutdown().await.unwrap();
 
         assert_eq!(SHUTDOWN_COUNT.load(Ordering::SeqCst), 1);
+    }
+
+    #[actix_web::test]
+    async fn doctor_mode_runs_startup_runtime_setup_and_shutdown_without_binding() {
+        DOCTOR_CONSTRUCTION_COUNT.store(0, Ordering::SeqCst);
+        DOCTOR_INIT_COUNT.store(0, Ordering::SeqCst);
+        DOCTOR_STARTUP_COUNT.store(0, Ordering::SeqCst);
+        DOCTOR_SHUTDOWN_COUNT.store(0, Ordering::SeqCst);
+        DOCTOR_ROUTE_CONFIG_COUNT.store(0, Ordering::SeqCst);
+
+        let application = Application::new::<DoctorModule>().await.unwrap();
+        assert_eq!(DOCTOR_CONSTRUCTION_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DOCTOR_INIT_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DOCTOR_STARTUP_COUNT.load(Ordering::SeqCst), 1);
+
+        application
+            .listen_with_doctor_mode("not a socket address", true)
+            .await
+            .unwrap();
+
+        assert_eq!(DOCTOR_ROUTE_CONFIG_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DOCTOR_SHUTDOWN_COUNT.load(Ordering::SeqCst), 1);
+    }
+
+    #[actix_web::test]
+    async fn doctor_mode_propagates_shutdown_failures() {
+        let error = Application::new::<FailingShutdownModule>()
+            .await
+            .unwrap()
+            .listen_with_doctor_mode("not a socket address", true)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("shutdown failed"));
+    }
+
+    #[actix_web::test]
+    async fn normal_listen_still_attempts_to_bind_the_configured_address() {
+        let error = Application::new::<TestModule>()
+            .await
+            .unwrap()
+            .listen_with_doctor_mode("127.0.0.1:not-a-port", false)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("invalid port value"));
+    }
+
+    #[test]
+    fn doctor_mode_requires_the_exact_process_argument() {
+        assert!(has_doctor_argument([OsString::from("--doctor")]));
+        assert!(!has_doctor_argument([OsString::from("--doctor=true")]));
+        assert!(!has_doctor_argument([OsString::from("doctor")]));
     }
 
     #[actix_web::test]

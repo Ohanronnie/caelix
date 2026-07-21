@@ -16,7 +16,7 @@ and enables `axum` explicitly:
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.23", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.25", default-features = false, features = ["axum"] }
 ```
 
 The `actix` and `axum` features are mutually exclusive. Most applications
@@ -26,7 +26,7 @@ as `axum::serve` or `tokio::net::TcpListener`:
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.23", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.25", default-features = false, features = ["axum"] }
 axum = "0.8.8"
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread"] }
 ```

@@ -299,7 +299,7 @@ Axum is selected explicitly because Actix is Caelix's default runtime:
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.23", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.25", default-features = false, features = ["axum"] }
 ```
 
 The `axum` feature and the `actix` feature are mutually exclusive. With this
@@ -396,7 +396,7 @@ transitively:
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.23", default-features = false, features = ["socketio"] }
+caelix = { version = "0.0.25", default-features = false, features = ["socketio"] }
 ```
 
 This feature cannot be combined with the default Actix backend. It exposes

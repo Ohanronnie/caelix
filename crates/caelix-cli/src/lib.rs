@@ -134,7 +134,7 @@ enum Command {
     Update,
     /// Run the current Caelix application
     Run(RunArgs),
-    /// Check compilation and validate Caelix module metadata
+    /// Run full application startup validation without binding a network port
     Doctor,
 }
 
@@ -303,20 +303,7 @@ fn run_text_command(cli: Cli, cwd: &Path) -> Result<String> {
 fn run_doctor(cwd: &Path) -> Result<i32> {
     ensure_cargo_manifest(cwd)?;
 
-    println!("Checking application...");
-    let check_status = cargo_check_command(cwd)
-        .status()
-        .map_err(|source| CliError::Io {
-            path: cwd.to_path_buf(),
-            source,
-        })?;
-    if !check_status.success() {
-        eprintln!("Doctor failed: the application does not compile.");
-        return Ok(check_status.code().unwrap_or(1));
-    }
-
-    println!("Compilation passed.");
-    println!("Validating Caelix module metadata...");
+    println!("Running application startup validation...");
     let doctor_status = cargo_doctor_command(cwd)
         .status()
         .map_err(|source| CliError::Io {
@@ -324,7 +311,7 @@ fn run_doctor(cwd: &Path) -> Result<i32> {
             source,
         })?;
     if !doctor_status.success() {
-        eprintln!("Doctor failed: Caelix module metadata is invalid.");
+        eprintln!("Doctor failed: application startup validation did not complete.");
         return Ok(doctor_status.code().unwrap_or(1));
     }
 
@@ -493,15 +480,9 @@ fn cargo_run_command(cwd: &Path, app_args: &[OsString]) -> ProcessCommand {
     command
 }
 
-fn cargo_check_command(cwd: &Path) -> ProcessCommand {
-    let mut command = ProcessCommand::new("cargo");
-    command.arg("check").current_dir(cwd);
-    command
-}
-
 fn cargo_doctor_command(cwd: &Path) -> ProcessCommand {
     let mut command = ProcessCommand::new("cargo");
-    command.args(["run", "--bin", "doctor"]).current_dir(cwd);
+    command.args(["run", "--", "--doctor"]).current_dir(cwd);
     command
 }
 
@@ -534,7 +515,7 @@ fn format_cargo_run_command(app_args: &[OsString]) -> String {
 }
 
 fn format_cargo_doctor_command() -> String {
-    "cargo check\ncargo run --bin doctor\n".to_string()
+    "cargo run -- --doctor\n".to_string()
 }
 
 fn update_caelix_dependency(cwd: &Path) -> Result<String> {
@@ -724,19 +705,10 @@ fn generate_new(args: NewArgs, cwd: &Path) -> Result<String> {
         path: target_dir.join("src"),
         source,
     })?;
-    fs::create_dir_all(target_dir.join("src/bin")).map_err(|source| CliError::Io {
-        path: target_dir.join("src/bin"),
-        source,
-    })?;
-
     let cargo_toml = render_app_cargo_toml_for_backend(&package_name, args.backend);
     create_file(target_dir.join("Cargo.toml"), &cargo_toml)?;
     create_file(target_dir.join("AGENTS.md"), render_agents_md())?;
     create_file(target_dir.join("src/main.rs"), &render_main_rs(&crate_name))?;
-    create_file(
-        target_dir.join("src/bin/doctor.rs"),
-        &render_doctor_rs(&crate_name),
-    )?;
     create_file(target_dir.join("src/lib.rs"), render_lib_rs())?;
     create_file(target_dir.join("src/app.rs"), render_app_rs())?;
 
@@ -901,9 +873,9 @@ pub fn render_app_cargo_toml(package_name: &str) -> String {
 
 fn render_app_cargo_toml_for_backend(package_name: &str, backend: BackendChoice) -> String {
     let backend_dependencies = match backend {
-        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.23\"",
+        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.25\"",
         BackendChoice::Axum => {
-            "caelix = { version = \"0.0.23\", default-features = false, features = [\"axum\", \"sqlx\", \"validator\"] }\ntower-http = { version = \"0.6\", features = [\"trace\", \"compression-full\"] }"
+            "caelix = { version = \"0.0.25\", default-features = false, features = [\"axum\"] }\ntower-http = { version = \"0.6\", features = [\"trace\", \"compression-full\"] }"
         }
     };
     format!(
@@ -937,20 +909,6 @@ async fn main() -> std::io::Result<()> {{
     )
 }
 
-fn render_doctor_rs(crate_name: &str) -> String {
-    format!(
-        r#"use {crate_name}::AppModule;
-
-#[caelix::main]
-async fn main() -> std::io::Result<()> {{
-    caelix::validate_module::<AppModule>()
-        .map_err(|err| std::io::Error::other(err.message))
-}}
-"#,
-        crate_name = crate_name
-    )
-}
-
 fn render_lib_rs() -> &'static str {
     "pub mod app;\n\npub use app::AppModule;\n"
 }
@@ -978,7 +936,7 @@ For fuller documentation, refer to https://ohanronnie.github.io/caelix/.
 ## App Structure
 
 - `src/main.rs` starts the selected Caelix runtime with `Application::new::<AppModule>()`.
-- `src/bin/doctor.rs` validates the root module metadata for `caelix doctor` without starting the application.
+- `caelix doctor` runs `src/main.rs` with `--doctor`, completing normal application startup and shutdown without binding an HTTP port.
 - `src/lib.rs` exports the root `AppModule` and should declare feature modules with `pub mod feature_name;`.
 - `src/app.rs` owns the root `AppModule`.
 - Feature folders usually contain `mod.rs`, `service.rs`, and `controller.rs`.
@@ -1099,7 +1057,7 @@ Cache support is explicit service-level caching.
 ## Checks
 
 - Run `cargo test` after code changes when feasible.
-- Run `caelix doctor` to compile the application and validate module metadata without constructing providers or binding a port.
+- Run `caelix doctor` to validate full application startup and shutdown without binding a port.
 - Keep public app code using the `caelix` facade (`use caelix::...`) instead of internal Caelix crate paths.
 - When using CLI-generated files, keep the manual registration steps in the command output aligned with `src/lib.rs` and `src/app.rs`.
 "#
@@ -1395,7 +1353,7 @@ mod tests {
     }
 
     #[test]
-    fn doctor_command_checks_then_runs_the_doctor_binary() {
+    fn doctor_command_runs_the_application_with_the_doctor_argument() {
         let tmp = tempdir().unwrap();
         fs::write(
             tmp.path().join("Cargo.toml"),
@@ -1405,7 +1363,7 @@ mod tests {
 
         let output = run_from(["caelix", "doctor"], tmp.path()).unwrap();
 
-        assert_eq!(output, "cargo check\ncargo run --bin doctor\n");
+        assert_eq!(output, "cargo run -- --doctor\n");
     }
 
     fn doctor_fixture(app_rs: &str) -> tempfile::TempDir {
@@ -1418,7 +1376,7 @@ mod tests {
         let target = workspace.join("target");
         let quote_toml_path = |path: &Path| path.display().to_string().replace('\\', "\\\\");
 
-        fs::create_dir_all(fixture.path().join("src/bin")).unwrap();
+        fs::create_dir_all(fixture.path().join("src")).unwrap();
         fs::create_dir_all(fixture.path().join(".cargo")).unwrap();
         fs::write(
             fixture.path().join("Cargo.toml"),
@@ -1443,8 +1401,8 @@ mod tests {
         .unwrap();
         fs::write(fixture.path().join("src/app.rs"), app_rs).unwrap();
         fs::write(
-            fixture.path().join("src/bin/doctor.rs"),
-            render_doctor_rs("doctor_fixture"),
+            fixture.path().join("src/main.rs"),
+            render_main_rs("doctor_fixture").replace("127.0.0.1:8080", "not a socket address"),
         )
         .unwrap();
 
@@ -1452,20 +1410,20 @@ mod tests {
     }
 
     #[test]
-    fn doctor_validates_without_constructing_providers_or_starting_a_listener() {
+    fn doctor_runs_full_startup_and_skips_listener_binding() {
         let _lock = DOCTOR_FIXTURE_LOCK.lock().unwrap();
         let fixture = doctor_fixture(
             r#"use caelix::{BoxFuture, Container, Injectable, Module, ModuleMetadata, Result};
 
-pub struct ConstructorMustNotRun;
+pub struct StartupService;
 
-impl Injectable for ConstructorMustNotRun {
+impl Injectable for StartupService {
     fn dependencies() -> Vec<caelix::ProviderDependency> {
         caelix::provider_dependencies![]
     }
 
     fn create(_: &Container) -> BoxFuture<'_, Result<Self>> {
-        Box::pin(async { panic!("doctor must not construct providers") })
+        Box::pin(async { Ok(Self) })
     }
 }
 
@@ -1473,7 +1431,7 @@ pub struct AppModule;
 
 impl Module for AppModule {
     fn register() -> ModuleMetadata {
-        ModuleMetadata::new().provider::<ConstructorMustNotRun>()
+        ModuleMetadata::new().provider::<StartupService>()
     }
 }
 "#,

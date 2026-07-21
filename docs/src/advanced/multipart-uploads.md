@@ -226,9 +226,9 @@ the response message. Storage failures are logged with their details but expose
 only Caelix's standard internal-server-error response to clients. `TestApplication`
 offers the same `.body_limit(...)` and `.upload_temp_dir(...)` configuration.
 
-Upload support is enabled by default. Applications that opt out with
-`default-features = false` can omit the multipart extractor APIs and their
-multipart dependencies entirely.
+Upload support is opt-in. Enable the `uploads` feature when an application uses
+multipart extractor APIs; builds without it omit the multipart dependencies
+entirely.
 
 ## Testing with curl
 

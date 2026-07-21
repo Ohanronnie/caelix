@@ -1,6 +1,6 @@
 [package]
 name = "caelix-actix"
-version = "0.0.22"
+version = "0.0.23"
 edition = "2024"
 description = "Actix Web runtime adapter for Caelix."
 license = "MIT"
@@ -10,27 +10,29 @@ documentation = "https://docs.rs/caelix-actix"
 readme = "README.md"
 
 [features]
-default = ["uploads"]
+default = []
 openapi = ["caelix-core/openapi"]
 uploads = ["caelix-core/uploads"]
 
 [dependencies]
-actix-http = "3.11.0"
+actix-http = { version = "3.11.0", default-features = false, features = ["ws"] }
 actix-codec = "0.5.2"
-actix-web = "4.14.0"
+actix-web = { version = "4.14.0", default-features = false, features = ["macros", "ws"] }
 bytes = "1.10.1"
 bytestring = "1.5.0"
 base64 = "0.22.1"
-caelix-core = { path = "../caelix-core", version = "0.0.19", default-features = false }
+caelix-core = { path = "../caelix-core", version = "0.0.20", default-features = false }
 futures-util = { version = "0.3.31", default-features = false, features = ["std", "sink"] }
 futures-core = "0.3.31"
 futures-sink = "0.3.31"
-serde = { version = "1.0.228", features = ["derive"] }
+serde = "1.0.228"
 serde_json = "1.0.150"
 num_cpus = "1"
-tokio = { version = "1.47.1", features = ["macros", "rt", "sync"] }
-tokio-util = { version = "0.7.16", features = ["rt"] }
+tokio = { version = "1.47.1", default-features = false, features = ["sync"] }
+tokio-util = { version = "0.7.16", default-features = false, features = ["rt"] }
 uuid = { version = "1.19.0", features = ["v4"] }
 [dev-dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.47.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync"] }
 uuid = { version = "1.19.0", features = ["serde", "v4"] }
 tokio-tungstenite = "0.28.0"

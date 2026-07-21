@@ -1,4 +1,9 @@
-use std::{convert::Infallible, sync::Arc, time::Instant};
+use std::{
+    convert::Infallible,
+    ffi::{OsStr, OsString},
+    sync::Arc,
+    time::Instant,
+};
 
 #[cfg(feature = "openapi")]
 use axum::http::header;
@@ -337,6 +342,18 @@ impl Application {
 
     /// Runs the `listen` public API operation.
     pub async fn listen(self, addr: &str) -> std::io::Result<()> {
+        self.listen_with_doctor_mode(addr, has_doctor_argument(std::env::args_os()))
+            .await
+    }
+
+    async fn listen_with_doctor_mode(self, addr: &str, doctor_mode: bool) -> std::io::Result<()> {
+        if doctor_mode {
+            let shutdown_fn = self.shutdown_fn;
+            let container = self.container.clone();
+            let _router = self.into_router();
+            return shutdown_fn(&container).await.map_err(to_io_error);
+        }
+
         log_listening(addr);
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(listener) => listener,
@@ -352,6 +369,13 @@ impl Application {
         shutdown_fn(&container).await.map_err(to_io_error)?;
         result
     }
+}
+
+fn has_doctor_argument<I>(args: I) -> bool
+where
+    I: IntoIterator<Item = OsString>,
+{
+    args.into_iter().any(|arg| arg == OsStr::new("--doctor"))
 }
 
 #[cfg(feature = "openapi")]
@@ -402,8 +426,20 @@ fn to_io_error(err: caelix_core::HttpException) -> std::io::Error {
 mod tests {
     use super::*;
     use axum::http::StatusCode;
-    use caelix_core::{HttpResponse, ModuleMetadata, Response as CaelixResponse};
+    use caelix_core::{
+        Controller, HttpResponse, Injectable, ModuleMetadata, Response as CaelixResponse,
+    };
     use http_body_util::BodyExt;
+    use std::{
+        any::Any,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    static DOCTOR_STARTUP_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DOCTOR_CONSTRUCTION_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DOCTOR_INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DOCTOR_SHUTDOWN_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static DOCTOR_ROUTE_CONFIG_COUNT: AtomicUsize = AtomicUsize::new(0);
 
     #[tokio::test]
     async fn response_adapter_preserves_status_body_and_content_type() {
@@ -454,6 +490,108 @@ mod tests {
         }
     }
 
+    struct DoctorService;
+
+    impl Injectable for DoctorService {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move {
+                DOCTOR_CONSTRUCTION_COUNT.fetch_add(1, Ordering::SeqCst);
+                Ok(Self)
+            })
+        }
+
+        fn on_module_init(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
+            Box::pin(async move {
+                DOCTOR_INIT_COUNT.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+
+        fn on_bootstrap(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
+            Box::pin(async move {
+                DOCTOR_STARTUP_COUNT.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+
+        fn on_shutdown(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
+            Box::pin(async move {
+                DOCTOR_SHUTDOWN_COUNT.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+    }
+
+    struct DoctorController;
+
+    impl Injectable for DoctorController {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move { Ok(Self) })
+        }
+    }
+
+    impl Controller for DoctorController {
+        fn base_path() -> &'static str {
+            "/doctor"
+        }
+
+        fn register_routes(routes_any: &mut dyn Any) {
+            DOCTOR_ROUTE_CONFIG_COUNT.fetch_add(1, Ordering::SeqCst);
+            let routes = routes_any
+                .downcast_mut::<AxumRouterBuilder>()
+                .expect("expected AxumRouterBuilder");
+            routes.route("/doctor", axum::routing::get(|| async {}));
+        }
+    }
+
+    struct DoctorModule;
+
+    impl Module for DoctorModule {
+        fn register() -> ModuleMetadata {
+            ModuleMetadata::new()
+                .provider::<DoctorService>()
+                .controller::<DoctorController>()
+        }
+    }
+
+    struct FailingShutdownService;
+
+    impl Injectable for FailingShutdownService {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move { Ok(Self) })
+        }
+
+        fn on_shutdown(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
+            Box::pin(async move {
+                Err(caelix_core::HttpException::new(
+                    caelix_core::StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal Server Error",
+                    "shutdown failed",
+                ))
+            })
+        }
+    }
+
+    struct FailingShutdownModule;
+
+    impl Module for FailingShutdownModule {
+        fn register() -> ModuleMetadata {
+            ModuleMetadata::new().provider::<FailingShutdownService>()
+        }
+    }
+
     #[tokio::test]
     async fn application_accepts_native_tower_layers() {
         let _router = Application::new::<EmptyModule>()
@@ -462,5 +600,58 @@ mod tests {
             .layer(tower_http::trace::TraceLayer::new_for_http())
             .layer(tower_http::compression::CompressionLayer::new())
             .into_router();
+    }
+
+    #[tokio::test]
+    async fn doctor_mode_runs_startup_runtime_setup_and_shutdown_without_binding() {
+        DOCTOR_CONSTRUCTION_COUNT.store(0, Ordering::SeqCst);
+        DOCTOR_INIT_COUNT.store(0, Ordering::SeqCst);
+        DOCTOR_STARTUP_COUNT.store(0, Ordering::SeqCst);
+        DOCTOR_SHUTDOWN_COUNT.store(0, Ordering::SeqCst);
+        DOCTOR_ROUTE_CONFIG_COUNT.store(0, Ordering::SeqCst);
+
+        let application = Application::new::<DoctorModule>().await.unwrap();
+        assert_eq!(DOCTOR_CONSTRUCTION_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DOCTOR_INIT_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DOCTOR_STARTUP_COUNT.load(Ordering::SeqCst), 1);
+
+        application
+            .listen_with_doctor_mode("not a socket address", true)
+            .await
+            .unwrap();
+
+        assert_eq!(DOCTOR_ROUTE_CONFIG_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DOCTOR_SHUTDOWN_COUNT.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn doctor_mode_propagates_shutdown_failures() {
+        let error = Application::new::<FailingShutdownModule>()
+            .await
+            .unwrap()
+            .listen_with_doctor_mode("not a socket address", true)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("shutdown failed"));
+    }
+
+    #[tokio::test]
+    async fn normal_listen_still_attempts_to_bind_the_configured_address() {
+        let error = Application::new::<EmptyModule>()
+            .await
+            .unwrap()
+            .listen_with_doctor_mode("127.0.0.1:not-a-port", false)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("invalid port value"));
+    }
+
+    #[test]
+    fn doctor_mode_requires_the_exact_process_argument() {
+        assert!(has_doctor_argument([OsString::from("--doctor")]));
+        assert!(!has_doctor_argument([OsString::from("--doctor=true")]));
+        assert!(!has_doctor_argument([OsString::from("doctor")]));
     }
 }

@@ -22,14 +22,13 @@ fn new_creates_application_structure_with_crates_io_dependency() {
     let cargo_toml = fs::read_to_string(app_dir.join("Cargo.toml")).unwrap();
     let agents_md = fs::read_to_string(app_dir.join("AGENTS.md")).unwrap();
     let main_rs = fs::read_to_string(app_dir.join("src/main.rs")).unwrap();
-    let doctor_rs = fs::read_to_string(app_dir.join("src/bin/doctor.rs")).unwrap();
     let lib_rs = fs::read_to_string(app_dir.join("src/lib.rs")).unwrap();
     let app_rs = fs::read_to_string(app_dir.join("src/app.rs")).unwrap();
 
     assert!(output.contains("Created Caelix application `demo-api`"));
     assert!(cargo_toml.contains("edition = \"2024\""));
     assert!(!cargo_toml.contains("[workspace]"));
-    assert!(cargo_toml.contains("caelix = \"0.0.23\""));
+    assert!(cargo_toml.contains("caelix = \"0.0.25\""));
     assert!(!cargo_toml.contains("path = "));
     assert!(!cargo_toml.contains("caelix-core"));
     assert!(!cargo_toml.contains("caelix-actix"));
@@ -47,11 +46,8 @@ fn new_creates_application_structure_with_crates_io_dependency() {
     assert!(main_rs.contains("use demo_api::AppModule;"));
     assert!(main_rs.contains("#[caelix::main]"));
     assert!(main_rs.contains("Application::new::<AppModule>()"));
-    assert!(doctor_rs.contains("use demo_api::AppModule;"));
-    assert!(doctor_rs.contains("#[caelix::main]"));
-    assert!(doctor_rs.contains("caelix::validate_module::<AppModule>()"));
-    assert!(!doctor_rs.contains("Application::new"));
-    assert!(!doctor_rs.contains(".listen("));
+    assert!(!app_dir.join("src/bin/doctor.rs").exists());
+    assert!(!app_dir.join("src/bin").exists());
     assert_eq!(lib_rs, "pub mod app;\n\npub use app::AppModule;\n");
     assert!(app_rs.contains("use caelix::{Module, ModuleMetadata};"));
     assert!(app_rs.contains("ModuleMetadata::new()"));
@@ -68,7 +64,7 @@ fn new_with_axum_backend_enables_the_axum_feature() {
     let cargo_toml = fs::read_to_string(tmp.path().join("demo-api/Cargo.toml")).unwrap();
 
     assert!(cargo_toml.contains("default-features = false"));
-    assert!(cargo_toml.contains("features = [\"axum\", \"sqlx\", \"validator\"]"));
+    assert!(cargo_toml.contains("features = [\"axum\"]"));
     assert!(cargo_toml.contains("tower-http"));
     assert!(!cargo_toml.contains("actix-web"));
 }

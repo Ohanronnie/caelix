@@ -34,9 +34,9 @@ caelix run --watch -- --port 4000 --verbose
 caelix doctor
 ```
 
-This first runs `cargo check`, then runs the application's `doctor` binary (`cargo run --bin doctor`). Generated applications provide that binary in `src/bin/doctor.rs`; it calls `caelix::validate_module::<AppModule>()` without constructing an `Application` or binding an HTTP port.
+This runs the normal application binary as `cargo run -- --doctor`. Caelix completes application construction, module validation, provider construction, lifecycle startup hooks, and route/runtime setup, then runs shutdown hooks and exits without binding an HTTP port.
 
-It validates the module graph, duplicate registrations, exports and import visibility, declared provider dependencies and dependency cycles, event-handler declarations, and WebSocket gateway paths. It does not execute provider constructors or async factories, lifecycle hooks, external services, or socket binding.
+It returns a non-zero status when compilation, configuration, startup, or shutdown fails. Doctor mode intentionally permits normal startup side effects because it verifies the same initialization path as `caelix run`; the only skipped step is network binding and request serving.
 
 ## Create An Application
 
@@ -55,11 +55,10 @@ The command creates:
 - `Cargo.toml`
 - `AGENTS.md`
 - `src/main.rs`
-- `src/bin/doctor.rs`
 - `src/lib.rs`
 - `src/app.rs`
 
-The default generated `Cargo.toml` uses `caelix = "0.0.23"` from crates.io and the Actix backend. The Axum option disables default features and enables `axum` instead.
+The default generated `Cargo.toml` uses `caelix = "0.0.25"` from crates.io and the Actix backend. The Axum option disables default features and enables `axum` instead.
 
 The generated `AGENTS.md` gives AI coding agents the app-level Caelix conventions: explicit module registration, provider/controller registration, injectable field shape, service-level cache behavior, and the usual `cargo test` check.
 

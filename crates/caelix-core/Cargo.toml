@@ -1,6 +1,6 @@
 [package]
 name = "caelix-core"
-version = "0.0.19"
+version = "0.0.20"
 edition = "2024"
 description = "Core primitives for the Caelix framework."
 license = "MIT"
@@ -13,7 +13,7 @@ readme = "README.md"
 path = "src/lib.rs"
 
 [features]
-default = ["sqlx", "validator", "uploads"]
+default = []
 sqlx = ["dep:sqlx"]
 validator = ["dep:validator"]
 openapi = ["dep:utoipa"]

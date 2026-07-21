@@ -457,7 +457,7 @@ dependencies = [
 
 [[package]]
 name = "caelix"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "actix-web",
  "caelix-actix",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-actix"
-version = "0.0.22"
+version = "0.0.23"
 dependencies = [
  "actix-codec",
  "actix-http",
@@ -499,7 +499,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-axum"
-version = "0.0.23"
+version = "0.0.24"
 dependencies = [
  "axum",
  "bytes",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-cli"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "clap",
  "ctrlc",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-core"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "anyhow",
  "bytes",
@@ -560,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-macros"
-version = "0.0.15"
+version = "0.0.16"
 dependencies = [
  "actix-web",
  "caelix-actix",
@@ -574,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-socketio"
-version = "0.0.22"
+version = "0.0.23"
 dependencies = [
  "caelix-core",
  "serde",
