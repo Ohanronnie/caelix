@@ -17,6 +17,7 @@ enum Extractor {
     Body,
     Query,
     User,
+    Cookie(LitStr),
     Multipart,
     File,
     Files,
@@ -316,6 +317,20 @@ fn string_lit(expr: &Expr) -> syn::Result<LitStr> {
 
 fn is_named_type(ty: &Type, name: &str) -> bool {
     matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == name))
+}
+
+fn is_option_of(ty: &Type, name: &str) -> bool {
+    let Type::Path(path) = ty else { return false };
+    let Some(segment) = path.path.segments.last() else {
+        return false;
+    };
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return false;
+    };
+    segment.ident == "Option"
+        && arguments.args.iter().any(
+            |argument| matches!(argument, syn::GenericArgument::Type(inner) if is_named_type(inner, name)),
+        )
 }
 
 fn is_option_uploaded_file(ty: &Type) -> bool {
@@ -745,14 +760,14 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     Err(err) => errors.push(err.to_compile_error()),
                 }
                 true
-            } else if attr.path().is_ident("security") {
-                #[cfg(feature = "openapi")]
-                match attr.parse_args::<Expr>() {
-                    Ok(security) => security_expressions.push(security),
-                    Err(err) => errors.push(err.to_compile_error()),
-                }
-                true
             } else {
+                if attr.path().is_ident("security") {
+                    #[cfg(feature = "openapi")]
+                    match attr.parse_args::<Expr>() {
+                        Ok(security) => security_expressions.push(security),
+                        Err(err) => errors.push(err.to_compile_error()),
+                    }
+                }
                 true
             }
         });
@@ -776,6 +791,24 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         false
                     } else if attr.path().is_ident("user") {
                         found = Some(Extractor::User);
+                        false
+                    } else if attr.path().is_ident("cookie") {
+                        match attr.parse_args::<LitStr>() {
+                            Ok(name) if !name.value().is_empty() => {
+                                found = Some(Extractor::Cookie(name));
+                            }
+                            Ok(name) => errors.push(
+                                syn::Error::new_spanned(name, "cookie name must not be empty")
+                                    .to_compile_error(),
+                            ),
+                            Err(_) => errors.push(
+                                syn::Error::new_spanned(
+                                    attr,
+                                    "#[cookie] requires a non-empty string literal, for example #[cookie(\"session\")]",
+                                )
+                                .to_compile_error(),
+                            ),
+                        }
                         false
                     } else if attr.path().is_ident("multipart") {
                         found = Some(Extractor::Multipart);
@@ -847,6 +880,18 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             continue;
                         }
                     };
+                    if matches!(extractor, Extractor::Cookie(_))
+                        && !(is_named_type(&pat_type.ty, "String")
+                            || is_option_of(&pat_type.ty, "String"))
+                    {
+                        errors.push(
+                            syn::Error::new_spanned(
+                                &pat_type.ty,
+                                "#[cookie] requires String or Option<String>",
+                            )
+                            .to_compile_error(),
+                        );
+                    }
                     if matches!(extractor, Extractor::File)
                         && !(is_named_type(&pat_type.ty, "UploadedFile")
                             || is_option_uploaded_file(&pat_type.ty))
@@ -931,7 +976,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
         let mut ordered_extractors = extractor_args.iter().collect::<Vec<_>>();
         if matches!(backend, Backend::Axum) {
             ordered_extractors.sort_by_key(|(extractor, _, _, _, _)| match extractor {
-                Extractor::Param | Extractor::Query | Extractor::User => 0,
+                Extractor::Param | Extractor::Query | Extractor::User | Extractor::Cookie(_) => 0,
                 Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files => 1,
             });
         }
@@ -964,7 +1009,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
         let wrapper_params = ordered_extractors
             .iter()
             .filter_map(|(extractor, name, ty, _, _)| match (backend, extractor) {
-                (_, Extractor::User) => None,
+                (_, Extractor::User | Extractor::Cookie(_)) => None,
                 (Backend::Actix, Extractor::Param) => {
                     Some(quote! { #name: caelix::__actix_web::web::Path<#ty> })
                 }
@@ -1014,15 +1059,15 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             .unwrap_or_else(|| quote! { None });
         let payload_slots = extractor_args
             .iter()
-            .filter_map(|(extractor, name, ty, _, _)| {
+            .filter(|(extractor, _, _, _, _)| {
                 matches!(
                     extractor,
                     Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files
                 )
-                .then(|| {
-                    let slot = payload_slot_ident(name);
-                    quote! { let mut #slot: Option<#ty> = None; }
-                })
+            })
+            .map(|(_, name, ty, _, _)| {
+                let slot = payload_slot_ident(name);
+                quote! { let mut #slot: Option<#ty> = None; }
             })
             .collect::<Vec<_>>();
         #[cfg(feature = "uploads")]
@@ -1093,11 +1138,11 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     || quote! { #slot = Some(__caelix_payload.multipart(#route_limit).await?); },
                 )
                 });
-        let payload_values = extractor_args.iter().filter_map(|(extractor, name, _, _, _)| {
-            matches!(extractor, Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files).then(|| {
+        let payload_values = extractor_args.iter().filter(|(extractor, _, _, _, _)| {
+            matches!(extractor, Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files)
+        }).map(|(_, name, _, _, _)| {
                 let slot = payload_slot_ident(name);
                 quote! { let #name = #slot.expect("multipart payload extractor must be initialized"); }
-            })
         }).collect::<Vec<_>>();
         let payload_setup = if has_payload {
             #[cfg(feature = "uploads")]
@@ -1154,6 +1199,19 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         .map(|value| (*value).clone())
                         .ok_or_else(|| caelix::UnauthorizedException::new("Not authenticated"))?
                 },
+                Extractor::Cookie(cookie_name) => {
+                    if is_option_of(ty, "String") {
+                        quote! { request_context.cookie(#cookie_name).map(str::to_owned) }
+                    } else {
+                        quote! {
+                            request_context.cookie(#cookie_name)
+                                .map(str::to_owned)
+                                .ok_or_else(|| caelix::BadRequestException::new(
+                                    format!("missing required cookie '{}'", #cookie_name)
+                                ))?
+                        }
+                    }
+                }
             };
             if *needs_validation {
                 quote! {{ let value = #base; caelix::validator::Validate::validate(&value)?; value }}
@@ -1177,9 +1235,9 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
         let needs_request_context = !guard_types.is_empty()
             || !interceptor_types.is_empty()
-            || extractor_args
-                .iter()
-                .any(|(extractor, _, _, _, _)| matches!(extractor, Extractor::User));
+            || extractor_args.iter().any(|(extractor, _, _, _, _)| {
+                matches!(extractor, Extractor::User | Extractor::Cookie(_))
+            });
         let (request_headers, request_method, request_path) = match backend {
             Backend::Actix => (
                 quote! { req.headers() },
@@ -1193,7 +1251,8 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             ),
         };
         let request_context_body = quote! {
-            let mut headers = std::collections::HashMap::with_capacity(#request_headers.len());
+            let mut headers: std::collections::HashMap<String, String> =
+                std::collections::HashMap::with_capacity(#request_headers.len());
             for (name, value) in #request_headers.iter() {
                 let value = match value.to_str() {
                     Ok(value) => value,
@@ -1201,7 +1260,17 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         caelix::BadRequestException::new("invalid request header value"),
                     )),
                 };
-                headers.insert(name.as_str().to_string(), value.to_string());
+                let name = name.as_str().to_string();
+                if name.eq_ignore_ascii_case("cookie") {
+                    headers.entry(name)
+                        .and_modify(|existing| {
+                            existing.push_str("; ");
+                            existing.push_str(value);
+                        })
+                        .or_insert_with(|| value.to_string());
+                } else {
+                    headers.insert(name, value.to_string());
+                }
             }
             let ctx = caelix::RequestContext::new(#request_method, #request_path, headers);
             #(
@@ -1304,13 +1373,23 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 let parameter_in = match extractor {
                     Extractor::Param => quote! { caelix::openapi::utoipa::openapi::path::ParameterIn::Path },
                     Extractor::Query => quote! { caelix::openapi::utoipa::openapi::path::ParameterIn::Query },
+                    Extractor::Cookie(_) => quote! { caelix::openapi::utoipa::openapi::path::ParameterIn::Cookie },
                     _ => return None,
                 };
-                let required = matches!(extractor, Extractor::Param);
+                let required = matches!(extractor, Extractor::Param)
+                    || matches!(extractor, Extractor::Cookie(_)) && !is_option_of(ty, "String");
+                let parameter_name = match extractor {
+                    Extractor::Cookie(name) => quote! { #name },
+                    _ => quote! { stringify!(#name) },
+                };
+                let schema = if matches!(extractor, Extractor::Cookie(_)) {
+                    quote! { caelix::openapi::inline_schema::<String>() }
+                } else {
+                    quote! { caelix::openapi::inline_schema::<#ty>() }
+                };
                 Some(quote! {
                     operation.parameters.get_or_insert_with(Vec::new).push(caelix::openapi::parameter(
-                        stringify!(#name), #parameter_in, #required, None,
-                        caelix::openapi::inline_schema::<#ty>(),
+                        #parameter_name, #parameter_in, #required, None, #schema,
                     ));
                 })
             });

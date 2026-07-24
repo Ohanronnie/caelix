@@ -6,6 +6,7 @@ use futures_util::StreamExt;
 use http::StatusCode;
 use tokio_util::io::ReaderStream;
 
+use crate::Cookie;
 use crate::exception::{
     ForbiddenException, HttpException, InternalServerErrorException, NotFoundException,
 };
@@ -67,6 +68,8 @@ pub struct HttpResponse {
     /// (e.g. `Content-Disposition` with a generated filename). This is a
     /// simple list, not a full `HeaderMap` with multi-value / typed APIs.
     pub headers: Vec<(String, String)>,
+    /// Cookies appended as separate `Set-Cookie` response headers.
+    pub cookies: Vec<Cookie>,
 }
 
 impl HttpResponse {
@@ -77,6 +80,7 @@ impl HttpResponse {
             body: ResponseBody::Buffered(body),
             content_type,
             headers: Vec::new(),
+            cookies: Vec::new(),
         }
     }
 
@@ -114,6 +118,17 @@ impl HttpResponse {
     /// Append a response header in place (e.g. from an interceptor).
     pub fn insert_header(&mut self, name: impl Into<String>, value: impl Into<String>) {
         self.headers.push((name.into(), value.into()));
+    }
+
+    /// Appends a response cookie.
+    pub fn with_cookie(mut self, cookie: Cookie) -> Self {
+        self.insert_cookie(cookie);
+        self
+    }
+
+    /// Appends a response cookie in place.
+    pub fn insert_cookie(&mut self, cookie: Cookie) {
+        self.cookies.push(cookie);
     }
 }
 
@@ -158,6 +173,21 @@ pub enum Response<T> {
     Raw(StatusCode, Body),
     /// Public Caelix API.
     Empty,
+    /// Adds cookies after materializing the wrapped response.
+    WithCookies(Box<Response<T>>, Vec<Cookie>),
+}
+
+impl<T> Response<T> {
+    /// Appends a cookie while preserving call order.
+    pub fn with_cookie(self, cookie: Cookie) -> Self {
+        match self {
+            Response::WithCookies(response, mut cookies) => {
+                cookies.push(cookie);
+                Response::WithCookies(response, cookies)
+            }
+            response => Response::WithCookies(Box::new(response), vec![cookie]),
+        }
+    }
 }
 
 impl Response<()> {
@@ -201,6 +231,7 @@ impl Response<()> {
             body: ResponseBody::Streaming(Box::pin(stream)),
             content_type,
             headers: Vec::new(),
+            cookies: Vec::new(),
         }
     }
 
@@ -301,6 +332,22 @@ mod tests {
             vec![("X-Request-Id".to_string(), "abc-123".to_string())]
         );
     }
+
+    #[test]
+    fn response_cookie_calls_append_in_order() {
+        let response = Response::Body("ok")
+            .with_cookie(Cookie::new("session", "a b"))
+            .with_cookie(Cookie::new("preference", "dark"))
+            .into_response();
+        assert_eq!(response.cookies.len(), 2);
+        assert_eq!(response.cookies[0].name(), "session");
+        assert_eq!(response.cookies[1].name(), "preference");
+        assert!(
+            response.cookies[0]
+                .to_header_value()
+                .starts_with("session=a%20b")
+        );
+    }
 }
 
 fn json_serialization_error_response() -> HttpResponse {
@@ -370,6 +417,11 @@ impl<T: serde::Serialize> IntoCaelixResponse for Response<T> {
             Response::Raw(status, body) => body.respond_with(status),
             Response::Empty => {
                 HttpResponse::new(StatusCode::NO_CONTENT, Vec::new(), "application/json")
+            }
+            Response::WithCookies(response, cookies) => {
+                let mut response = response.into_response();
+                response.cookies.extend(cookies);
+                response
             }
         }
     }

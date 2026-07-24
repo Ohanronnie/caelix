@@ -61,6 +61,7 @@ Supported extractor attributes are:
 - `#[file]` and `#[files]` for multipart file fields.
 - `#[multipart]` for direct access to a complete multipart form.
 - `#[user]` for a typed value previously attached to `RequestContext`.
+- `#[cookie("name")]` for a required `String` or optional `Option<String>` cookie.
 - `#[validate]` to call `validator::Validate::validate` on an extracted value.
 
 Extractor arguments must use simple identifiers. Pattern arguments are rejected by the macro.
@@ -202,3 +203,16 @@ If the value is missing, the generated wrapper returns `401 Unauthorized` with m
 ## Generated Route Metadata
 
 The macro implements `Controller` for the type. Registered routes are exposed through `Controller::routes()` and logged at application startup. Display paths use `:id` style in logs, even though route attributes use Actix's `{id}` syntax.
+```rust
+#[get("/me")]
+async fn me(
+    &self,
+    #[cookie("session")] session: String,
+    #[cookie("theme")] theme: Option<String>,
+) -> Result<Response<UserDto>> {
+    Ok(Response::Body(self.users.for_session(&session, theme).await?))
+}
+```
+
+A missing required cookie returns `400 Bad Request`. Cookie extractors are also
+documented as OpenAPI cookie parameters when OpenAPI support is enabled.

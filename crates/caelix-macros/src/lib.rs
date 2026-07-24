@@ -6,13 +6,14 @@
 mod controller;
 mod gateway;
 mod injectable;
+mod microservice;
 
 #[cfg(all(feature = "actix", feature = "axum"))]
 compile_error!("caelix-macros backend features `actix` and `axum` are mutually exclusive");
 
 use proc_macro::TokenStream;
 use quote::quote;
-#[cfg(feature = "axum")]
+#[cfg(any(feature = "axum", feature = "tokio"))]
 use syn::{ItemFn, parse_macro_input, parse_quote};
 
 /// Implements `caelix::Injectable` for a named or unit struct.
@@ -24,6 +25,36 @@ use syn::{ItemFn, parse_macro_input, parse_quote};
 #[proc_macro_attribute]
 pub fn injectable(args: TokenStream, input: TokenStream) -> TokenStream {
     injectable::expand(args, input)
+}
+
+/// Generates dependency-injected microservice metadata for an inherent impl.
+#[proc_macro_attribute]
+pub fn microservice(args: TokenStream, input: TokenStream) -> TokenStream {
+    microservice::expand(args, input)
+}
+
+/// Marks a typed Core NATS request/reply handler inside a [`microservice`].
+#[proc_macro_attribute]
+pub fn message_pattern(_args: TokenStream, input: TokenStream) -> TokenStream {
+    input
+}
+
+/// Marks a typed JetStream event handler inside a [`microservice`].
+#[proc_macro_attribute]
+pub fn event_pattern(_args: TokenStream, input: TokenStream) -> TokenStream {
+    input
+}
+
+/// Marks the decoded message payload parameter inside a [`microservice`].
+#[proc_macro_attribute]
+pub fn payload(_args: TokenStream, input: TokenStream) -> TokenStream {
+    input
+}
+
+/// Marks the optional [`caelix::MessageContext`] handler parameter.
+#[proc_macro_attribute]
+pub fn context(_args: TokenStream, input: TokenStream) -> TokenStream {
+    input
 }
 
 /// Marks a dependency-injected struct as a route guard.
@@ -113,11 +144,11 @@ pub fn on_message(_args: TokenStream, input: TokenStream) -> TokenStream {
 /// (with the `actix` feature), not a direct `actix-web` dependency.
 #[proc_macro_attribute]
 pub fn main(_args: TokenStream, item: TokenStream) -> TokenStream {
-    #[cfg(feature = "axum")]
+    #[cfg(any(feature = "axum", feature = "tokio"))]
     {
         expand_tokio_runtime(item, false)
     }
-    #[cfg(not(feature = "axum"))]
+    #[cfg(not(any(feature = "axum", feature = "tokio")))]
     {
         let item = proc_macro2::TokenStream::from(item);
         quote! { #[caelix::__actix_web::rt::main(system = "caelix::__actix_web::rt::System")] #item }.into()
@@ -130,18 +161,18 @@ pub fn main(_args: TokenStream, item: TokenStream) -> TokenStream {
 /// `caelix::__actix_web` so consumers only need a `caelix` dependency.
 #[proc_macro_attribute]
 pub fn test(_args: TokenStream, item: TokenStream) -> TokenStream {
-    #[cfg(feature = "axum")]
+    #[cfg(any(feature = "axum", feature = "tokio"))]
     {
         expand_tokio_runtime(item, true)
     }
-    #[cfg(not(feature = "axum"))]
+    #[cfg(not(any(feature = "axum", feature = "tokio")))]
     {
         let item = proc_macro2::TokenStream::from(item);
         quote! { #[caelix::__actix_web::rt::test(system = "caelix::__actix_web::rt::System")] #item }.into()
     }
 }
 
-#[cfg(feature = "axum")]
+#[cfg(any(feature = "axum", feature = "tokio"))]
 fn expand_tokio_runtime(item: TokenStream, is_test: bool) -> TokenStream {
     let mut function = parse_macro_input!(item as ItemFn);
     let body = function.block;

@@ -138,3 +138,9 @@ With the Axum-only `socketio` feature, place it on an inherent implementation an
 async event method with `#[on_message("event")]`. Such methods accept either `payload: T` or
 `socket: SocketRef, payload: T` and return `Result<Reply>`; successful replies become Socket.IO
 acks, while failures also emit `"error"`.
+### `#[cookie("name")]`
+
+Controller arguments may use `String` for a required cookie or
+`Option<String>` for an optional cookie. The name must be a non-empty string
+literal. Extraction reads the generated `RequestContext`, so the same
+controller source works with Actix and Axum.

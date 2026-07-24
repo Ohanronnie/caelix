@@ -1,6 +1,7 @@
 use crate::{
-    BoxFuture, Container, Controller, EventHandler, EventHandlerDef, Injectable,
-    RegisterableEventHandler, Result, WebSocketGateway,
+    BoxFuture, Container, Controller, EventHandler, EventHandlerDef, Injectable, MessageHandlerDef,
+    MessageHandlerKind, Microservice, MicroserviceDef, RegisterableEventHandler, Result,
+    WebSocketGateway,
 };
 use std::{
     any::{Any, TypeId},
@@ -385,6 +386,8 @@ pub struct ModuleMetadata {
     pub event_handlers: Vec<EventHandlerDef>,
     /// The `gateways` value.
     pub gateways: Vec<GatewayDef>,
+    /// The dependency-injected microservice classes declared by this module.
+    pub microservices: Vec<MicroserviceDef>,
     exports: Vec<ProviderDependency>,
     global: bool,
 }
@@ -397,6 +400,7 @@ impl ModuleMetadata {
             controllers: vec![],
             event_handlers: vec![],
             gateways: vec![],
+            microservices: vec![],
             exports: vec![],
             global: false,
         }
@@ -444,6 +448,14 @@ impl ModuleMetadata {
         self.gateways.push(G::definition());
         self
     }
+    /// Registers a dependency-injected microservice and all of its message handlers.
+    ///
+    /// A microservice is already a provider; do not additionally register it
+    /// with [`Self::provider`].
+    pub fn microservice<T: Microservice>(mut self) -> Self {
+        self.microservices.push(T::definition());
+        self
+    }
     /// Runs the `event_handler` public API operation.
     pub fn event_handler<H>(mut self) -> Self
     where
@@ -488,6 +500,7 @@ enum ProviderSlot {
     Provider(usize),
     Controller(usize),
     Gateway(usize),
+    Microservice(usize),
 }
 #[derive(Clone, Copy)]
 struct ProviderRegistration {
@@ -601,6 +614,12 @@ impl ModuleGraph {
                     slot: ProviderSlot::Gateway(slot),
                 });
             }
+            values.extend((0..node.metadata.microservices.len()).map(|slot| {
+                ProviderRegistration {
+                    module,
+                    slot: ProviderSlot::Microservice(slot),
+                }
+            }));
         }
         values
     }
@@ -614,6 +633,9 @@ impl ModuleGraph {
             }
             ProviderSlot::Gateway(index) => {
                 &self.nodes[registration.module].metadata.gateways[index].provider
+            }
+            ProviderSlot::Microservice(index) => {
+                &self.nodes[registration.module].metadata.microservices[index].provider
             }
         }
     }
@@ -717,6 +739,67 @@ impl ModuleGraph {
                     return Err(crate::exception::startup_error(format!(
                         "no provider registered for EventBus in module {}; import EventModule",
                         node.type_name
+                    )));
+                }
+            }
+        }
+        let mut command_patterns: HashMap<&'static str, usize> = HashMap::new();
+        let mut event_patterns: HashMap<&'static str, usize> = HashMap::new();
+        for (module, node) in self.nodes.iter().enumerate() {
+            for microservice in &node.metadata.microservices {
+                for handler in microservice.handlers() {
+                    if !valid_microservice_pattern(
+                        handler.pattern,
+                        handler.kind == MessageHandlerKind::Command,
+                    ) {
+                        return Err(crate::exception::startup_error(format!(
+                            "invalid microservice subject `{}` in module {}",
+                            handler.pattern, node.type_name
+                        )));
+                    }
+                    let (other, existing) = if handler.kind == MessageHandlerKind::Command {
+                        (&event_patterns, command_patterns.get(handler.pattern))
+                    } else {
+                        (&command_patterns, event_patterns.get(handler.pattern))
+                    };
+                    if let Some(other_module) = other.get(handler.pattern) {
+                        return Err(crate::exception::startup_error(format!(
+                            "command and event handlers cannot share subject `{}` in {} and {}",
+                            handler.pattern, self.nodes[*other_module].type_name, node.type_name
+                        )));
+                    }
+                    if let Some(existing) = existing {
+                        return Err(crate::exception::startup_error(format!(
+                            "duplicate {:?} handler subject `{}` in {} and {}",
+                            handler.kind,
+                            handler.pattern,
+                            self.nodes[*existing].type_name,
+                            node.type_name
+                        )));
+                    }
+                    if handler.kind == MessageHandlerKind::Command {
+                        command_patterns.insert(handler.pattern, module);
+                    } else {
+                        event_patterns.insert(handler.pattern, module);
+                    }
+                }
+            }
+        }
+        for command in command_patterns.keys() {
+            for event in event_patterns.keys() {
+                if microservice_patterns_intersect(command, event) {
+                    return Err(crate::exception::startup_error(format!(
+                        "command subject `{command}` overlaps event subject `{event}`; command and event transports must be disjoint"
+                    )));
+                }
+            }
+        }
+        let event_subjects: Vec<_> = event_patterns.keys().copied().collect();
+        for (index, first) in event_subjects.iter().enumerate() {
+            for second in event_subjects.iter().skip(index + 1) {
+                if microservice_patterns_intersect(first, second) {
+                    return Err(crate::exception::startup_error(format!(
+                        "event subjects `{first}` and `{second}` overlap; each event delivery must have one owner"
                     )));
                 }
             }
@@ -943,6 +1026,32 @@ pub async fn build_container_with_overrides<M: Module + 'static>(
     Ok(container)
 }
 
+/// Collects the transport-neutral handlers declared by a module graph.
+///
+/// Transport adapters call this after constructing the shared container. The
+/// same graph validation used during startup rejects duplicate ownership before
+/// any subscriptions are started.
+pub fn collect_module_message_handlers<M: Module + 'static>() -> Result<Vec<MessageHandlerDef>> {
+    collect_module_message_handlers_with_container::<M>(None)
+}
+
+/// Collects message handlers while validating dependencies against an existing
+/// application container. Transport adapters use this when they register
+/// transport-owned values before module construction.
+pub fn collect_module_message_handlers_with_container<M: Module + 'static>(
+    container: Option<&Container>,
+) -> Result<Vec<MessageHandlerDef>> {
+    let graph = ModuleGraph::discover::<M>()?;
+    graph.preflight(container)?;
+    let mut handlers = Vec::new();
+    for node in &graph.nodes {
+        for microservice in &node.metadata.microservices {
+            handlers.extend(microservice.handlers());
+        }
+    }
+    Ok(handlers)
+}
+
 fn validate_gateway_paths_in_graph(graph: &ModuleGraph) -> crate::Result<()> {
     let mut paths = HashSet::new();
     for node in &graph.nodes {
@@ -962,6 +1071,50 @@ fn validate_gateway_paths_in_graph(graph: &ModuleGraph) -> crate::Result<()> {
         }
     }
     Ok(())
+}
+
+fn valid_microservice_pattern(pattern: &str, command: bool) -> bool {
+    if pattern.is_empty() || pattern.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let tokens: Vec<_> = pattern.split('.').collect();
+    tokens.iter().enumerate().all(|(index, token)| {
+        !token.is_empty()
+            && (!token.contains('*') || (!command && *token == "*"))
+            && (!token.contains('>') || (!command && *token == ">" && index + 1 == tokens.len()))
+    })
+}
+
+fn microservice_patterns_intersect(first: &str, second: &str) -> bool {
+    let first: Vec<_> = first.split('.').collect();
+    let second: Vec<_> = second.split('.').collect();
+    let mut index = 0;
+    loop {
+        let left = first.get(index).copied();
+        let right = second.get(index).copied();
+        match (left, right) {
+            (None, None) => return true,
+            (Some(">"), Some(_)) | (Some(_), Some(">")) => return true,
+            (Some(left), Some(right)) if left == "*" || right == "*" || left == right => {
+                index += 1;
+            }
+            _ => return false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod microservice_pattern_tests {
+    use super::microservice_patterns_intersect;
+
+    #[test]
+    fn terminal_wildcards_do_not_overlap_their_empty_prefix() {
+        assert!(!microservice_patterns_intersect("orders", "orders.>"));
+        assert!(microservice_patterns_intersect(
+            "orders.created",
+            "orders.>"
+        ));
+    }
 }
 
 fn validate_gateway_paths<M: Module + 'static>() -> crate::Result<()> {

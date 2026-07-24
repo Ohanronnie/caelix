@@ -18,6 +18,8 @@ actix = []
 axum = []
 openapi = []
 uploads = []
+microservices = []
+tokio = []
 
 [dev-dependencies]
 actix-web = "4.14.0"

@@ -15,3 +15,10 @@ Lifecycle hooks live on `Injectable`. Normal providers use `.provider::<T>()`; a
 Events are opt-in through `EventModule`, which registers `EventBus`. Event handlers must be providers before being registered as handlers.
 
 Cache support is explicit service-level caching through `Cache`, `CacheStore`, `MemoryCacheStore`, and `CacheModule`.
+## Cookies are explicit response data
+
+Request cookies are parsed into `RequestContext`, while response cookies live
+in a dedicated ordered collection on `HttpResponse`. This keeps controllers
+runtime-neutral and preserves multiple `Set-Cookie` headers without changing
+the intentionally simple generic response-header collection. Caelix does not
+track cookie mutations or provide an application session store.

@@ -114,6 +114,36 @@ pub fn to_actix_response(response: CaelixHttpResponse) -> HttpResponse {
     for (name, value) in response.headers {
         builder.insert_header((name, value));
     }
+    for cookie in response.cookies {
+        let mut runtime_cookie =
+            actix_web::cookie::Cookie::new(cookie.name().to_string(), cookie.value().to_string());
+        runtime_cookie.set_http_only(cookie.is_http_only());
+        runtime_cookie.set_secure(cookie.is_secure());
+        runtime_cookie.set_same_site(match cookie.same_site_value() {
+            caelix_core::SameSite::Strict => actix_web::cookie::SameSite::Strict,
+            caelix_core::SameSite::Lax => actix_web::cookie::SameSite::Lax,
+            caelix_core::SameSite::None => actix_web::cookie::SameSite::None,
+        });
+        if let Some(path) = cookie.path_value() {
+            runtime_cookie.set_path(path.to_string());
+        }
+        if let Some(domain) = cookie.domain_value() {
+            runtime_cookie.set_domain(domain.to_string());
+        }
+        if let Some(max_age) = cookie.max_age_value() {
+            runtime_cookie.set_max_age(
+                actix_web::cookie::time::Duration::try_from(max_age)
+                    .unwrap_or(actix_web::cookie::time::Duration::MAX),
+            );
+        }
+        if let Some(expires) = cookie.expires_value() {
+            runtime_cookie.set_expires(actix_web::cookie::time::OffsetDateTime::from(expires));
+        }
+        builder.append_header((
+            actix_web::http::header::SET_COOKIE,
+            runtime_cookie.encoded().to_string(),
+        ));
+    }
 
     match response.body {
         ResponseBody::Buffered(bytes) => builder.body(bytes),
@@ -612,6 +642,33 @@ mod tests {
         any::Any,
         sync::atomic::{AtomicUsize, Ordering},
     };
+
+    #[test]
+    fn response_adapter_appends_every_cookie_header() {
+        let response = to_actix_response(
+            CaelixHttpResponse::text(caelix_core::StatusCode::OK, "ok")
+                .with_cookie(caelix_core::Cookie::new("session", "a b"))
+                .with_cookie(
+                    caelix_core::Cookie::removal("preference")
+                        .path("/settings")
+                        .domain("example.com"),
+                ),
+        );
+        let values = response
+            .headers()
+            .get_all(actix_web::http::header::SET_COOKIE)
+            .into_iter()
+            .map(|value| value.to_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(values.len(), 2);
+        assert!(values[0].contains("session=a%20b"));
+        assert!(values[0].contains("HttpOnly"));
+        assert!(values[0].contains("Secure"));
+        assert!(values[0].contains("SameSite=Lax"));
+        assert!(values[1].contains("Max-Age=0"));
+        assert!(values[1].contains("Domain=example.com"));
+        assert!(values[1].contains("Path=/settings"));
+    }
     use uuid::Uuid;
 
     static SHUTDOWN_COUNT: AtomicUsize = AtomicUsize::new(0);

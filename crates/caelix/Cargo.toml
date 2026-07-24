@@ -18,6 +18,8 @@ sqlx = ["caelix-core/sqlx"]
 validator = ["caelix-core/validator"]
 openapi = ["caelix-core/openapi", "caelix-macros/openapi", "caelix-actix?/openapi", "caelix-axum?/openapi"]
 uploads = ["caelix-core/uploads", "caelix-macros/uploads", "caelix-actix?/uploads", "caelix-axum?/uploads"]
+microservices-nats = ["dep:caelix-microservices", "caelix-microservices/nats", "dep:tokio", "caelix-macros/microservices", "caelix-macros/tokio"]
+microservices-redis = ["dep:caelix-microservices", "caelix-microservices/redis", "dep:tokio", "caelix-macros/microservices", "caelix-macros/tokio"]
 
 [dependencies]
 caelix-actix = { path = "../caelix-actix", version = "0.0.23", optional = true, default-features = false }
@@ -25,6 +27,8 @@ caelix-axum = { path = "../caelix-axum", version = "0.0.24", optional = true, de
 caelix-socketio = { path = "../caelix-socketio", version = "0.0.23", optional = true }
 caelix-core = { path = "../caelix-core", version = "0.0.20", default-features = false }
 caelix-macros = { path = "../caelix-macros", version = "0.0.16", default-features = false }
+caelix-microservices = { path = "../caelix-microservices", optional = true, default-features = false }
+tokio = { version = "1.47.1", optional = true, features = ["rt-multi-thread"] }
 
 [lib]
 path = "src/lib.rs"
@@ -32,6 +36,14 @@ path = "src/lib.rs"
 [[example]]
 name = "upload_validation_server"
 required-features = ["actix", "uploads"]
+
+[[example]]
+name = "jetstream_event_probe"
+required-features = ["microservices-nats"]
+
+[[example]]
+name = "redis_event_probe"
+required-features = ["microservices-redis"]
 
 [dev-dependencies]
 actix-web = { version = "4.14.0", default-features = false, features = ["macros", "ws"] }

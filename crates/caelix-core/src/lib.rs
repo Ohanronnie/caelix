@@ -9,11 +9,13 @@ mod cache;
 mod container;
 mod context;
 mod controller;
+mod cookie;
 mod events;
 mod exception;
 mod guard;
 mod interceptor;
 mod logging;
+mod microservice;
 mod module;
 #[cfg(feature = "openapi")]
 /// Public Caelix module `openapi`.
@@ -34,6 +36,8 @@ pub use container::*;
 pub use context::*;
 /// Re-exported public API.
 pub use controller::*;
+/// Framework-owned response cookie primitives.
+pub use cookie::{Cookie, SameSite};
 /// Re-exported public API.
 pub use events::*;
 /// Re-exported public API.
@@ -48,6 +52,8 @@ pub use http::StatusCode;
 pub use interceptor::*;
 /// Re-exported public API.
 pub use logging::*;
+/// Re-exported public API.
+pub use microservice::*;
 /// Re-exported public API.
 pub use module::*;
 /// Re-exported public API.

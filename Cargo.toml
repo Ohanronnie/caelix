@@ -6,6 +6,7 @@ members = [
     "crates/caelix-axum",
     "crates/caelix-socketio",
     "crates/caelix-macros",
+    "crates/caelix-microservices",
     "crates/caelix-cli",
 ]
 resolver = "3"

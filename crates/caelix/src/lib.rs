@@ -7,8 +7,28 @@
 pub use caelix_core::*;
 // Explicit re-exports so `test` / `main` are not pulled into `prelude` (which
 // would shadow Rust's `#[test]`).
+#[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
+/// Re-exported public API.
+pub use caelix_macros::{context, event_pattern, message_pattern, microservice, payload};
 /// Re-exported public API.
 pub use caelix_macros::{controller, gateway, guard, injectable, on_message};
+
+/// Microservice transport APIs.
+#[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
+pub mod microservices {
+    /// Re-exported public API.
+    pub use caelix_microservices::*;
+}
+
+#[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
+/// Re-exported public API.
+pub use caelix_microservices::*;
+
+#[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
+#[doc(hidden)]
+pub use caelix_microservices::{
+    __serde as __microservice_serde, __serde_json as __microservice_serde_json,
+};
 
 /// OpenAPI generation types and controller documentation marker attributes.
 #[cfg(feature = "openapi")]
@@ -35,7 +55,12 @@ pub mod websocket {
 #[cfg(all(feature = "actix", feature = "axum"))]
 compile_error!("Caelix backends `actix` and `axum` are mutually exclusive; select exactly one");
 
-#[cfg(any(feature = "actix", feature = "axum"))]
+#[cfg(any(
+    feature = "actix",
+    feature = "axum",
+    feature = "microservices-nats",
+    feature = "microservices-redis"
+))]
 /// Re-exported public API.
 pub use caelix_macros::{main, test};
 
@@ -57,6 +82,14 @@ pub use caelix_actix::{
 #[doc(hidden)]
 pub use caelix_axum::{__axum, __tokio};
 
+/// Hidden Tokio re-export for microservice-only runtime macros.
+#[cfg(all(
+    any(feature = "microservices-nats", feature = "microservices-redis"),
+    not(feature = "axum")
+))]
+#[doc(hidden)]
+pub use tokio as __tokio;
+
 #[cfg(feature = "axum")]
 /// Re-exported public API.
 pub use caelix_axum::{
@@ -76,6 +109,10 @@ pub mod socket_io {
 pub mod prelude {
     /// Re-exported public API.
     pub use caelix_core::*;
+    #[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
+    pub use caelix_macros::{context, event_pattern, message_pattern, microservice, payload};
     /// Re-exported public API.
     pub use caelix_macros::{controller, gateway, guard, injectable, on_message};
+    #[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
+    pub use caelix_microservices::*;
 }

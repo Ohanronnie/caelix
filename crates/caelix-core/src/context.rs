@@ -10,6 +10,7 @@ pub struct RequestContext {
     method: String,
     path: String,
     headers: HashMap<String, String>,
+    cookies: HashMap<String, String>,
     extensions: RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
 }
 
@@ -20,13 +21,16 @@ impl RequestContext {
         path: impl Into<String>,
         headers: HashMap<String, String>,
     ) -> Self {
+        let headers = headers
+            .into_iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value))
+            .collect::<HashMap<_, _>>();
+        let cookies = parse_cookies(headers.get("cookie").map(String::as_str));
         Self {
             method: method.into(),
             path: path.into(),
-            headers: headers
-                .into_iter()
-                .map(|(name, value)| (name.to_ascii_lowercase(), value))
-                .collect(),
+            headers,
+            cookies,
             extensions: RwLock::new(HashMap::new()),
         }
     }
@@ -51,6 +55,11 @@ impl RequestContext {
     /// Runs the `bearer_token` public API operation.
     pub fn bearer_token(&self) -> Option<&str> {
         self.header("authorization")?.strip_prefix("Bearer ")
+    }
+
+    /// Returns the first cookie with `name`.
+    pub fn cookie(&self, name: &str) -> Option<&str> {
+        self.cookies.get(name).map(String::as_str)
     }
 
     /// Runs the `set` public API operation.
@@ -84,5 +93,52 @@ impl RequestContext {
             .downcast::<T>()
             .map(Some)
             .map_err(|_| crate::exception::startup_error("request context extension type mismatch"))
+    }
+}
+
+fn parse_cookies(header: Option<&str>) -> HashMap<String, String> {
+    let mut cookies = HashMap::new();
+    for pair in header.into_iter().flat_map(|value| value.split(';')) {
+        let pair = pair.trim();
+        let Some((name, value)) = pair.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let Ok(name) = cookie::Cookie::parse_encoded(format!("{name}=")) else {
+            continue;
+        };
+        let Ok(value) = cookie::Cookie::parse_encoded(format!("value={}", value.trim())) else {
+            continue;
+        };
+        cookies
+            .entry(name.name().to_string())
+            .or_insert_with(|| value.value().to_string());
+    }
+    cookies
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_cookie_edge_cases_once() {
+        let ctx = RequestContext::new(
+            "GET",
+            "/",
+            HashMap::from([(
+                "Cookie".into(),
+                " theme = dark%20mode ; token=a=b=c; broken; =bad; dup=first; dup=second; na%6De=value"
+                    .into(),
+            )]),
+        );
+        assert_eq!(ctx.cookie("theme"), Some("dark mode"));
+        assert_eq!(ctx.cookie("token"), Some("a=b=c"));
+        assert_eq!(ctx.cookie("dup"), Some("first"));
+        assert_eq!(ctx.cookie("name"), Some("value"));
+        assert_eq!(ctx.cookie("broken"), None);
     }
 }

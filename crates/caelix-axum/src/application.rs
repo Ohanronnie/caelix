@@ -148,6 +148,9 @@ pub fn to_axum_response(response: CaelixHttpResponse) -> Response {
     for (name, value) in response.headers {
         builder = builder.header(name, value);
     }
+    for cookie in response.cookies {
+        builder = builder.header(axum::http::header::SET_COOKIE, cookie.to_header_value());
+    }
 
     let body = match response.body {
         ResponseBody::Buffered(bytes) => Body::from(bytes),
@@ -436,6 +439,27 @@ mod tests {
     };
 
     static DOCTOR_STARTUP_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn response_adapter_appends_every_cookie_header() {
+        let response = to_axum_response(
+            HttpResponse::text(StatusCode::OK, "ok")
+                .with_cookie(caelix_core::Cookie::new("session", "a b"))
+                .with_cookie(caelix_core::Cookie::removal("preference").path("/settings")),
+        );
+        let values = response
+            .headers()
+            .get_all(axum::http::header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(values.len(), 2);
+        assert!(values[0].contains("session=a%20b"));
+        assert!(values[0].contains("HttpOnly"));
+        assert!(values[0].contains("Secure"));
+        assert!(values[1].contains("Max-Age=0"));
+        assert!(values[1].contains("Path=/settings"));
+    }
     static DOCTOR_CONSTRUCTION_COUNT: AtomicUsize = AtomicUsize::new(0);
     static DOCTOR_INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
     static DOCTOR_SHUTDOWN_COUNT: AtomicUsize = AtomicUsize::new(0);

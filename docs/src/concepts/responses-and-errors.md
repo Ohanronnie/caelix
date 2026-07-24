@@ -155,3 +155,32 @@ The internal source is retained on `HttpException::source`, but the client recei
   "message": "Internal Server Error"
 }
 ```
+## Cookies
+
+`Cookie::new` defaults to `HttpOnly`, `Secure`, `SameSite::Lax`, and `Path=/`.
+These defaults reduce script access, accidental cleartext transport, and common
+cross-site request risks. Local plain-HTTP development can explicitly use
+`.secure(false)`; production cookies should normally retain `Secure`.
+
+```rust
+let response = Response::Body(user)
+    .with_cookie(Cookie::new("session", opaque_session_token))
+    .with_cookie(Cookie::new("theme", "dark").http_only(false));
+```
+
+Cookies can also be attached to raw, file, streaming, and SSE `HttpResponse`
+values with `.with_cookie(...)`. Every cookie becomes its own `Set-Cookie`
+header and call order is preserved.
+
+To log out, match the original path and domain:
+
+```rust
+Response::no_content().with_cookie(
+    Cookie::removal("session").path("/").domain("example.com"),
+)
+```
+
+Caelix does not maintain a cookie jar or create, persist, rotate, sign, encrypt,
+or resolve sessions. Applications should use opaque random session tokens and
+validate them in their own session service. CSRF token generation and
+verification are separate concerns.
