@@ -1,6 +1,6 @@
 [package]
 name = "caelix-axum"
-version = "0.0.24"
+version = "0.0.25"
 edition = "2024"
 description = "Axum runtime adapter for Caelix."
 license = "MIT"
@@ -18,8 +18,8 @@ uploads = ["caelix-core/uploads"]
 [dependencies]
 axum = { version = "0.8.8", features = ["ws"] }
 bytes = "1.10.1"
-caelix-core = { path = "../caelix-core", version = "0.0.20", default-features = false }
-caelix-socketio = { path = "../caelix-socketio", version = "0.0.23", optional = true }
+caelix-core = { path = "../caelix-core", version = "0.0.21", default-features = false }
+caelix-socketio = { path = "../caelix-socketio", version = "0.0.24", optional = true }
 futures-util = { version = "0.3.31", default-features = false, features = ["std", "sink"] }
 http = "1.4.2"
 serde = { version = "1.0.228", features = ["derive"] }
