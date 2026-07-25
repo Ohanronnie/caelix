@@ -1,10 +1,14 @@
 # Caelix
 
-Caelix is a Rust web framework layer built around modules, dependency injection, controllers, guards, interceptors, lifecycle hooks, domain events, and explicit service-level caching.
+Caelix is a Rust backend framework built around modules, dependency injection,
+controllers, guards, interceptors, lifecycle hooks, cookies, validated uploads,
+OpenAPI, structured logging, domain events, WebSockets, typed NATS/Redis
+microservices, and explicit service-level caching.
 
 The public package is:
 
-- `caelix`: the framework crate that exports the runtime, traits, macros, and Actix application entry point.
+- `caelix`: the facade exporting traits, macros, optional HTTP runtimes, and
+  microservice transports.
 
 The fastest way to start an app is:
 

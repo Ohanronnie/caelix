@@ -1,8 +1,13 @@
 # Overview
 
-Caelix applications are built from a root module. Modules describe imported modules, injectable providers, controllers, and event handlers. The Actix adapter reads that metadata, builds a dependency container, registers controller routes, runs lifecycle hooks, and starts the HTTP server.
+Caelix applications are built from a root module. Modules describe imports,
+injectable providers, controllers, gateways, event handlers, and microservice
+handlers. The selected runtime builds the container, registers its transport
+handlers, and runs lifecycle hooks.
 
-The public package is `caelix`. It exports the runtime, framework traits, controller and provider macros, responses, guards, interceptors, events, cache types, and Actix application entry point.
+The public `caelix` package exports the HTTP runtimes, framework traits and
+macros, extractors, cookies, uploads, OpenAPI, logging, events, gateways, cache,
+and NATS/Redis microservices behind feature flags.
 
 ## Start A Project
 

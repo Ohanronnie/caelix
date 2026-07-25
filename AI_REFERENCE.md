@@ -6,12 +6,15 @@ Use this file as the first stop when an AI agent needs to work on Caelix. It is 
 
 Caelix is a Rust workspace for a NestJS-style backend framework:
 
-- `crates/caelix-core`: framework primitives: DI container, modules, providers, controllers, responses, exceptions, guards, interceptors, events, request context, logging, and service-level cache.
-- `crates/caelix-macros`: proc macros: `#[injectable]`, `#[guard]`, and `#[controller("...")]`.
+- `crates/caelix-core`: DI, modules, controllers, extractors, cookies, uploads,
+  responses, guards, events, gateways, microservice metadata, logging, and cache.
+- `crates/caelix-macros`: provider, controller, gateway, OpenAPI, upload, and
+  microservice proc macros.
 - `crates/caelix-actix`: Actix Web runtime integration and `Application`.
 - `crates/caelix-axum`: Axum runtime integration, in-process `TestApplication`, and Tower-layer escape hatch.
 - `crates/caelix`: public framework facade that re-exports core and macros, plus exactly one runtime behind the `actix` (default) or `axum` feature.
 - `crates/caelix-cli`: project/code generation CLI.
+- `crates/caelix-microservices`: typed NATS and Redis command/event transports.
 - `docs/src`: mdBook documentation. Update docs when changing public behavior.
 
 ## Core Architecture
@@ -147,6 +150,10 @@ Start here for public behavior details:
 - `docs/src/advanced/guards-and-interceptors.md`
 - `docs/src/advanced/request-context.md`
 - `docs/src/concepts/responses-and-errors.md`
+- `docs/src/concepts/extractors.md`
+- `docs/src/concepts/cookies-and-sessions.md`
+- `docs/src/advanced/logging.md`
+- `docs/src/advanced/microservices.md` and its transport/operations subchapters
 
 ## Repository Conventions
 

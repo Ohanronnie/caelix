@@ -1,31 +1,87 @@
-# Microservices: NATS and Redis
+# Microservices
 
-Caelix's microservice macros and handler signatures are transport-neutral. Enable either or both broker features; each running `MicroserviceApplication` selects exactly one transport.
+Caelix uses the same dependency-injected module graph for HTTP applications and
+broker consumers. Handler metadata is transport-neutral; a running
+`MicroserviceApplication` selects NATS or Redis.
+
+## Select a transport
 
 ```toml
-caelix = { version = "…", features = ["microservices-nats", "microservices-redis"] }
+[dependencies]
+caelix = { version = "0.0.26", default-features = false, features = ["microservices-nats"] }
+serde = { version = "1", features = ["derive"] }
 ```
 
-NATS uses Core NATS for competing command consumers and JetStream for durable events:
+Use `microservices-redis` for Redis, or enable both when one binary needs both
+client option types. These features do not select an HTTP runtime.
+
+NATS commands use Core NATS queue groups and events use JetStream. Redis commands
+and events use Streams; temporary Pub/Sub channels carry command replies. Both
+provide competing command consumers, durable at-least-once events, typed JSON
+envelopes, end-to-end deadlines, bounded concurrency, and graceful shutdown.
+
+## Complete service
 
 ```rust
-let options = NatsTransportOptions::new("nats://127.0.0.1:4222")
-    .service_name("users-service")
-    .jetstream_stream("CAELIX_EVENTS");
-MicroserviceApplication::<AppModule>::new(options).await?.run().await?;
+use caelix::{
+    MessageContext, MicroserviceApplication, Module, ModuleMetadata,
+    NatsTransportOptions, Result,
+};
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+struct Sum { left: i64, right: i64 }
+
+#[derive(Serialize)]
+struct Total { value: i64 }
+
+#[derive(Deserialize)]
+struct AuditEvent { order_id: i64 }
+
+#[caelix::injectable]
+struct MathMessages;
+
+#[caelix::microservice]
+impl MathMessages {
+    #[caelix::message_pattern("math.sum")]
+    async fn sum(&self, #[caelix::payload] input: Sum) -> Result<Total> {
+        Ok(Total { value: input.left + input.right })
+    }
+
+    #[caelix::event_pattern("audit.created")]
+    async fn audit(
+        &self,
+        #[caelix::context] context: MessageContext,
+        #[caelix::payload] event: AuditEvent,
+    ) -> Result<()> {
+        // Persist `(context.event_id(), event.order_id)` atomically in real code.
+        let _ = (context.event_id(), event.order_id);
+        Ok(())
+    }
+}
+
+struct AppModule;
+impl Module for AppModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new().microservice::<MathMessages>()
+    }
+}
+
+#[caelix::main]
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let options = NatsTransportOptions::new("nats://127.0.0.1:4222")
+        .service_name("math")
+        .jetstream_stream("CAELIX_EVENTS");
+    MicroserviceApplication::<AppModule>::new(options).await?.run().await?;
+    Ok(())
+}
 ```
 
-Redis 6.2 or newer uses a deterministic Stream per command subject and a shared event Stream. Command responses use a unique temporary Pub/Sub channel; the client subscribes before appending the command.
+`.microservice::<T>()` registers `T` as a normal provider, so constructor
+injection and lifecycle hooks work unchanged. Startup builds the container,
+collects handler definitions, validates topology, connects, and subscribes.
 
-```rust
-let options = RedisTransportOptions::new("redis://127.0.0.1/")
-    .service_name("users-service")
-    .event_stream("caelix:events");
-MicroserviceApplication::<AppModule>::new(options).await?.run().await?;
-```
-
-Commands are executed by one replica in a service consumer group. Events are delivered once to every service group and to one replica within that group. Failed broker deliveries are at least once, so command and event handlers must be idempotent.
-
-Redis event retention is unlimited by default. `approximate_max_event_entries` explicitly opts into `MAXLEN ~`; Redis can trim entries that remain pending for another consumer group, so only enable it with an operational retention policy that accounts for the slowest service. An optional, distinct dead-letter Stream can capture events that exhaust their configured deliveries.
-
-Request timeouts are end-to-end deadlines. A Redis command whose deadline elapsed before invocation is acknowledged without running user code. Remote failures contain only sanitized client-safe details; internal server messages are not sent across either transport.
+Continue with [Handlers and Client](microservices-handlers-and-client.md), then
+the [NATS](microservices-nats.md) or [Redis](microservices-redis.md) transport
+guide. Production concerns and tests are in
+[Operations, Testing, and Interoperability](microservices-operations.md).

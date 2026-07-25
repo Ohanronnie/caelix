@@ -71,6 +71,13 @@ just to use the test macro.
 | `.json::<T>().await` | Deserialize JSON body |
 | `.body().await` / `.text().await` | Raw bytes / UTF-8 text |
 
+### Cookies
+
+Send cookies with `.header("cookie", "session=hello%20world; theme=dark")`.
+Assert required/optional extraction and errors. For response cookies, inspect
+each `Set-Cookie` value separately and assert its security attributes and scope.
+See [Cookies and Sessions](../concepts/cookies-and-sessions.md).
+
 ### Provider overrides
 
 Swap a concrete provider (including ones registered in nested imports) before the container is built:
@@ -126,6 +133,14 @@ app.shutdown().await?;
 ```
 
 Dropping a `TestApplication` without `shutdown` skips `on_shutdown` hooks. Call `shutdown` when your test cares about cleanup.
+
+## Microservice tests
+
+Build the module container and invoke
+`Microservice::definition().handlers()` directly for typed handler tests. Use an
+isolated real broker with `MicroserviceRuntime` and `MicroserviceClient` for
+queue groups, recovery, deadlines, retries, dead letters, and shutdown. See
+[Microservice Operations, Testing, and Interoperability](../advanced/microservices-operations.md).
 
 ## CLI-generated projects
 

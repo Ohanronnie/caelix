@@ -75,3 +75,14 @@ self.events.emit(UserCreated { id: user.id }).await?;
 ## Cache Service Results Explicitly
 
 Import `CacheModule`, inject `Arc<Cache>`, and call `get`, `set`, `set_with_ttl`, `delete`, or `clear` inside service methods.
+
+## Set and Clear a Session Cookie
+
+Create a response with `Response::Body(value).with_cookie(Cookie::new("session",
+signed))`. Clear it with `Cookie::removal("session")`, matching the original
+path and domain. See [Cookies and Sessions](../concepts/cookies-and-sessions.md).
+
+## Call a Microservice
+
+Inject `Arc<MicroserviceClient>` and call `request::<Payload, Reply>` or `emit`.
+See [Handlers and Client](../advanced/microservices-handlers-and-client.md).

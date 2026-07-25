@@ -52,13 +52,6 @@ If the typed value is missing, the generated wrapper returns `401 Unauthorized` 
 `#[user]` clones the value out of the context, so user types must be cloneable when used this way.
 ## Cookies
 
-Incoming cookies are available without depending on the selected HTTP backend:
-
-```rust
-let session = ctx.cookie("session");
-```
-
-Caelix combines repeated `Cookie` headers, parses them once when the
-`RequestContext` is created, and percent-decodes names and values. The first
-cookie wins when a name is repeated. Cookie values are opaque: Caelix does not
-sign, encrypt, validate, or resolve sessions from them.
+Incoming cookies are available with `ctx.cookie("session")`. Parsing,
+controller extraction, response cookies, and session security boundaries are
+documented in [Cookies and Sessions](../concepts/cookies-and-sessions.md).

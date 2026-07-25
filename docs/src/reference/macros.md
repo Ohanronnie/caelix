@@ -66,6 +66,7 @@ Extractor attributes:
 - `#[files]`
 - `#[multipart]`
 - `#[user]`
+- `#[cookie("name")]`
 - `#[validate]`
 
 ### Bodies and uploads
@@ -85,6 +86,10 @@ UploadedFile`.
 intentionally incompatible with `#[body]`, `#[file]`, and `#[files]` on the
 same route. Use `#[upload(limit = bytes)]` on a route to set a stricter
 multipart body limit than the application limit.
+
+`#[file]`/`#[files]` additionally accept `max_size`, `content_type`,
+`trust_content_type_header`, and an async controller `validate` method. See
+[Extractors](../concepts/extractors.md).
 
 Example:
 
@@ -144,3 +149,29 @@ Controller arguments may use `String` for a required cookie or
 `Option<String>` for an optional cookie. The name must be a non-empty string
 literal. Extraction reads the generated `RequestContext`, so the same
 controller source works with Actix and Axum.
+
+## OpenAPI markers
+
+With `openapi`, controller expansion consumes `#[response(...)]`,
+`#[errors(...)]`, `#[request_header(...)]`, and `#[security(...)]`. They declare
+successful/error responses, header parameters, and security requirements; they
+do not perform runtime authentication or extraction. Controller extractors,
+including cookies and uploads, also contribute request metadata.
+
+## `#[upload(limit = bytes)]`
+
+This route marker requires `uploads` and supplies a stricter multipart limit
+than the application body limit. It is meaningful only on a controller route.
+
+## Microservice macros
+
+`#[microservice]` decorates an inherent impl. Its methods use exactly one
+`#[message_pattern("subject")]` or `#[event_pattern("subject")]`, one bare
+`#[payload]`, and optionally one bare `#[context] MessageContext`.
+
+Handlers must be async, non-generic, take `&self`, use named parameters, and
+return `Result<T>`. Payloads require `DeserializeOwned + Send`; command response
+types require `Serialize + Send`; events must return `Result<()>`. Command
+subjects reject wildcards. Event subjects accept whole-token `*` and terminal
+`>`. The macro generates `Microservice` metadata and resolves the handler class
+from the module container.

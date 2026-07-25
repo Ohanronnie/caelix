@@ -1,61 +1,39 @@
 # Feature Flags
 
-`caelix` enables only the Actix runtime by default:
+`caelix` defaults to `actix`. Disable defaults when selecting Axum or building a
+broker-only process.
+
+| Feature | Enables and exports | Compatibility |
+| --- | --- | --- |
+| `actix` | Actix `Application`, `TestApplication`, runtime macros, `Logging`, `to_actix_response` | mutually exclusive with `axum` |
+| `axum` | Axum `Application`, `TestApplication`, runtime macros, `AxumRouterBuilder`, `to_axum_response` | mutually exclusive with `actix` |
+| `socketio` | Socket.IO types and `Application::with_socket_io`; selects `axum` | unavailable with Actix |
+| `sqlx` | `From<sqlx::Error>` exception conversion | combines with either runtime |
+| `validator` | `#[validate]` and `validator` re-export | combines with either runtime |
+| `openapi` | OpenAPI metadata/config, Swagger UI, controller markers | requires an HTTP runtime to serve docs |
+| `uploads` | `UploadedFile`, `MultipartForm`, upload extractors/configuration | combines with either runtime |
+| `microservices-nats` | microservice macros, application/runtime/client, NATS options, Tokio runtime macros | no HTTP runtime required |
+| `microservices-redis` | same shared microservice API plus `RedisTransportOptions` | no HTTP runtime required; Redis 6.2+ |
 
 ```toml
+# Default Actix
 caelix = "0.0.26"
-```
 
-The default feature is:
-
-- `actix`: enables `Application`, `#[caelix::main]`, and Actix Web runtime support.
-
-Database error conversion, request validation, multipart uploads, and OpenAPI
-generation are opt-in so they do not add dependencies to an Actix-only build:
-
-```toml
-[dependencies]
-caelix = { version = "0.0.26", features = ["sqlx", "validator", "uploads", "openapi"] }
-```
-
-To state the minimal Actix selection explicitly, disable defaults and select
-`actix`:
-
-```toml
-[dependencies]
-caelix = { version = "0.0.26", default-features = false, features = ["actix"] }
-```
-
-Generated applications depend directly on `caelix`; they do not need additional Caelix package dependencies.
-
-## Axum backend
-
-Actix remains the default backend. To use Axum, disable defaults and select `axum`; `actix` and `axum` are mutually exclusive.
-
-```toml
-[dependencies]
+# Axum
 caelix = { version = "0.0.26", default-features = false, features = ["axum"] }
+
+# Actix with request facilities
+caelix = { version = "0.0.26", features = ["uploads", "validator", "openapi"] }
+
+# Broker-only process with both transports
+caelix = { version = "0.0.26", default-features = false, features = [
+  "microservices-nats",
+  "microservices-redis",
+] }
 ```
 
-The same `#[controller]`, route, extractor, guard, interceptor, `#[gateway]`, and
-`#[caelix::main]` source works on either backend.
-
-## Socket.IO backend extension
-
-The `socketio` feature selects Axum automatically and is structurally unavailable with the
-default Actix-only build. It exposes `caelix::socket_io` and
-`Application::with_socket_io::<AppModule>()`.
-
-```toml
-[dependencies]
-caelix = { version = "0.0.26", default-features = false, features = ["socketio"] }
-```
-
-Example generated dependencies:
-
-```toml
-[dependencies]
-actix-web = "4.14.0"
-caelix = "0.0.26"
-serde = { version = "1.0.228", features = ["derive"] }
-```
+`actix` and `axum` must never be enabled together. `socketio` selects Axum, so
+disable defaults. NATS and Redis may be enabled separately or together and may
+also coexist with one HTTP runtime in a combined process. Generated macro code
+uses facade-only hidden exports; applications should depend on `caelix`, not
+adapter or macro crates directly.

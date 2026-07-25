@@ -53,20 +53,13 @@ impl UsersController {
 
 Supported route attributes are `#[get]`, `#[post]`, `#[patch]`, `#[put]`, and `#[delete]`.
 
-Supported extractor attributes are:
+Controller parameters use `#[param]`, `#[query]`, `#[body]`, `#[file]`,
+`#[files]`, `#[multipart]`, `#[user]`, and `#[cookie("name")]`.
+`#[validate]` validates a decoded value. See the canonical [Extractors](extractors.md)
+guide for accepted Rust types, feature requirements, combinations, order, and
+error behavior. Extractor arguments must be simple identifiers.
 
-- `#[param]` for route path parameters.
-- `#[query]` for query strings.
-- `#[body]` for content-negotiated JSON or multipart request bodies.
-- `#[file]` and `#[files]` for multipart file fields.
-- `#[multipart]` for direct access to a complete multipart form.
-- `#[user]` for a typed value previously attached to `RequestContext`.
-- `#[cookie("name")]` for a required `String` or optional `Option<String>` cookie.
-- `#[validate]` to call `validator::Validate::validate` on an extracted value.
-
-Extractor arguments must use simple identifiers. Pattern arguments are rejected by the macro.
-
-## Path Params
+## Routing example
 
 A single path segment can be extracted directly:
 
@@ -77,7 +70,7 @@ pub async fn find(&self, #[param] id: i64) -> Result<UserDto> {
 }
 ```
 
-For multiple path params, use a tuple or a serde-deserializable type supported by Actix's `web::Path<T>`:
+For multiple path params, use a tuple or a Serde-deserializable struct:
 
 ```rust
 #[get("/{org_id}/users/{user_id}")]
@@ -87,132 +80,6 @@ pub async fn find_in_org(&self, #[param] ids: (i64, i64)) -> Result<UserDto> {
 }
 ```
 
-## Query And Body
-
-`#[query]` maps to the selected runtime's query extractor. `#[body]` accepts JSON
-(including requests without a `Content-Type`) and `multipart/form-data`. Multipart
-text fields are decoded with normal Serde form semantics, so numbers, booleans,
-optional values, and repeated fields retain their DTO types.
-
-```rust
-#[derive(Deserialize)]
-pub struct SearchUsers {
-    pub q: Option<String>,
-    pub limit: Option<usize>,
-}
-
-#[get("/search")]
-pub async fn search(&self, #[query] query: SearchUsers) -> Result<Vec<UserDto>> {
-    self.users.search(query.q, query.limit).await
-}
-
-#[post("")]
-pub async fn create(&self, #[body] input: CreateUserDto) -> Result<Response<UserDto>> {
-    let user = self.users.create(input).await?;
-    Ok(Response::WithStatus(StatusCode::CREATED, user))
-}
-```
-
-Invalid JSON returns `400 Bad Request`. JSON bodies over the configured body limit return `413 Payload Too Large`. Caelix parses `#[body]` requests as JSON even when the client omits the `Content-Type` header.
-
-## Multipart Uploads
-
-Use `UploadedFile` beside a DTO when a route accepts normal form fields and files.
-The file field defaults to the argument name and can be renamed with
-`#[file(name = "avatar")]`. A required single file rejects missing or duplicate
-parts with `400 Bad Request`; `Option<UploadedFile>` is absent as `None`, and
-`Vec<UploadedFile>` collects repeated parts.
-
-```rust
-use caelix::{Response, Result, UploadedFile};
-
-#[post("/profile")]
-async fn update_profile(
-    &self,
-    #[body] input: UpdateProfile,
-    #[file(name = "avatar")] avatar: Option<UploadedFile>,
-) -> Result<Response<Profile>> {
-    if let Some(avatar) = avatar {
-        let bytes = avatar.read_bytes().await?;
-        // Store bytes or persist the upload before returning.
-        let _ = bytes;
-    }
-    Ok(Response::Body(self.profiles.update(input).await?))
-}
-```
-
-Routes with required files only accept `multipart/form-data`. Routes whose files
-are all optional also accept JSON and receive `None` for those file arguments.
-Use `#[files] attachments: Vec<UploadedFile>` for repeated file parts. To manage
-all fields yourself, use `#[multipart] form: MultipartForm`; it exposes `text`,
-`files`, `take_file`, and `take_files`.
-
-Uploaded files are staged in an isolated temporary directory and removed when
-their handle is dropped. `read_bytes()` explicitly loads a file into memory.
-`persist_to(destination)` consumes the handle and never replaces an existing
-destination; call `read_bytes()` first if both operations are needed. Configure
-the staging directory with `Application::upload_temp_dir(path)` and use
-`#[upload(limit = bytes)]` for a lower route-specific multipart limit. Without
-that attribute, `Application::body_limit` is used.
-
-## Validation
-
-With the default `validator` support enabled on `caelix`, `#[validate]` calls `validator::Validate::validate(&value)` after extraction and before the controller method is invoked. Missing required body, query, or path fields are returned in the same validation error shape. Other deserialization failures, such as invalid JSON syntax or invalid field types, return the extractor error because there is no typed value to validate.
-
-```rust
-use validator::Validate;
-
-#[derive(Deserialize, Validate)]
-pub struct CreateUserDto {
-    #[validate(email)]
-    pub email: String,
-    #[validate(length(min = 1))]
-    pub name: String,
-}
-
-#[post("")]
-pub async fn create(
-    &self,
-    #[body] #[validate] input: CreateUserDto,
-) -> Result<Response<UserDto>> {
-    let user = self.users.create(input).await?;
-    Ok(Response::WithStatus(StatusCode::CREATED, user))
-}
-```
-
-Validation errors convert into a `400 Bad Request` response with an `errors` object.
-
-## User Extraction
-
-`#[user]` reads a typed value from `RequestContext` extensions. Guards or interceptors usually set this value.
-
-```rust
-#[derive(Clone)]
-pub struct CurrentUser {
-    pub id: i64,
-}
-
-#[get("/me")]
-pub async fn me(&self, #[user] user: CurrentUser) -> Result<UserDto> {
-    self.users.find(user.id).await
-}
-```
-
-If the value is missing, the generated wrapper returns `401 Unauthorized` with message `Not authenticated`.
-
 ## Generated Route Metadata
 
 The macro implements `Controller` for the type. Registered routes are exposed through `Controller::routes()` and logged at application startup. Display paths use `:id` style in logs, even though route attributes use Actix's `{id}` syntax.
-```rust
-#[get("/me")]
-async fn me(
-    &self,
-    #[cookie("session")] session: String,
-    #[cookie("theme")] theme: Option<String>,
-) -> Result<Response<UserDto>> {
-    Ok(Response::Body(self.users.for_session(&session, theme).await?))
-}
-```
-
-A missing required cookie returns `400 Bad Request`. Cookie extractors are also
-documented as OpenAPI cookie parameters when OpenAPI support is enabled.

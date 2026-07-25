@@ -1,8 +1,8 @@
 # Caelix
 
 Caelix is a Rust backend framework with explicit modules, dependency injection,
-controllers, lifecycle hooks, validation, events, WebSockets, and Actix or Axum
-runtime support.
+controllers, cookies, validated multipart uploads, structured logging, OpenAPI,
+events, WebSockets, typed NATS/Redis microservices, and Actix or Axum support.
 
 [Documentation](https://ohanronnie.github.io/caelix/) · [API docs](https://docs.rs/caelix) · [crates.io](https://crates.io/crates/caelix) · [GitHub](https://github.com/Ohanronnie/caelix)
 
@@ -36,5 +36,6 @@ See the [CLI guide](https://ohanronnie.github.io/caelix/cli/guide.html) for gene
 | [caelix-actix](https://crates.io/crates/caelix-actix) | Actix Web runtime adapter |
 | [caelix-axum](https://crates.io/crates/caelix-axum) | Axum runtime adapter |
 | [caelix-socketio](https://crates.io/crates/caelix-socketio) | Socket.IO integration for Axum |
+| [caelix-microservices](https://crates.io/crates/caelix-microservices) | Typed NATS and Redis transports |
 | [caelix-macros](https://crates.io/crates/caelix-macros) | `#[injectable]`, `#[controller]`, and related macros |
 | [caelix-cli](https://crates.io/crates/caelix-cli) | Application and feature generator |
