@@ -11,5 +11,5 @@ readme = "README.md"
 
 [dependencies]
 caelix-core = { path = "../caelix-core", version = "0.0.21", default-features = false }
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 socketioxide = "=0.18.5"

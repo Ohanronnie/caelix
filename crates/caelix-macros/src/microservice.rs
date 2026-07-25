@@ -22,7 +22,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             .to_compile_error(),
         );
     }
-    let Some((_, trait_path, _)) = &implementation.trait_ else {
+    let Some((trait_path, _)) = &implementation.trait_ else {
         let service = implementation.self_ty.clone();
         let mut handlers = Vec::new();
 
@@ -115,7 +115,7 @@ fn parse_handler(method: &mut ImplItemFn) -> syn::Result<Option<proc_macro2::Tok
             "microservice handlers require an &self receiver",
         ));
     };
-    if receiver.reference.is_none() || receiver.mutability.is_some() {
+    if !matches!(receiver.kind, syn::ReceiverKind::Reference(_, _, None)) {
         return Err(syn::Error::new_spanned(
             receiver,
             "microservice handlers require an &self receiver",

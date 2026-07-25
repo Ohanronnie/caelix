@@ -14,14 +14,15 @@ name = "caelix"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.5.53", features = ["derive"] }
-ctrlc = "3.5.1"
+clap = { workspace = true, features = ["derive"] }
+ctrlc.workspace = true
 heck = "0.5.0"
-notify = "6"
-notify-debouncer-mini = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-serde_json = "1.0.150"
-toml_edit = "0.22"
+notify.workspace = true
+notify-debouncer-mini.workspace = true
+reqwest = { workspace = true, default-features = false, features = ["blocking", "json", "rustls-no-provider"] }
+rustls = { workspace = true, features = ["ring", "std"] }
+serde_json.workspace = true
+toml_edit.workspace = true
 
 [dev-dependencies]
 tempfile = "3.27.0"

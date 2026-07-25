@@ -1026,7 +1026,11 @@ fn event_group(service: &str) -> String {
 fn stable_name(value: &str) -> String {
     let mut hash = Sha256::new();
     hash.update(value.as_bytes());
-    format!("{:x}", hash.finalize())[..24].into()
+    let mut name = String::with_capacity(24);
+    for byte in hash.finalize().into_iter().take(12) {
+        write!(&mut name, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    name
 }
 fn transport(error: impl fmt::Display) -> MicroserviceError {
     MicroserviceError::Transport(error.to_string())

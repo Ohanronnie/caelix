@@ -231,7 +231,7 @@ fn is_upload_validator_signature(method: &syn::ImplItemFn) -> bool {
     let Some(FnArg::Receiver(receiver)) = method.sig.inputs.first() else {
         return false;
     };
-    if receiver.reference.is_none() || receiver.mutability.is_some() {
+    if !matches!(receiver.kind, syn::ReceiverKind::Reference(_, _, None)) {
         return false;
     }
     let Some(FnArg::Typed(file)) = method.sig.inputs.iter().nth(1) else {
@@ -1364,12 +1364,19 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
         {
             let openapi_name = format_ident!("__{}_openapi", method_name);
             openapi_document_functions.push(openapi_name.clone());
+            let typed_openapi = response_spec.is_some()
+                || !documented_headers.is_empty()
+                || !documented_errors.is_empty()
+                || !security_expressions.is_empty();
             let summary = method_summary(&method.attrs)
                 .map(|summary| quote! { operation.summary = Some(#summary.to_string()); });
-            let body = extractor_args.iter().find_map(|(extractor, _, ty, _, _)| {
-                matches!(extractor, Extractor::Body).then(|| ty.clone())
-            });
-            let extractor_parameters = extractor_args.iter().filter_map(|(extractor, name, ty, _, _)| {
+            let body = extractor_args
+                .iter()
+                .find_map(|(extractor, _, ty, validated, _)| {
+                    matches!(extractor, Extractor::Body)
+                        .then(|| (ty.clone(), *validated || !typed_openapi))
+                });
+            let extractor_parameters = extractor_args.iter().filter_map(|(extractor, name, ty, validated, _)| {
                 let parameter_in = match extractor {
                     Extractor::Param => quote! { caelix::openapi::utoipa::openapi::path::ParameterIn::Path },
                     Extractor::Query => quote! { caelix::openapi::utoipa::openapi::path::ParameterIn::Query },
@@ -1382,9 +1389,11 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     Extractor::Cookie(name) => quote! { #name },
                     _ => quote! { stringify!(#name) },
                 };
-                let schema = if matches!(extractor, Extractor::Cookie(_)) {
-                    quote! { caelix::openapi::inline_schema::<String>() }
-                } else {
+                    let schema = if matches!(extractor, Extractor::Cookie(_)) {
+                        quote! { caelix::openapi::inline_schema::<String>() }
+                    } else if *validated || !typed_openapi {
+                        quote! { caelix::openapi::untyped_schema() }
+                    } else {
                     quote! { caelix::openapi::inline_schema::<#ty>() }
                 };
                 Some(quote! {
@@ -1449,25 +1458,37 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
             } else if !multipart_files.is_empty() {
                 match body {
-                    Some(body) if all_files_optional => quote! {
+                    Some((body, false)) if all_files_optional => quote! {
                         let mut request = caelix::openapi::request_body(caelix::openapi::schema_ref::<#body>(openapi));
                         let multipart = caelix::openapi::multipart_request_body(Some(caelix::openapi::schema_ref::<#body>(openapi)), &[#(#multipart_files),*]);
                         request.content.extend(multipart.content);
                         operation.request_body = Some(request);
                     },
-                    Some(body) => quote! {
+                    Some((body, false)) => quote! {
                         operation.request_body = Some(caelix::openapi::multipart_request_body(Some(caelix::openapi::schema_ref::<#body>(openapi)), &[#(#multipart_files),*]));
+                    },
+                    Some((_body, true)) => quote! {
+                        operation.request_body = Some(caelix::openapi::multipart_request_body(Some(caelix::openapi::untyped_schema()), &[#(#multipart_files),*]));
                     },
                     None => quote! {
                         operation.request_body = Some(caelix::openapi::multipart_request_body(None, &[#(#multipart_files),*]));
                     },
                 }
-            } else if let Some(body) = body {
-                quote! {
-                    let mut request = caelix::openapi::request_body(caelix::openapi::schema_ref::<#body>(openapi));
-                    let multipart = caelix::openapi::multipart_request_body(Some(caelix::openapi::schema_ref::<#body>(openapi)), &[]);
-                    request.content.extend(multipart.content);
-                    operation.request_body = Some(request);
+            } else if let Some((body, validated)) = body {
+                if validated {
+                    quote! {
+                        let mut request = caelix::openapi::request_body(caelix::openapi::untyped_schema());
+                        let multipart = caelix::openapi::multipart_request_body(Some(caelix::openapi::untyped_schema()), &[]);
+                        request.content.extend(multipart.content);
+                        operation.request_body = Some(request);
+                    }
+                } else {
+                    quote! {
+                        let mut request = caelix::openapi::request_body(caelix::openapi::schema_ref::<#body>(openapi));
+                        let multipart = caelix::openapi::multipart_request_body(Some(caelix::openapi::schema_ref::<#body>(openapi)), &[]);
+                        request.content.extend(multipart.content);
+                        operation.request_body = Some(request);
+                    }
                 }
             } else {
                 quote! {}
@@ -1491,7 +1512,13 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     )
                 };
             let response_schema = response_body
-                .map(|body| quote! { Some(caelix::openapi::schema_ref::<#body>(openapi)) })
+                .map(|body| {
+                    if typed_openapi {
+                        quote! { Some(caelix::openapi::schema_ref::<#body>(openapi)) }
+                    } else {
+                        quote! { Some(caelix::openapi::untyped_schema()) }
+                    }
+                })
                 .unwrap_or_else(|| quote! { None });
             let response_headers = response_headers.iter().map(|header| {
                 let name = &header.name;

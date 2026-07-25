@@ -24,7 +24,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 fn is_websocket_impl(implementation: &ItemImpl) -> bool {
-    implementation.trait_.as_ref().is_some_and(|(_, path, _)| {
+    implementation.trait_.as_ref().is_some_and(|(path, _)| {
         path.segments
             .last()
             .is_some_and(|segment| segment.ident == "WebSocketGateway")

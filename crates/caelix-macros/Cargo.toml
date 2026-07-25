@@ -13,7 +13,7 @@ readme = "README.md"
 proc-macro = true
 
 [features]
-default = ["actix"]
+default = ["actix", "uploads"]
 actix = []
 axum = []
 openapi = []
@@ -23,12 +23,12 @@ tokio = []
 
 [dev-dependencies]
 actix-web = "4.14.0"
-caelix-actix = { path = "../caelix-actix", version = "0.0.24" }
-caelix-core = { path = "../caelix-core", version = "0.0.21" }
-serde = { version = "1.0.228", features = ["derive"] }
-trybuild = "1.0.117"
+caelix-actix = { path = "../caelix-actix", version = "0.0.24", features = ["uploads"] }
+caelix-core = { path = "../caelix-core", version = "0.0.21", features = ["uploads"] }
+serde = { workspace = true, features = ["derive"] }
+trybuild.workspace = true
 
 [dependencies]
-proc-macro2 = "1.0.106"
-quote = "1.0.46"
-syn = { version = "2.0.118", features = ["full"] }
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["full"] }

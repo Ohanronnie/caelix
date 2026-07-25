@@ -16,19 +16,19 @@ openapi = ["caelix-core/openapi"]
 uploads = ["caelix-core/uploads"]
 
 [dependencies]
-axum = { version = "0.8.8", features = ["ws"] }
-bytes = "1.10.1"
+axum = { workspace = true, features = ["ws"] }
+bytes.workspace = true
 caelix-core = { path = "../caelix-core", version = "0.0.21", default-features = false }
 caelix-socketio = { path = "../caelix-socketio", version = "0.0.24", optional = true }
-futures-util = { version = "0.3.31", default-features = false, features = ["std", "sink"] }
+futures-util = { workspace = true, default-features = false, features = ["std", "sink"] }
 http = "1.4.2"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
-tokio = { version = "1.47.1", features = ["macros", "net", "rt", "rt-multi-thread", "signal"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt", "rt-multi-thread", "signal"] }
 tower = { version = "0.5.3", features = ["util"] }
-uuid = { version = "1.19.0", features = ["v4"] }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-http-body-util = "0.1.3"
+http-body-util.workspace = true
 tower = { version = "0.5.3", features = ["util"] }
-tower-http = { version = "0.6.8", features = ["compression-full", "trace"] }
+tower-http = { workspace = true, features = ["compression-full", "trace"] }

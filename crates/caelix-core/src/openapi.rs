@@ -377,6 +377,13 @@ pub fn inline_schema<T: PartialSchema>() -> RefOr<Schema> {
     T::schema()
 }
 
+/// Returns an unconstrained object schema for extractor types that do not opt
+/// into OpenAPI schema generation.
+#[doc(hidden)]
+pub fn untyped_schema() -> RefOr<Schema> {
+    ObjectBuilder::new().schema_type(Type::Object).into()
+}
+
 #[doc(hidden)]
 pub fn operation(method: &str, path: &str, operation: Operation, openapi: &mut OpenApi) {
     let method = match method {

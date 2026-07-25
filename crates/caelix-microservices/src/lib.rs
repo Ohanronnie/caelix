@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fmt,
+    fmt::Write as _,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -1149,7 +1150,11 @@ fn durable_name(service_name: &str, subject: &str) -> String {
     hash.update(service_name.as_bytes());
     hash.update([0]);
     hash.update(subject.as_bytes());
-    format!("caelix-{:x}", hash.finalize())
+    let mut name = String::from("caelix-");
+    for byte in hash.finalize() {
+        write!(&mut name, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    name
 }
 
 fn nats_pattern_matches(pattern: &str, subject: &str) -> bool {
@@ -1230,7 +1235,9 @@ fn request_transport_error(error: async_nats::RequestError) -> MicroserviceClien
     match error.kind() {
         RequestErrorKind::TimedOut => MicroserviceClientError::Timeout,
         RequestErrorKind::NoResponders => MicroserviceClientError::NoResponder,
-        RequestErrorKind::Other => MicroserviceClientError::Transport(error.to_string()),
+        RequestErrorKind::InvalidSubject
+        | RequestErrorKind::MaxPayloadExceeded
+        | RequestErrorKind::Other => MicroserviceClientError::Transport(error.to_string()),
     }
 }
 
