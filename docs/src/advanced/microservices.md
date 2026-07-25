@@ -8,7 +8,7 @@ broker consumers. Handler metadata is transport-neutral; a running
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.26", default-features = false, features = ["microservices-nats"] }
+caelix = { version = "0.0.27", default-features = false, features = ["microservices-nats"] }
 serde = { version = "1", features = ["derive"] }
 ```
 
