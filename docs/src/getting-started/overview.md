@@ -25,7 +25,7 @@ cd demo-api
 caelix run
 ```
 
-The generated application uses `caelix = "0.0.30"` from crates.io:
+The generated application uses `caelix = "0.0.31"` from crates.io:
 
 ```text
 demo-api/

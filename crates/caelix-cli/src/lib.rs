@@ -539,6 +539,7 @@ fn update_caelix_dependency(cwd: &Path) -> Result<String> {
 }
 
 fn fetch_latest_caelix_version() -> Result<String> {
+    install_rustls_crypto_provider();
     let response = reqwest::blocking::Client::new()
         .get("https://crates.io/api/v1/crates/caelix")
         .header(reqwest::header::USER_AGENT, "caelix-cli")
@@ -552,6 +553,13 @@ fn fetch_latest_caelix_version() -> Result<String> {
         .as_str()
         .map(ToOwned::to_owned)
         .ok_or(CliError::CratesIoResponse)
+}
+
+fn install_rustls_crypto_provider() {
+    // `reqwest` uses `rustls-no-provider` so the CLI controls the provider and
+    // avoids pulling multiple crypto backends. Installation returns an error
+    // when this process already selected a provider, which is safe to ignore.
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 fn run_cargo_update(cwd: &Path) -> Result<()> {
@@ -875,9 +883,9 @@ pub fn render_app_cargo_toml(package_name: &str) -> String {
 
 fn render_app_cargo_toml_for_backend(package_name: &str, backend: BackendChoice) -> String {
     let backend_dependencies = match backend {
-        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.30\"",
+        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.31\"",
         BackendChoice::Axum => {
-            "caelix = { version = \"0.0.30\", default-features = false, features = [\"axum\"] }\ntower-http = { version = \"0.7\", features = [\"trace\", \"compression-full\"] }"
+            "caelix = { version = \"0.0.31\", default-features = false, features = [\"axum\"] }\ntower-http = { version = \"0.7\", features = [\"trace\", \"compression-full\"] }"
         }
     };
     format!(
@@ -1519,6 +1527,13 @@ serde = { version = "1.0", features = ["derive"] }
         assert!(updated.contains("# Keep this dependency comment."));
         assert!(updated.contains(r#"caelix = "0.0.3" # framework"#));
         assert!(updated.contains(r#"serde = { version = "1.0", features = ["derive"] }"#));
+    }
+
+    #[test]
+    fn crates_io_client_has_a_rustls_crypto_provider() {
+        install_rustls_crypto_provider();
+
+        reqwest::blocking::Client::builder().build().unwrap();
     }
 
     #[test]
