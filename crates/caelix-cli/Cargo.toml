@@ -1,6 +1,6 @@
 [package]
 name = "caelix-cli"
-version = "0.0.29"
+version = "0.0.30"
 edition = "2024"
 description = "Command line generator for Caelix applications."
 license = "MIT"

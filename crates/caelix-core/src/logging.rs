@@ -165,7 +165,9 @@ impl Logger {
             }
             LogLevel::Warn => tracing::warn!(target: "caelix", message = line.as_str()),
             LogLevel::Error => tracing::error!(target: "caelix", message = line.as_str()),
-            LogLevel::Debug => tracing::debug!(target: "caelix", message = line.as_str()),
+            // Detailed Caelix startup events are visible by default, but must not
+            // globally enable debug callsites belonging to application dependencies.
+            LogLevel::Debug => tracing::info!(target: "caelix", message = line.as_str()),
         }
     }
 }
@@ -303,7 +305,7 @@ fn init_tracing() {
             .with_level(false)
             .with_target(false)
             .with_ansi(false)
-            .with_max_level(Level::TRACE)
+            .with_max_level(Level::INFO)
             .with_writer(CaelixMakeWriter)
             .event_format(CaelixFormatter)
             .finish();
