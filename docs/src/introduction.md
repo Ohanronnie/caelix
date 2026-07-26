@@ -19,4 +19,4 @@ cd demo-api
 cargo run
 ```
 
-Generated applications depend on `caelix = "0.0.27"` from crates.io. The generator refuses to overwrite existing files, so it is safe to run against a feature name and stop when a generated file already exists.
+Generated applications depend on `caelix = "0.0.28"` from crates.io. The generator refuses to overwrite existing files, so it is safe to run against a feature name and stop when a generated file already exists.
