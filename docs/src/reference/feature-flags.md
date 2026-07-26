@@ -3,17 +3,18 @@
 `caelix` defaults to `actix`. Disable defaults when selecting Axum or building a
 broker-only process.
 
-| Feature | Enables and exports | Compatibility |
-| --- | --- | --- |
-| `actix` | Actix `Application`, `TestApplication`, runtime macros, `Logging`, `to_actix_response` | mutually exclusive with `axum` |
-| `axum` | Axum `Application`, `TestApplication`, runtime macros, `AxumRouterBuilder`, `to_axum_response` | mutually exclusive with `actix` |
-| `socketio` | Socket.IO types and `Application::with_socket_io`; selects `axum` | unavailable with Actix |
-| `sqlx` | Compatibility feature; SQLx errors work with `?` without enabling it | combines with either runtime |
-| `validator` | `#[validate]` and `validator` re-export | combines with either runtime |
-| `openapi` | OpenAPI metadata/config, Swagger UI, controller markers | requires an HTTP runtime to serve docs |
-| `uploads` | `UploadedFile`, `MultipartForm`, upload extractors/configuration | combines with either runtime |
-| `microservices-nats` | microservice macros, application/runtime/client, NATS options, Tokio runtime macros | no HTTP runtime required |
-| `microservices-redis` | same shared microservice API plus `RedisTransportOptions` | no HTTP runtime required; Redis 6.2+ |
+| Feature               | Enables and exports                                                                                             | Compatibility                          |
+| --------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `actix`               | Actix `Application`, `TestApplication`, runtime macros, `Logging`, `to_actix_response`                          | mutually exclusive with `axum`         |
+| `axum`                | Axum `Application`, `TestApplication`, runtime macros, `AxumRouterBuilder`, `to_axum_response`                  | mutually exclusive with `actix`        |
+| `socketio`            | Socket.IO types and `Application::with_socket_io`; selects `axum`                                               | unavailable with Actix                 |
+| `sqlx`                | Compatibility feature; SQLx errors work with `?` without enabling it                                            | combines with either runtime           |
+| `validator`           | `#[validate]` and `validator` re-export                                                                         | combines with either runtime           |
+| `config`              | typed `.env`/explicit-file loading, `Config`, `ConfigFile`, `ConfigModule<T, F>`, `Deserialize`, and `Validate` | combines with either runtime           |
+| `openapi`             | OpenAPI metadata/config, Swagger UI, controller markers                                                         | requires an HTTP runtime to serve docs |
+| `uploads`             | `UploadedFile`, `MultipartForm`, upload extractors/configuration                                                | combines with either runtime           |
+| `microservices-nats`  | microservice macros, application/runtime/client, NATS options, Tokio runtime macros                             | no HTTP runtime required               |
+| `microservices-redis` | same shared microservice API plus `RedisTransportOptions`                                                       | no HTTP runtime required; Redis 6.2+   |
 
 ```toml
 # Default Actix

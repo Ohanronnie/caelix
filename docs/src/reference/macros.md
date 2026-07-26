@@ -1,5 +1,23 @@
 # Macro Attributes
 
+## `#[derive(Config)]`
+
+Generates typed environment loading and an `Injectable` implementation for a
+named, non-generic struct. Every struct field requires exactly one
+`#[config(env = "NAME")]` mapping and may add `default = "text"`; mappings are
+case-sensitive and duplicate environment names are rejected. The struct must
+also derive the re-exported `Deserialize` and `Validate` macros. Values are
+read as text, deserialized one field at a time, and validated before the config
+provider is returned. Direct `Option<T>` fields become `None` when their source
+is absent. Serde `deserialize_with`/`with` functions are supported for custom
+text formats.
+
+The derive inspects fields only. Associated constants and methods declared in
+an `impl` block are ordinary Rust and need no `#[config]` attribute, so a
+configuration type can combine environment-backed fields with literal policy
+and helper methods. See [Typed Configuration](../advanced/configuration.md) for
+source precedence, explicit files, DI registration, and test overrides.
+
 ## `#[injectable]`
 
 Applies to unit structs or named-field structs. Named fields must be `Arc<T>`.
@@ -143,6 +161,7 @@ With the Axum-only `socketio` feature, place it on an inherent implementation an
 async event method with `#[on_message("event")]`. Such methods accept either `payload: T` or
 `socket: SocketRef, payload: T` and return `Result<Reply>`; successful replies become Socket.IO
 acks, while failures also emit `"error"`.
+
 ### `#[cookie("name")]`
 
 Controller arguments may use `String` for a required cookie or

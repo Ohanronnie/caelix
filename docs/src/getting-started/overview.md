@@ -56,36 +56,78 @@ src/posts/
   service.rs
 ```
 
-Add application config as a normal provider. It can own both settings and application resources such as a SQLx pool.
+Enable typed configuration and define the application settings:
+
+```sh
+cargo add caelix --features config
+```
 
 ```rust
 // src/config.rs
+use caelix::{Config, Deserialize, Validate};
+
+#[derive(Config, Deserialize, Validate)]
+pub struct AppConfig {
+    #[config(env = "DATABASE_URL")]
+    pub database_url: String,
+
+    #[config(env = "ENVIRONMENT", default = "development")]
+    pub environment: String,
+}
+
+impl AppConfig {
+    pub const SERVICE_NAME: &'static str = "demo-api";
+
+    pub fn is_production(&self) -> bool {
+        self.environment == "production"
+    }
+}
+```
+
+Every struct field needs a `#[config(env = "...")]` mapping. Associated
+constants and methods, such as `SERVICE_NAME` and `is_production`, are literal
+application policy and do not need environment variables; they can live beside
+the loaded fields on the same type.
+
+Keep the database pool in its own provider:
+
+```rust
+// src/database.rs
+use std::sync::Arc;
+
 use caelix::{
-    BoxFuture, Container, Injectable, ProviderDependency, Result,
-    ServiceUnavailableException, provider_dependencies,
+    BoxFuture, Container, Injectable, Module, ModuleMetadata, ProviderDependency, Result,
+    provider_dependencies,
 };
 use sqlx::PgPool;
 
-pub struct AppConfig {
-    pub database_url: String,
+use crate::config::AppConfig;
+
+pub struct Database {
     pub pool: PgPool,
 }
 
-impl Injectable for AppConfig {
+impl Injectable for Database {
     fn dependencies() -> Vec<ProviderDependency> {
-        provider_dependencies![]
+        provider_dependencies![AppConfig]
     }
 
-    fn create(_container: &Container) -> BoxFuture<'_, Result<Self>> {
-        Box::pin(async {
-            let database_url = std::env::var("DATABASE_URL")
-                .map_err(|_| ServiceUnavailableException::new("DATABASE_URL must be set"))?;
-
-            let pool = PgPool::connect(&database_url)
-                .await?;
-
-            Ok(Self { database_url, pool })
+    fn create(container: &Container) -> BoxFuture<'_, Result<Self>> {
+        Box::pin(async move {
+            let config: Arc<AppConfig> = container.resolve()?;
+            let pool = PgPool::connect(&config.database_url).await?;
+            Ok(Self { pool })
         })
+    }
+}
+
+pub struct DatabaseModule;
+
+impl Module for DatabaseModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::global()
+            .provider::<Database>()
+            .export::<Database>()
     }
 }
 ```
@@ -96,6 +138,7 @@ Generated feature files are not wired into the root app automatically. Register 
 // src/lib.rs
 pub mod app;
 pub mod config;
+pub mod database;
 pub mod posts;
 
 pub use app::AppModule;
@@ -103,16 +146,17 @@ pub use app::AppModule;
 
 ```rust
 // src/app.rs
-use caelix::{Module, ModuleMetadata};
+use caelix::{ConfigModule, Module, ModuleMetadata};
 
-use crate::{config::AppConfig, posts::PostsModule};
+use crate::{config::AppConfig, database::DatabaseModule, posts::PostsModule};
 
 pub struct AppModule;
 
 impl Module for AppModule {
     fn register() -> ModuleMetadata {
         ModuleMetadata::new()
-            .provider::<AppConfig>()
+            .import::<ConfigModule<AppConfig>>()
+            .import::<DatabaseModule>()
             .import::<PostsModule>()
     }
 }
@@ -137,7 +181,7 @@ use std::sync::Arc;
 use caelix::{EventBus, NotFoundException, Result, injectable};
 use serde::{Deserialize, Serialize};
 
-use crate::config::AppConfig;
+use crate::database::Database;
 
 #[derive(Clone, Serialize, sqlx::FromRow)]
 pub struct PostDto {
@@ -165,7 +209,7 @@ pub struct PostCreated {
 
 #[injectable]
 pub struct PostsService {
-    config: Arc<AppConfig>,
+    database: Arc<Database>,
     events: Arc<EventBus>,
 }
 
@@ -175,7 +219,7 @@ impl PostsService {
             "select id, title, body from posts order by id desc limit $1",
         )
         .bind(limit.unwrap_or(20))
-        .fetch_all(&self.config.pool)
+        .fetch_all(&self.database.pool)
         .await?;
 
         Ok(posts)
@@ -186,7 +230,7 @@ impl PostsService {
             "select id, title, body from posts where id = $1",
         )
         .bind(id)
-        .fetch_optional(&self.config.pool)
+        .fetch_optional(&self.database.pool)
         .await?;
 
         post.ok_or_else(|| NotFoundException::new(format!("post {id} not found")))
@@ -198,7 +242,7 @@ impl PostsService {
         )
         .bind(input.title)
         .bind(input.body)
-        .fetch_one(&self.config.pool)
+        .fetch_one(&self.database.pool)
         .await?;
 
         self.events
