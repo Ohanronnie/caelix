@@ -18,18 +18,21 @@ sqlx = []
 validator = ["dep:validator"]
 openapi = ["dep:utoipa"]
 uploads = ["dep:infer", "dep:multer"]
+config = ["dep:dotenvy", "dep:serde_plain", "dep:validator"]
 
 [dependencies]
 anyhow.workspace = true
 bytes.workspace = true
 cookie = { version = "0.18.1", features = ["percent-encode"] }
 crossbeam-channel = "0.5.16"
+dotenvy = { workspace = true, optional = true }
 futures-core.workspace = true
 futures-util = { workspace = true, default-features = false, features = ["std"] }
 http = "1.4.2"
 ipnet.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+serde_plain = { workspace = true, optional = true }
 serde_html_form.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
 tokio-stream = { workspace = true, features = ["sync"] }

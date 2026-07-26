@@ -16,6 +16,7 @@ axum = ["dep:caelix-axum", "caelix-macros/axum"]
 socketio = ["axum", "caelix-axum/socketio", "dep:caelix-socketio"]
 sqlx = ["caelix-core/sqlx"]
 validator = ["caelix-core/validator"]
+config = ["caelix-core/config", "caelix-macros/config", "dep:serde", "dep:validator"]
 openapi = ["caelix-core/openapi", "caelix-macros/openapi", "caelix-actix?/openapi", "caelix-axum?/openapi"]
 uploads = ["caelix-core/uploads", "caelix-macros/uploads", "caelix-actix?/uploads", "caelix-axum?/uploads"]
 microservices-nats = ["dep:caelix-microservices", "caelix-microservices/nats", "dep:tokio", "caelix-macros/microservices", "caelix-macros/tokio"]
@@ -29,6 +30,8 @@ caelix-core = { path = "../caelix-core", version = "0.0.32", default-features = 
 caelix-macros = { path = "../caelix-macros", version = "0.0.32", default-features = false }
 caelix-microservices = { path = "../caelix-microservices", version = "0.0.32", optional = true, default-features = false }
 tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
+serde = { workspace = true, optional = true, features = ["derive"] }
+validator = { version = "0.20", optional = true, features = ["derive"] }
 
 [lib]
 path = "src/lib.rs"
@@ -53,5 +56,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tower = { version = "0.5.3", features = ["util"] }
 futures-util = { workspace = true, default-features = false, features = ["sink"] }
+futures = "0.3.32"
 tokio-tungstenite.workspace = true
 validator = { version = "0.20", features = ["derive"] }

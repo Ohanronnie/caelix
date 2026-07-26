@@ -20,13 +20,15 @@ openapi = []
 uploads = []
 microservices = []
 tokio = []
+config = []
 
 [dev-dependencies]
 actix-web = "4.14.0"
 caelix-actix = { path = "../caelix-actix", version = "0.0.32", features = ["uploads"] }
-caelix-core = { path = "../caelix-core", version = "0.0.32", features = ["uploads"] }
+caelix-core = { path = "../caelix-core", version = "0.0.32", features = ["config", "uploads"] }
 serde = { workspace = true, features = ["derive"] }
 trybuild.workspace = true
+validator = { version = "0.20", features = ["derive"] }
 
 [dependencies]
 proc-macro2.workspace = true

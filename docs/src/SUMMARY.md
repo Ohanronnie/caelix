@@ -36,6 +36,7 @@
   - [Operations, Testing, and Interoperability](advanced/microservices-operations.md)
 - [WebSockets](advanced/websockets.md)
 - [Service-Level Cache](advanced/cache.md)
+- [Typed Configuration](advanced/configuration.md)
 - [Request Throttling](advanced/throttling.md)
 - [Application Runtime](advanced/application-runtime.md)
 - [Logging](advanced/logging.md)

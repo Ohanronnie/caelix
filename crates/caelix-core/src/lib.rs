@@ -6,6 +6,8 @@
 extern crate self as caelix_core;
 
 mod cache;
+#[cfg(feature = "config")]
+mod config;
 mod container;
 mod context;
 mod controller;
@@ -31,6 +33,9 @@ mod websocket;
 pub use bytes::Bytes;
 /// Re-exported public API.
 pub use cache::*;
+#[cfg(feature = "config")]
+/// Typed configuration loading and module registration.
+pub use config::*;
 /// Re-exported public API.
 pub use container::*;
 /// Re-exported public API.
@@ -70,6 +75,17 @@ pub use upload::*;
 /// Re-exported public API.
 pub use websocket::*;
 
+#[cfg(feature = "config")]
+#[doc(hidden)]
+pub use serde::de::DeserializeOwned as __DeserializeOwned;
+#[cfg(feature = "config")]
+#[doc(hidden)]
+pub use serde::de::value::{
+    Error as __ConfigValueError, StrDeserializer as __ConfigStrDeserializer,
+};
 #[cfg(feature = "validator")]
 /// Re-exported public API.
 pub use validator;
+#[cfg(feature = "config")]
+#[doc(hidden)]
+pub use validator::Validate as __Validate;

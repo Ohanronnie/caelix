@@ -3,6 +3,8 @@
 
 //! Procedural macros for defining Caelix applications.
 
+#[cfg(feature = "config")]
+mod config;
 mod controller;
 mod gateway;
 mod injectable;
@@ -15,6 +17,13 @@ use proc_macro::TokenStream;
 use quote::quote;
 #[cfg(any(feature = "axum", feature = "tokio"))]
 use syn::{ItemFn, parse_macro_input, parse_quote};
+
+/// Implements typed environment loading and dependency injection.
+#[cfg(feature = "config")]
+#[proc_macro_derive(Config, attributes(config))]
+pub fn config(input: TokenStream) -> TokenStream {
+    config::expand(input)
+}
 
 /// Implements `caelix::Injectable` for a named or unit struct.
 ///

@@ -1,0 +1,13 @@
+error: #[derive(Config)] does not support generic structs
+ --> tests/ui/config_rejects_generics.rs:7:21
+  |
+7 | struct ExampleConfig<T> {
+  |                     ^^^
+
+warning: unused import: `caelix_core as caelix`
+ --> tests/ui/config_rejects_generics.rs:1:5
+  |
+1 | use caelix_core as caelix;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

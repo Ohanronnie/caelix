@@ -7,6 +7,9 @@
 pub use caelix_core::*;
 // Explicit re-exports so `test` / `main` are not pulled into `prelude` (which
 // would shadow Rust's `#[test]`).
+#[cfg(feature = "config")]
+/// Derives typed environment configuration loading.
+pub use caelix_macros::Config;
 #[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
 /// Re-exported public API.
 pub use caelix_macros::{context, event_pattern, message_pattern, microservice, payload};
@@ -14,6 +17,12 @@ pub use caelix_macros::{context, event_pattern, message_pattern, microservice, p
 pub use caelix_macros::{
     controller, gateway, guard, injectable, on_message, skip_throttle, throttle,
 };
+#[cfg(feature = "config")]
+/// Serde's deserialization derive and trait.
+pub use serde::Deserialize;
+#[cfg(feature = "config")]
+/// Validator's validation derive and trait.
+pub use validator::Validate;
 
 /// Microservice transport APIs.
 #[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
@@ -112,6 +121,8 @@ pub mod socket_io {
 pub mod prelude {
     /// Re-exported public API.
     pub use caelix_core::*;
+    #[cfg(feature = "config")]
+    pub use caelix_macros::Config;
     #[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
     pub use caelix_macros::{context, event_pattern, message_pattern, microservice, payload};
     /// Re-exported public API.
@@ -120,4 +131,8 @@ pub mod prelude {
     };
     #[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
     pub use caelix_microservices::*;
+    #[cfg(feature = "config")]
+    pub use serde::Deserialize;
+    #[cfg(feature = "config")]
+    pub use validator::Validate;
 }
