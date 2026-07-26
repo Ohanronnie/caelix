@@ -1,6 +1,7 @@
 use std::{
     future::{Future, IntoFuture},
     marker::PhantomData,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     pin::Pin,
     rc::Rc,
     sync::Arc,
@@ -242,7 +243,16 @@ pub struct TestRequestBuilder<'a> {
 
 impl<'a> TestRequestBuilder<'a> {
     fn new(app: &'a TestApplication, request: actix_test::TestRequest) -> Self {
-        Self { app, request }
+        Self {
+            app,
+            request: request.peer_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 12345)),
+        }
+    }
+
+    /// Sets the immediate socket peer address for this request.
+    pub fn peer_addr(mut self, peer_addr: SocketAddr) -> Self {
+        self.request = self.request.peer_addr(peer_addr);
+        self
     }
 
     /// Runs the `json` public API operation.
@@ -280,6 +290,11 @@ impl TestResponse {
     pub fn status(&self) -> StatusCode {
         StatusCode::from_u16(self.response.status().as_u16())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+    }
+
+    /// Returns a response header as UTF-8 text.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.response.headers().get(name)?.to_str().ok()
     }
 
     /// Runs the `assert_status` public API operation.

@@ -2,7 +2,7 @@ use caelix_core::{Result, UploadedFile};
 use caelix_macros::{controller, injectable};
 
 mod caelix {
-    pub use caelix_actix::{__actix_web, RequestPayload, to_actix_response};
+    pub use caelix_actix::{__actix_web, RawRequestPayload, to_actix_response};
     pub use caelix_core::*;
 }
 

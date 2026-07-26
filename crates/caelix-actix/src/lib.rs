@@ -19,7 +19,7 @@ pub use actix_web as __actix_web;
 pub use application::{Application, Logging, to_actix_response};
 /// Re-exported public API used by generated multipart controller wrappers.
 #[doc(hidden)]
-pub use request_payload::RequestPayload;
+pub use request_payload::{RawRequestPayload, RequestPayload};
 /// Re-exported public API.
 pub use test_app::{TestApplication, TestApplicationBuilder, TestRequestBuilder, TestResponse};
 /// Re-exported public API.

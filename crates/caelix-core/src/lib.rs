@@ -22,6 +22,7 @@ mod module;
 pub mod openapi;
 mod response;
 mod result;
+mod throttle;
 #[cfg(feature = "uploads")]
 mod upload;
 mod websocket;
@@ -60,6 +61,8 @@ pub use module::*;
 pub use response::*;
 /// Re-exported public API.
 pub use result::Result;
+/// Request throttling primitives.
+pub use throttle::*;
 /// Re-exported public API.
 #[cfg(feature = "uploads")]
 /// Re-exported public API.

@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use crate::ProviderDependency;
+use crate::{ProviderDependency, Result};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Public Caelix type `RouteDef`.
@@ -23,6 +23,12 @@ pub trait Controller {
     /// lifecycle ordering just like constructor-injected dependencies.
     fn route_dependencies() -> Vec<ProviderDependency> {
         vec![]
+    }
+
+    /// Validates generated route configuration during module discovery.
+    #[doc(hidden)]
+    fn validate_routes() -> Result<()> {
+        Ok(())
     }
 
     /// Public Caelix API.

@@ -23,6 +23,131 @@ enum Extractor {
     Files,
 }
 
+#[derive(Clone, Copy)]
+enum ThrottleAnnotation {
+    Policy(u64, u64),
+    Skip,
+}
+
+fn parse_throttle(attr: &syn::Attribute) -> syn::Result<ThrottleAnnotation> {
+    let list = attr.meta.require_list()?;
+    let values = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(list.tokens.clone())?;
+    let mut limit = None;
+    let mut window = None;
+    for value in values {
+        let Meta::NameValue(value) = value else {
+            return Err(syn::Error::new_spanned(
+                value,
+                "throttle arguments must use `limit` and `window_seconds`",
+            ));
+        };
+        let target = if value.path.is_ident("limit") {
+            &mut limit
+        } else if value.path.is_ident("window_seconds") {
+            &mut window
+        } else {
+            return Err(syn::Error::new_spanned(
+                value,
+                "throttle arguments must use `limit` and `window_seconds`",
+            ));
+        };
+        if target.is_some() {
+            return Err(syn::Error::new_spanned(
+                value,
+                "duplicate throttle argument",
+            ));
+        }
+        let Expr::Lit(expression) = &value.value else {
+            return Err(syn::Error::new_spanned(
+                &value.value,
+                "throttle arguments must be positive integer literals",
+            ));
+        };
+        let syn::Lit::Int(integer) = &expression.lit else {
+            return Err(syn::Error::new_spanned(
+                expression,
+                "throttle arguments must be positive integer literals",
+            ));
+        };
+        let parsed = integer.base10_parse::<u64>()?;
+        if parsed == 0 {
+            return Err(syn::Error::new_spanned(
+                integer,
+                "throttle arguments must be greater than zero",
+            ));
+        }
+        *target = Some(parsed);
+    }
+    Ok(ThrottleAnnotation::Policy(
+        limit.ok_or_else(|| syn::Error::new_spanned(attr, "missing throttle `limit`"))?,
+        window.ok_or_else(|| syn::Error::new_spanned(attr, "missing throttle `window_seconds`"))?,
+    ))
+}
+
+pub(crate) fn expand_controller_throttle_marker(
+    args: TokenStream,
+    input: TokenStream,
+    skip: bool,
+) -> TokenStream {
+    let mut item = parse_macro_input!(input as ItemImpl);
+    let args = proc_macro2::TokenStream::from(args);
+    let annotation = if skip {
+        if !args.is_empty() {
+            return syn::Error::new_spanned(args, "skip_throttle does not accept arguments")
+                .to_compile_error()
+                .into();
+        }
+        ThrottleAnnotation::Skip
+    } else {
+        let attr: syn::Attribute = syn::parse_quote!(#[throttle(#args)]);
+        match parse_throttle(&attr) {
+            Ok(annotation) => annotation,
+            Err(error) => return error.to_compile_error().into(),
+        }
+    };
+    let marker = match annotation {
+        ThrottleAnnotation::Policy(limit, window) => {
+            format!("__caelix_throttle:{limit}:{window}")
+        }
+        ThrottleAnnotation::Skip => "__caelix_skip_throttle".to_string(),
+    };
+    item.attrs.push(syn::parse_quote!(#[doc = #marker]));
+    quote!(#item).into()
+}
+
+fn throttle_doc_marker(attr: &syn::Attribute) -> Option<ThrottleAnnotation> {
+    if !attr.path().is_ident("doc") {
+        return None;
+    }
+    let Meta::NameValue(value) = &attr.meta else {
+        return None;
+    };
+    let Expr::Lit(expression) = &value.value else {
+        return None;
+    };
+    let syn::Lit::Str(value) = &expression.lit else {
+        return None;
+    };
+    if value.value() == "__caelix_skip_throttle" {
+        return Some(ThrottleAnnotation::Skip);
+    }
+    let raw = value.value();
+    let mut parts = raw.strip_prefix("__caelix_throttle:")?.split(':');
+    let limit = parts.next()?.parse().ok()?;
+    let window = parts.next()?.parse().ok()?;
+    parts
+        .next()
+        .is_none()
+        .then_some(ThrottleAnnotation::Policy(limit, window))
+}
+
+fn attr_named(attr: &syn::Attribute, name: &str) -> bool {
+    attr.path()
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == name)
+}
+
 #[cfg(feature = "uploads")]
 struct UploadFieldOptions {
     name: Option<LitStr>,
@@ -615,12 +740,23 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     let struct_type = impl_block.self_ty.clone();
     let mut controller_guards = Vec::new();
     let mut controller_interceptors = Vec::new();
+    let mut controller_throttle = None;
     let mut errors = Vec::new();
     #[cfg(feature = "uploads")]
     let mut invalid_upload_validators = HashSet::new();
 
     impl_block.attrs.retain(|attr| {
-        if attr.path().is_ident("use_guard") {
+        if let Some(value) = throttle_doc_marker(attr) {
+            if controller_throttle.is_some() {
+                errors.push(
+                    syn::Error::new_spanned(attr, "conflicting controller throttle settings")
+                        .to_compile_error(),
+                );
+            } else {
+                controller_throttle = Some(value);
+            }
+            false
+        } else if attr.path().is_ident("use_guard") {
             match parse_type_list(attr) {
                 Ok(types) => controller_guards.extend(types),
                 Err(err) => errors.push(err.to_compile_error()),
@@ -630,6 +766,35 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             match parse_type_list(attr) {
                 Ok(types) => controller_interceptors.extend(types),
                 Err(err) => errors.push(err.to_compile_error()),
+            }
+            false
+        } else if attr_named(attr, "throttle") {
+            if controller_throttle.is_some() {
+                errors.push(
+                    syn::Error::new_spanned(attr, "conflicting controller throttle settings")
+                        .to_compile_error(),
+                );
+            } else {
+                match parse_throttle(attr) {
+                    Ok(value) => controller_throttle = Some(value),
+                    Err(err) => errors.push(err.to_compile_error()),
+                }
+            }
+            false
+        } else if attr_named(attr, "skip_throttle") {
+            if !matches!(attr.meta, Meta::Path(_)) {
+                errors.push(
+                    syn::Error::new_spanned(attr, "skip_throttle does not accept arguments")
+                        .to_compile_error(),
+                );
+            }
+            if controller_throttle.is_some() {
+                errors.push(
+                    syn::Error::new_spanned(attr, "conflicting controller throttle settings")
+                        .to_compile_error(),
+                );
+            } else {
+                controller_throttle = Some(ThrottleAnnotation::Skip);
             }
             false
         } else {
@@ -667,6 +832,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut registrations = Vec::new();
     let mut routes = Vec::new();
     let mut route_dependencies = Vec::new();
+    let mut route_throttle_policies = Vec::new();
     #[cfg(feature = "openapi")]
     let mut openapi_routes = Vec::new();
     #[cfg(feature = "openapi")]
@@ -678,6 +844,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
         let mut method_guards = Vec::new();
         let mut method_interceptors = Vec::new();
         let mut upload_limit: Option<Expr> = None;
+        let mut method_throttle = None;
         #[cfg(feature = "openapi")]
         let mut documented_headers = Vec::new();
         #[cfg(feature = "openapi")]
@@ -737,6 +904,35 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         syn::Error::new_spanned(attr, "upload requires `limit = ...`")
                             .to_compile_error(),
                     ),
+                }
+                false
+            } else if attr_named(attr, "throttle") {
+                if method_throttle.is_some() {
+                    errors.push(
+                        syn::Error::new_spanned(attr, "conflicting method throttle settings")
+                            .to_compile_error(),
+                    );
+                } else {
+                    match parse_throttle(attr) {
+                        Ok(value) => method_throttle = Some(value),
+                        Err(err) => errors.push(err.to_compile_error()),
+                    }
+                }
+                false
+            } else if attr_named(attr, "skip_throttle") {
+                if !matches!(attr.meta, Meta::Path(_)) {
+                    errors.push(
+                        syn::Error::new_spanned(attr, "skip_throttle does not accept arguments")
+                            .to_compile_error(),
+                    );
+                }
+                if method_throttle.is_some() {
+                    errors.push(
+                        syn::Error::new_spanned(attr, "conflicting method throttle settings")
+                            .to_compile_error(),
+                    );
+                } else {
+                    method_throttle = Some(ThrottleAnnotation::Skip);
                 }
                 false
             } else if attr.path().is_ident("request_header") {
@@ -956,6 +1152,30 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
 
         let Some((verb, path)) = route else { continue };
         let method_name = &method.sig.ident;
+        let effective_throttle = method_throttle.or(controller_throttle);
+        let explicit_throttle =
+            matches!(effective_throttle, Some(ThrottleAnnotation::Policy(_, _)));
+        if let Some(ThrottleAnnotation::Policy(limit, window)) = effective_throttle {
+            route_throttle_policies.push((limit, window));
+        }
+        if explicit_throttle {
+            route_dependencies.push(syn::parse_quote!(caelix::Throttle));
+        }
+        let throttle_policy = match effective_throttle {
+            Some(ThrottleAnnotation::Policy(limit, window)) => quote! {
+                Some(caelix::ThrottlePolicy::new(#limit, #window))
+            },
+            Some(ThrottleAnnotation::Skip) => quote! { None },
+            None => quote! { __caelix_throttle.as_ref().map(|service| service.policy()) },
+        };
+        let throttle_enabled = !matches!(effective_throttle, Some(ThrottleAnnotation::Skip));
+        #[cfg(feature = "openapi")]
+        let documented_throttle = match effective_throttle {
+            Some(ThrottleAnnotation::Policy(_, _)) => quote! { true },
+            Some(ThrottleAnnotation::Skip) => quote! { false },
+            None => quote! { __caelix_global_throttle },
+        };
+        let full_path = format!("{}{}", base_path, path);
         let wrapper_name = format_ident!("__{}_handler", method_name);
         let backend_verb = format_ident!("{}", verb);
         let guard_types = controller_guards
@@ -1034,7 +1254,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             .collect::<Vec<_>>();
         let mut wrapper_params = wrapper_params;
         if has_payload {
-            wrapper_params.push(quote! { __caelix_payload: caelix::RequestPayload });
+            wrapper_params.push(quote! { __caelix_payload: caelix::RawRequestPayload });
         }
 
         let body_extractors = extractor_args
@@ -1245,17 +1465,57 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             });
         let request_context_binding =
             needs_request_context.then(|| quote! { let request_context = &ctx; });
-        let (request_headers, request_method, request_path) = match backend {
+        let (request_headers, request_method, request_path, request_peer) = match backend {
             Backend::Actix => (
                 quote! { req.headers() },
                 quote! { req.method().as_str() },
                 quote! { req.path() },
+                quote! { req.peer_addr() },
             ),
             Backend::Axum => (
                 quote! { request_info.headers() },
                 quote! { request_info.method().as_str() },
                 quote! { request_info.path() },
+                quote! { request_info.peer_addr() },
             ),
+        };
+        let throttle_check = if throttle_enabled {
+            quote! {
+                let __caelix_throttle = container.resolve::<caelix::Throttle>().ok();
+                if let Some(__caelix_policy) = #throttle_policy {
+                    let Some(__caelix_throttle) = __caelix_throttle else {
+                        let err = caelix::InternalServerErrorException::new(std::io::Error::other(
+                            "throttled route requires ThrottleModule",
+                        ));
+                        return #response_adapter(ctx.attach_correlation_headers(
+                            caelix::IntoCaelixResponse::into_response(err)
+                        ));
+                    };
+                    match __caelix_throttle.check(&ctx, #verb, #full_path, __caelix_policy).await {
+                        Ok(Some(response)) => return #response_adapter(
+                            ctx.attach_correlation_headers(response)
+                        ),
+                        Ok(None) => {}
+                        Err(err) => return #response_adapter(ctx.attach_correlation_headers(
+                            caelix::IntoCaelixResponse::into_response(err)
+                        )),
+                    }
+                }
+            }
+        } else {
+            quote! {}
+        };
+        let payload_buffering = if has_payload {
+            quote! {
+                let __caelix_payload = match __caelix_payload.buffer().await {
+                    Ok(payload) => payload,
+                    Err(err) => return #response_adapter(ctx.attach_correlation_headers(
+                        caelix::IntoCaelixResponse::into_response(err)
+                    )),
+                };
+            }
+        } else {
+            quote! {}
         };
         let request_context_body = quote! {
             let mut headers: std::collections::HashMap<String, String> =
@@ -1275,11 +1535,22 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             existing.push_str(value);
                         })
                         .or_insert_with(|| value.to_string());
+                } else if name.eq_ignore_ascii_case("x-forwarded-for") {
+                    headers.entry(name)
+                        .and_modify(|existing| {
+                            existing.push_str(", ");
+                            existing.push_str(value);
+                        })
+                        .or_insert_with(|| value.to_string());
                 } else {
                     headers.insert(name, value.to_string());
                 }
             }
-            let ctx = caelix::RequestContext::new(#request_method, #request_path, headers);
+            let mut ctx = caelix::RequestContext::new(#request_method, #request_path, headers);
+            if let Some(peer_addr) = #request_peer {
+                ctx = ctx.with_peer_addr(peer_addr);
+            }
+            #throttle_check
             #request_context_binding
             #(
                 let guard = match container.resolve::<#guard_types>() {
@@ -1306,6 +1577,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     }
                 }
             )*
+            #payload_buffering
             let controller = match container.resolve::<#struct_type>() {
                 Ok(value) => value,
                 Err(err) => {
@@ -1349,7 +1621,6 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
         };
         wrappers.push(wrapper);
 
-        let full_path = format!("{}{}", base_path, path);
         let display_path = full_path.replace("{", ":").replace("}", "");
         let handler_name = method_name.to_string();
         registrations.push(match backend {
@@ -1540,12 +1811,22 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     operation.responses.responses.insert(status, response.into());
                 }
             });
+            let throttle_response = quote! {
+                if #documented_throttle {
+                    let (status, response) =
+                        caelix::openapi::error_response::<caelix::TooManyRequestsException>(openapi);
+                    operation.responses.responses.insert(status, response.into());
+                }
+            };
             let route_security = quote! {
                 caelix::openapi::apply_security(&mut operation, &[#(#security_expressions),*]);
             };
             let full_path = full_path.clone();
             openapi_routes.push(quote! {
-                fn #openapi_name(openapi: &mut caelix::openapi::utoipa::openapi::OpenApi) {
+                fn #openapi_name(
+                    openapi: &mut caelix::openapi::utoipa::openapi::OpenApi,
+                    __caelix_global_throttle: bool,
+                ) {
                     let mut operation = caelix::openapi::utoipa::openapi::path::Operation::new();
                     operation.operation_id = Some(#handler_name.to_string());
                     #summary
@@ -1557,6 +1838,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     #(#response_headers)*
                     operation.responses.responses.insert(#status.to_string(), response.into());
                     #(#error_responses)*
+                    #throttle_response
                     caelix::openapi::operation(#verb, #full_path, operation, openapi);
                 }
             });
@@ -1586,6 +1868,9 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     #[cfg(not(feature = "openapi"))]
     let openapi_route_functions = quote! {};
     let route_dependencies = route_dependencies.iter();
+    let route_throttle_policies = route_throttle_policies.iter().map(|(limit, window)| {
+        quote! { caelix::ThrottlePolicy::new(#limit, #window).validate()?; }
+    });
     quote! {
         #(#errors)*
         #impl_block
@@ -1593,6 +1878,10 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             fn base_path() -> &'static str { #base_path }
             fn route_dependencies() -> Vec<caelix::ProviderDependency> {
                 vec![#(caelix::ProviderDependency::of::<#route_dependencies>()),*]
+            }
+            fn validate_routes() -> caelix::Result<()> {
+                #(#route_throttle_policies)*
+                Ok(())
             }
             fn routes() -> &'static [caelix::RouteDef] { &[#(#routes),*] }
             fn register_routes(cfg_any: &mut dyn std::any::Any) { #register_routes }

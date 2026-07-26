@@ -2,12 +2,12 @@ use std::{collections::BTreeMap, future::Future, pin::Pin};
 
 use actix_web::{FromRequest, HttpRequest, dev::Payload, web};
 use bytes::{Bytes, BytesMut};
-use caelix_core::{BadRequestException, IntoCaelixResponse, Result};
+use caelix_core::{BadRequestException, Result};
 #[cfg(feature = "uploads")]
 use caelix_core::{MultipartForm, UploadConfig, upload_limit_error};
 use futures_util::StreamExt;
 
-use crate::{application::UploadRuntimeConfig, to_actix_response};
+use crate::application::UploadRuntimeConfig;
 
 /// Buffered request data used by generated body and multipart controller wrappers.
 #[doc(hidden)]
@@ -16,6 +16,42 @@ pub struct RequestPayload {
     body: Bytes,
     #[cfg(feature = "uploads")]
     upload: UploadRuntimeConfig,
+}
+
+/// Unbuffered body extractor used so generated wrappers can throttle first.
+#[doc(hidden)]
+pub struct RawRequestPayload {
+    content_type: Option<String>,
+    payload: Payload,
+    body_limit: usize,
+    #[cfg(feature = "uploads")]
+    upload: UploadRuntimeConfig,
+}
+
+impl RawRequestPayload {
+    /// Buffers the request body after throttling and guards have run.
+    pub async fn buffer(mut self) -> Result<RequestPayload> {
+        let mut body = BytesMut::new();
+        while let Some(chunk) = self.payload.next().await {
+            let chunk = chunk.map_err(|_| BadRequestException::new("invalid request body"))?;
+            if body.len().saturating_add(chunk.len()) > self.body_limit {
+                #[cfg(feature = "uploads")]
+                return Err(upload_limit_error(self.body_limit));
+                #[cfg(not(feature = "uploads"))]
+                return Err(caelix_core::PayloadTooLargeException::new(format!(
+                    "request body exceeds the configured limit of {} bytes",
+                    self.body_limit
+                )));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(RequestPayload {
+            content_type: self.content_type,
+            body: body.freeze(),
+            #[cfg(feature = "uploads")]
+            upload: self.upload,
+        })
+    }
 }
 
 impl RequestPayload {
@@ -71,7 +107,7 @@ fn json_error(message: &str) -> caelix_core::HttpException {
     }
 }
 
-impl FromRequest for RequestPayload {
+impl FromRequest for RawRequestPayload {
     type Error = actix_web::Error;
     type Future = Pin<Box<dyn Future<Output = std::result::Result<Self, Self::Error>>>>;
 
@@ -90,36 +126,15 @@ impl FromRequest for RequestPayload {
                 body_limit: crate::application::DEFAULT_BODY_LIMIT_BYTES,
             });
         let body_limit = upload.body_limit;
-        let mut payload = payload.take();
+        let payload = payload.take();
         Box::pin(async move {
-            let mut body = BytesMut::new();
-            while let Some(chunk) = payload.next().await {
-                let chunk = chunk
-                    .map_err(|_| actix_error(BadRequestException::new("invalid request body")))?;
-                if body.len().saturating_add(chunk.len()) > body_limit {
-                    #[cfg(feature = "uploads")]
-                    return Err(actix_error(upload_limit_error(body_limit)));
-                    #[cfg(not(feature = "uploads"))]
-                    return Err(actix_error(caelix_core::PayloadTooLargeException::new(
-                        format!("request body exceeds the configured limit of {body_limit} bytes"),
-                    )));
-                }
-                body.extend_from_slice(&chunk);
-            }
             Ok(Self {
                 content_type,
-                body: body.freeze(),
+                payload,
+                body_limit,
                 #[cfg(feature = "uploads")]
                 upload,
             })
         })
     }
-}
-
-fn actix_error(error: caelix_core::HttpException) -> actix_web::Error {
-    actix_web::error::InternalError::from_response(
-        "Caelix request payload error",
-        to_actix_response(error.into_response()),
-    )
-    .into()
 }

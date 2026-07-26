@@ -184,7 +184,7 @@ fn normalize_path(mut path: String) -> String {
 #[doc(hidden)]
 pub struct OpenApiRouteDef {
     /// The `document` value.
-    pub document: fn(&mut OpenApi),
+    pub document: fn(&mut OpenApi, bool),
 }
 
 /// Describes an exception marker that can appear in `#[errors(...)]`.
@@ -261,7 +261,10 @@ pub fn build_openapi<M: Module + 'static>(config: &OpenApiConfig) -> Result<Open
         Info::new(config.title.clone(), config.version.clone()),
         utoipa::openapi::Paths::new(),
     );
-    crate::visit_module_openapi_routes::<M>(&mut |route| (route.document)(&mut openapi));
+    let throttle_enabled = crate::module_registers_provider::<M, crate::Throttle>();
+    crate::visit_module_openapi_routes::<M>(&mut |route| {
+        (route.document)(&mut openapi, throttle_enabled)
+    });
     add_security_schemes(&mut openapi, config);
     validate_security_requirements(&openapi, config)?;
     validate_document_paths(&openapi, config)?;

@@ -11,7 +11,9 @@ pub use caelix_core::*;
 /// Re-exported public API.
 pub use caelix_macros::{context, event_pattern, message_pattern, microservice, payload};
 /// Re-exported public API.
-pub use caelix_macros::{controller, gateway, guard, injectable, on_message};
+pub use caelix_macros::{
+    controller, gateway, guard, injectable, on_message, skip_throttle, throttle,
+};
 
 /// Microservice transport APIs.
 #[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
@@ -73,8 +75,8 @@ pub use caelix_actix::__actix_web;
 #[cfg(feature = "actix")]
 /// Re-exported public API.
 pub use caelix_actix::{
-    Application, Logging, RequestPayload, TestApplication, TestApplicationBuilder,
-    TestRequestBuilder, TestResponse, to_actix_response,
+    Application, Logging, RawRequestPayload, RequestPayload, TestApplication,
+    TestApplicationBuilder, TestRequestBuilder, TestResponse, to_actix_response,
 };
 
 /// Hidden Axum and Tokio re-exports for generated controller and runtime code.
@@ -93,8 +95,9 @@ pub use tokio as __tokio;
 #[cfg(feature = "axum")]
 /// Re-exported public API.
 pub use caelix_axum::{
-    Application, AxumRequestInfo, AxumRouterBuilder, DEFAULT_BODY_LIMIT_BYTES, RequestPayload,
-    TestApplication, TestApplicationBuilder, TestRequestBuilder, TestResponse, to_axum_response,
+    Application, AxumRequestInfo, AxumRouterBuilder, DEFAULT_BODY_LIMIT_BYTES, RawRequestPayload,
+    RequestPayload, TestApplication, TestApplicationBuilder, TestRequestBuilder, TestResponse,
+    to_axum_response,
 };
 
 /// Socket.IO APIs, available only with the Axum-selecting `socketio` feature.
@@ -112,7 +115,9 @@ pub mod prelude {
     #[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
     pub use caelix_macros::{context, event_pattern, message_pattern, microservice, payload};
     /// Re-exported public API.
-    pub use caelix_macros::{controller, gateway, guard, injectable, on_message};
+    pub use caelix_macros::{
+        controller, gateway, guard, injectable, on_message, skip_throttle, throttle,
+    };
     #[cfg(any(feature = "microservices-nats", feature = "microservices-redis"))]
     pub use caelix_microservices::*;
 }

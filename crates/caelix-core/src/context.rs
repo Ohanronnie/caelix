@@ -2,6 +2,7 @@ use crate::Result;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
+    net::SocketAddr,
     sync::{Arc, RwLock},
 };
 
@@ -13,6 +14,7 @@ pub struct RequestContext {
     trace_id: String,
     headers: HashMap<String, String>,
     cookies: HashMap<String, String>,
+    peer_addr: Option<SocketAddr>,
     extensions: RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
 }
 
@@ -50,8 +52,20 @@ impl RequestContext {
             trace_id,
             headers,
             cookies,
+            peer_addr: None,
             extensions: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Sets the immediate socket peer address.
+    pub fn with_peer_addr(mut self, peer_addr: SocketAddr) -> Self {
+        self.peer_addr = Some(peer_addr);
+        self
+    }
+
+    /// Returns the immediate socket peer address, when the runtime supplied one.
+    pub fn peer_addr(&self) -> Option<SocketAddr> {
+        self.peer_addr
     }
 
     /// Runs the `method` public API operation.

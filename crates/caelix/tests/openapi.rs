@@ -5,7 +5,7 @@ use caelix::openapi::{
 };
 use caelix::{
     BadRequestException, ConflictException, Module, ModuleMetadata, Response, Result,
-    TestApplication, controller, injectable,
+    TestApplication, ThrottleModule, controller, injectable,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -47,6 +47,27 @@ impl Module for DocumentationModule {
     }
 }
 
+struct ThrottledDocumentationModule;
+
+#[injectable]
+struct ThrottleDocumentationController;
+
+#[controller("/throttled-docs")]
+impl ThrottleDocumentationController {
+    #[get("")]
+    async fn get(&self) -> Result<Response<&'static str>> {
+        Ok(Response::Body("ok"))
+    }
+}
+
+impl Module for ThrottledDocumentationModule {
+    fn register() -> ModuleMetadata {
+        ModuleMetadata::new()
+            .import::<ThrottleModule>()
+            .controller::<ThrottleDocumentationController>()
+    }
+}
+
 #[caelix::test]
 async fn serves_openapi_documentation_with_route_metadata() {
     let app = TestApplication::new::<DocumentationModule>()
@@ -75,6 +96,7 @@ async fn serves_openapi_documentation_with_route_metadata() {
     assert_eq!(document["openapi"], "3.1.0");
     assert_eq!(document["info"]["title"], "Payments");
     let operation = &document["paths"]["/payments"]["post"];
+    assert!(operation["responses"].get("429").is_none());
     assert_eq!(operation["requestBody"]["required"], true);
     assert_eq!(operation["parameters"][0]["in"], "header");
     assert_eq!(operation["parameters"][0]["required"], true);
@@ -137,4 +159,15 @@ async fn serves_openapi_documentation_with_route_metadata() {
         .await
         .unwrap()
         .assert_status(caelix::StatusCode::OK);
+}
+
+#[test]
+fn openapi_only_documents_active_global_throttling() {
+    let document = caelix::openapi::build_openapi::<ThrottledDocumentationModule>(
+        &OpenApiConfig::new("Payments", "1.0.0"),
+    )
+    .unwrap();
+    let document = serde_json::to_value(document).unwrap();
+    let rejected = &document["paths"]["/throttled-docs"]["get"]["responses"]["429"];
+    assert!(rejected.is_object());
 }

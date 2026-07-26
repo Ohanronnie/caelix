@@ -26,7 +26,7 @@ fn cookie_extractors_generate_required_and_optional_openapi_parameters() {
 
     let mut document = OpenApi::new(Info::new("Cookies", "1.0.0"), Paths::new());
     for route in CookieController::openapi_routes() {
-        (route.document)(&mut document);
+        (route.document)(&mut document, false);
     }
     let value = serde_json::to_value(document).unwrap();
     let required = &value["paths"]["/cookies/required"]["get"]["parameters"][0];

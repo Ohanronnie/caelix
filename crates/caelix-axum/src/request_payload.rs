@@ -5,13 +5,12 @@ use axum::{
     response::Response,
 };
 use bytes::Bytes;
-use caelix_core::{BadRequestException, IntoCaelixResponse, Result};
+use caelix_core::{BadRequestException, Result};
 #[cfg(feature = "uploads")]
 use caelix_core::{MultipartForm, upload_limit_error};
 use std::collections::BTreeMap;
 
 use crate::application::UploadRuntimeConfig;
-use crate::to_axum_response;
 
 /// Buffered request data used by generated body and multipart controller wrappers.
 #[doc(hidden)]
@@ -20,6 +19,37 @@ pub struct RequestPayload {
     body: Bytes,
     #[cfg(feature = "uploads")]
     upload: UploadRuntimeConfig,
+}
+
+/// Unbuffered body extractor used so generated wrappers can throttle first.
+#[doc(hidden)]
+pub struct RawRequestPayload {
+    content_type: Option<String>,
+    body: Body,
+    body_limit: usize,
+    #[cfg(feature = "uploads")]
+    upload: UploadRuntimeConfig,
+}
+
+impl RawRequestPayload {
+    /// Buffers the request body after throttling and guards have run.
+    pub async fn buffer(self) -> Result<RequestPayload> {
+        let body = to_bytes(self.body, self.body_limit).await.map_err(|_| {
+            #[cfg(feature = "uploads")]
+            return upload_limit_error(self.body_limit);
+            #[cfg(not(feature = "uploads"))]
+            caelix_core::PayloadTooLargeException::new(format!(
+                "request body exceeds the configured limit of {} bytes",
+                self.body_limit
+            ))
+        })?;
+        Ok(RequestPayload {
+            content_type: self.content_type,
+            body,
+            #[cfg(feature = "uploads")]
+            upload: self.upload,
+        })
+    }
 }
 
 impl RequestPayload {
@@ -75,7 +105,7 @@ fn json_error(message: &str) -> caelix_core::HttpException {
     }
 }
 
-impl<S> FromRequest<S> for RequestPayload
+impl<S> FromRequest<S> for RawRequestPayload
 where
     S: Send + Sync,
 {
@@ -101,20 +131,10 @@ where
             .and_then(|value| value.to_str().ok())
             .map(ToOwned::to_owned);
         let body_limit = upload.body_limit;
-        let body = to_bytes(body, body_limit).await.map_err(|_| {
-            #[cfg(feature = "uploads")]
-            return to_axum_response(upload_limit_error(body_limit).into_response());
-            #[cfg(not(feature = "uploads"))]
-            to_axum_response(
-                caelix_core::PayloadTooLargeException::new(format!(
-                    "request body exceeds the configured limit of {body_limit} bytes"
-                ))
-                .into_response(),
-            )
-        })?;
         Ok(Self {
             content_type,
             body,
+            body_limit,
             #[cfg(feature = "uploads")]
             upload,
         })

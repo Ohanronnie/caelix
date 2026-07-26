@@ -1,6 +1,7 @@
 use std::{
     convert::Infallible,
     ffi::{OsStr, OsString},
+    net::SocketAddr,
     sync::Arc,
     time::Instant,
 };
@@ -10,7 +11,7 @@ use axum::http::header;
 use axum::{
     Router,
     body::Body,
-    extract::{Extension, FromRequestParts},
+    extract::{ConnectInfo, Extension, FromRequestParts},
     http::{HeaderMap, Method, Request, Uri, request::Parts},
     response::Response,
 };
@@ -67,6 +68,7 @@ pub struct AxumRequestInfo {
     method: Method,
     uri: Uri,
     headers: HeaderMap,
+    peer_addr: Option<SocketAddr>,
 }
 
 impl AxumRequestInfo {
@@ -81,6 +83,10 @@ impl AxumRequestInfo {
     /// Runs the `headers` public API operation.
     pub fn headers(&self) -> &HeaderMap {
         &self.headers
+    }
+    /// Returns the immediate socket peer address.
+    pub fn peer_addr(&self) -> Option<SocketAddr> {
+        self.peer_addr
     }
 }
 
@@ -98,6 +104,10 @@ where
             method: parts.method.clone(),
             uri: parts.uri.clone(),
             headers: parts.headers.clone(),
+            peer_addr: parts
+                .extensions
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|value| value.0),
         })
     }
 }
@@ -370,7 +380,11 @@ impl Application {
         let shutdown_fn = self.shutdown_fn;
         let container = self.container.clone();
         let router = self.into_router();
-        let result = axum::serve(listener, router).await;
+        let result = axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
         shutdown_fn(&container).await.map_err(to_io_error)?;
         result
     }

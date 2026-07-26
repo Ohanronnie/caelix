@@ -79,6 +79,18 @@ pub fn controller(args: TokenStream, input: TokenStream) -> TokenStream {
     controller::expand(args, input)
 }
 
+/// Applies a fixed-window policy to a controller or route.
+#[proc_macro_attribute]
+pub fn throttle(args: TokenStream, input: TokenStream) -> TokenStream {
+    controller::expand_controller_throttle_marker(args, input, false)
+}
+
+/// Disables inherited throttling for a controller or route.
+#[proc_macro_attribute]
+pub fn skip_throttle(args: TokenStream, input: TokenStream) -> TokenStream {
+    controller::expand_controller_throttle_marker(args, input, true)
+}
+
 /// Declares an OpenAPI response for a controller handler.
 ///
 /// This marker is consumed by [`controller`] when the `openapi` feature is

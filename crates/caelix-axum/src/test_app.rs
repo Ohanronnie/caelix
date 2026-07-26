@@ -1,6 +1,7 @@
 use std::{
     future::{Future, IntoFuture},
     marker::PhantomData,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     pin::Pin,
     sync::Arc,
 };
@@ -8,6 +9,7 @@ use std::{
 use axum::{
     Router,
     body::Body,
+    extract::ConnectInfo,
     http::{HeaderValue, Method, Request, header::HeaderName},
     response::Response,
 };
@@ -233,12 +235,22 @@ pub struct TestRequestBuilder<'a> {
 
 impl<'a> TestRequestBuilder<'a> {
     fn new(app: &'a TestApplication, method: Method, path: &str) -> Self {
-        let request = Request::builder()
+        let mut request = Request::builder()
             .method(method)
             .uri(path)
             .body(Body::empty())
             .expect("test request path must be a valid URI");
+        request.extensions_mut().insert(ConnectInfo(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            12345,
+        )));
         Self { app, request }
+    }
+
+    /// Sets the immediate socket peer address for this request.
+    pub fn peer_addr(mut self, peer_addr: SocketAddr) -> Self {
+        self.request.extensions_mut().insert(ConnectInfo(peer_addr));
+        self
     }
 
     /// Runs the `json` public API operation.
@@ -282,6 +294,11 @@ impl TestResponse {
     pub fn status(&self) -> StatusCode {
         StatusCode::from_u16(self.response.status().as_u16())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+    }
+
+    /// Returns a response header as UTF-8 text.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.response.headers().get(name)?.to_str().ok()
     }
 
     /// Runs the `assert_status` public API operation.

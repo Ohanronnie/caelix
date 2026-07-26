@@ -26,6 +26,7 @@ futures-sink = "0.3.33"
 futures-util = { version = "0.3.33", default-features = false }
 http-body-util = "0.1.4"
 infer = "0.22.0"
+ipnet = "2.11.0"
 notify = "8.2.0"
 notify-debouncer-mini = "0.7.0"
 num_cpus = "1.17.0"

@@ -27,6 +27,7 @@ crossbeam-channel = "0.5.16"
 futures-core.workspace = true
 futures-util = { workspace = true, default-features = false, features = ["std"] }
 http = "1.4.2"
+ipnet.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 serde_html_form.workspace = true

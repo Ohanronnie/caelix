@@ -255,6 +255,7 @@ pub struct ControllerDef {
     /// The `route_log_fn` value.
     pub route_log_fn: fn(),
     pub(crate) route_count_fn: fn() -> usize,
+    validate_routes_fn: fn() -> Result<()>,
     #[cfg(feature = "openapi")]
     pub(crate) openapi_routes_fn: fn() -> &'static [crate::openapi::OpenApiRouteDef],
     provider: ProviderDef,
@@ -276,6 +277,7 @@ impl ControllerDef {
             register_fn: |any| C::register_routes(any),
             route_log_fn: || crate::log_controller_routes::<C>(),
             route_count_fn: || C::routes().len(),
+            validate_routes_fn: C::validate_routes,
             #[cfg(feature = "openapi")]
             openapi_routes_fn: || C::openapi_routes(),
             provider,
@@ -539,6 +541,9 @@ impl ModuleGraph {
             states.insert(def.type_id, 1);
             path.push(def.type_name);
             let metadata = (def.metadata_fn)();
+            for controller in &metadata.controllers {
+                (controller.validate_routes_fn)()?;
+            }
             let index = graph.len();
             graph.push(ModuleNode {
                 type_id: def.type_id,
@@ -1150,6 +1155,17 @@ pub fn register_module_controllers<M: Module + 'static>(any: &mut dyn Any) {
             }
         }
     }
+}
+#[cfg(feature = "openapi")]
+pub(crate) fn module_registers_provider<M: Module + 'static, T: 'static>() -> bool {
+    ModuleGraph::discover::<M>().is_ok_and(|graph| {
+        graph.nodes.iter().any(|node| {
+            node.metadata
+                .providers
+                .iter()
+                .any(|provider| provider.type_id == TypeId::of::<T>())
+        })
+    })
 }
 #[cfg(feature = "openapi")]
 #[doc(hidden)]
