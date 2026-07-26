@@ -18,16 +18,16 @@ broker-only process.
 
 ```toml
 # Default Actix
-caelix = "0.0.32"
+caelix = "0.0.33"
 
 # Axum
-caelix = { version = "0.0.32", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.33", default-features = false, features = ["axum"] }
 
 # Actix with request facilities
-caelix = { version = "0.0.32", features = ["uploads", "validator", "openapi"] }
+caelix = { version = "0.0.33", features = ["uploads", "validator", "openapi"] }
 
 # Broker-only process with both transports
-caelix = { version = "0.0.32", default-features = false, features = [
+caelix = { version = "0.0.33", default-features = false, features = [
   "microservices-nats",
   "microservices-redis",
 ] }

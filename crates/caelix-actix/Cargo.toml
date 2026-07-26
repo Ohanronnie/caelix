@@ -1,6 +1,6 @@
 [package]
 name = "caelix-actix"
-version = "0.0.32"
+version = "0.0.33"
 edition = "2024"
 description = "Actix Web runtime adapter for Caelix."
 license = "MIT"
@@ -21,7 +21,7 @@ actix-web = { version = "4.14.0", default-features = false, features = ["cookies
 bytes.workspace = true
 bytestring.workspace = true
 base64.workspace = true
-caelix-core = { path = "../caelix-core", version = "0.0.32", default-features = false }
+caelix-core = { path = "../caelix-core", version = "0.0.33", default-features = false }
 futures-util = { workspace = true, default-features = false, features = ["std", "sink"] }
 futures-core.workspace = true
 futures-sink.workspace = true

@@ -117,13 +117,13 @@ do not register the same gateway path twice in the module tree.
 `WebSocketGateway` provides five callbacks. All except `on_error` and
 `on_close` can return a `caelix::Result<()>` through `BoxFuture`.
 
-| Callback | When it runs | Typical use |
-| --- | --- | --- |
-| `on_connect` | After the WebSocket handshake | Inspect the request, initialize state, send a welcome message |
-| `on_text` | For each complete text message | Decode commands or JSON text and send a response |
-| `on_binary` | For each complete binary message | Process bytes or forward a binary payload |
-| `on_error` | When a callback fails or the transport reports a protocol error | Log the failure and collect metrics |
-| `on_close` | Once when the connection ends | Release application-level resources |
+| Callback     | When it runs                                                    | Typical use                                                   |
+| ------------ | --------------------------------------------------------------- | ------------------------------------------------------------- |
+| `on_connect` | After the WebSocket handshake                                   | Inspect the request, initialize state, send a welcome message |
+| `on_text`    | For each complete text message                                  | Decode commands or JSON text and send a response              |
+| `on_binary`  | For each complete binary message                                | Process bytes or forward a binary payload                     |
+| `on_error`   | When a callback fails or the transport reports a protocol error | Log the failure and collect metrics                           |
+| `on_close`   | Once when the connection ends                                   | Release application-level resources                           |
 
 Fragmented frames are reassembled before `on_text` or `on_binary` runs. Ping
 frames receive an automatic pong reply; application code normally only needs
@@ -259,7 +259,7 @@ The browser's built-in `WebSocket` client speaks RFC 6455 directly:
 ```html
 <script>
   const socket = new WebSocket(
-    "ws://localhost:3000/chat?token=temporary-token"
+    "ws://localhost:3000/chat?token=temporary-token",
   );
   socket.binaryType = "arraybuffer";
 
@@ -299,7 +299,7 @@ Axum is selected explicitly because Actix is Caelix's default runtime:
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.32", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.33", default-features = false, features = ["axum"] }
 ```
 
 The `axum` feature and the `actix` feature are mutually exclusive. With this
@@ -396,7 +396,7 @@ transitively:
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.32", default-features = false, features = ["socketio"] }
+caelix = { version = "0.0.33", default-features = false, features = ["socketio"] }
 ```
 
 This feature cannot be combined with the default Actix backend. It exposes

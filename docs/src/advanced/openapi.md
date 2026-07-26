@@ -3,7 +3,7 @@
 Enable the `openapi` feature. Caelix re-exports `utoipa`, including `ToSchema`, so no separate dependency is required:
 
 ```toml
-caelix = { version = "0.0.32", features = ["openapi"] }
+caelix = { version = "0.0.33", features = ["openapi"] }
 ```
 
 Opt in when building the application. Caelix serves OpenAPI 3.1 JSON at `/openapi.json` and Swagger UI at `/docs`.
@@ -61,12 +61,12 @@ This does not add guards, extract credentials, verify tokens, read cookies, or a
 
 Caelix reserves four standard security-scheme names. Register the builder that corresponds to the route marker you plan to use:
 
-| Builder | OpenAPI component | Route requirement |
-| --- | --- | --- |
-| `.bearer_auth()` | `BearerAuth`: HTTP bearer, JWT format | `Security::BearerAuth` |
-| `.api_key_auth("X-API-Key")` | `ApiKeyAuth`: API key in a header | `Security::ApiKeyAuth` |
-| `.cookie_auth("session")` | `CookieAuth`: API key in a cookie | `Security::CookieAuth` |
-| `.oauth2(...)` | `OAuth2`: supplied OAuth2 flows | `Security::OAuth2(&[...])` |
+| Builder                      | OpenAPI component                     | Route requirement          |
+| ---------------------------- | ------------------------------------- | -------------------------- |
+| `.bearer_auth()`             | `BearerAuth`: HTTP bearer, JWT format | `Security::BearerAuth`     |
+| `.api_key_auth("X-API-Key")` | `ApiKeyAuth`: API key in a header     | `Security::ApiKeyAuth`     |
+| `.cookie_auth("session")`    | `CookieAuth`: API key in a cookie     | `Security::CookieAuth`     |
+| `.oauth2(...)`               | `OAuth2`: supplied OAuth2 flows       | `Security::OAuth2(&[...])` |
 
 For example, this configures bearer, header API-key, cookie, and OAuth2 client-credentials components in Swagger UI:
 

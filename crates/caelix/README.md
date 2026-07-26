@@ -11,7 +11,7 @@ cargo add caelix
 Actix is enabled by default. For Axum:
 
 ```toml
-caelix = { version = "0.0.32", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.33", default-features = false, features = ["axum"] }
 ```
 
 Broker services can select `microservices-nats`, `microservices-redis`, or both.

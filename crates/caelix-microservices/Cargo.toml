@@ -1,6 +1,6 @@
 [package]
 name = "caelix-microservices"
-version = "0.0.32"
+version = "0.0.33"
 edition = "2024"
 description = "NATS and Redis microservice transports for Caelix."
 license = "MIT"
@@ -14,7 +14,7 @@ redis = ["dep:redis"]
 [dependencies]
 async-nats.workspace = true
 redis = { version = "1.4.1", optional = true, features = ["tokio-comp", "connection-manager", "streams"] }
-caelix-core = { path = "../caelix-core", version = "0.0.32" }
+caelix-core = { path = "../caelix-core", version = "0.0.33" }
 futures-util = { workspace = true, default-features = false, features = ["std"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

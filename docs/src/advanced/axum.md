@@ -16,7 +16,7 @@ and enables `axum` explicitly:
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.32", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.33", default-features = false, features = ["axum"] }
 ```
 
 The `actix` and `axum` features are mutually exclusive. Most applications
@@ -26,7 +26,7 @@ as `axum::serve` or `tokio::net::TcpListener`:
 
 ```toml
 [dependencies]
-caelix = { version = "0.0.32", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.33", default-features = false, features = ["axum"] }
 axum = "0.8.8"
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread"] }
 ```
@@ -109,15 +109,15 @@ WebSocket messages have their own limit. Configure that separately with
 Controller source does not change for Axum. Caelix maps its framework-neutral
 extractor attributes to Axum extractors internally:
 
-| Caelix attribute | Axum extractor | Meaning |
-| --- | --- | --- |
-| `#[param]` | `axum::extract::Path<T>` | Route parameters such as `{id}` |
-| `#[query]` | `axum::extract::Query<T>` | Query-string values |
-| `#[body]` | Caelix negotiated request wrapper | JSON or typed multipart text fields |
-| `#[file]` | Caelix multipart file binding | One required or optional `UploadedFile` |
-| `#[files]` | Caelix multipart file binding | Repeated `Vec<UploadedFile>` field |
-| `#[multipart]` | Caelix multipart form binding | Direct `MultipartForm` access |
-| `#[user]` | `RequestContext` lookup | A typed value installed by a guard or interceptor |
+| Caelix attribute | Axum extractor                    | Meaning                                           |
+| ---------------- | --------------------------------- | ------------------------------------------------- |
+| `#[param]`       | `axum::extract::Path<T>`          | Route parameters such as `{id}`                   |
+| `#[query]`       | `axum::extract::Query<T>`         | Query-string values                               |
+| `#[body]`        | Caelix negotiated request wrapper | JSON or typed multipart text fields               |
+| `#[file]`        | Caelix multipart file binding     | One required or optional `UploadedFile`           |
+| `#[files]`       | Caelix multipart file binding     | Repeated `Vec<UploadedFile>` field                |
+| `#[multipart]`   | Caelix multipart form binding     | Direct `MultipartForm` access                     |
+| `#[user]`        | `RequestContext` lookup           | A typed value installed by a guard or interceptor |
 
 The controller method receives the inner value (`T`), not `Path<T>`,
 `Query<T>`, or `Json<T>`:

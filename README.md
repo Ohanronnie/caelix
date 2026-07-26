@@ -15,7 +15,7 @@ cargo add caelix
 Caelix uses Actix by default. For Axum:
 
 ```toml
-caelix = { version = "0.0.32", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.33", default-features = false, features = ["axum"] }
 ```
 
 ## CLI
@@ -29,13 +29,13 @@ See the [CLI guide](https://ohanronnie.github.io/caelix/cli/guide.html) for gene
 
 ## Packages
 
-| Package | Purpose |
-| --- | --- |
-| [caelix](https://crates.io/crates/caelix) | Public framework facade |
-| [caelix-core](https://crates.io/crates/caelix-core) | Modules, DI, lifecycle, events, and HTTP primitives |
-| [caelix-actix](https://crates.io/crates/caelix-actix) | Actix Web runtime adapter |
-| [caelix-axum](https://crates.io/crates/caelix-axum) | Axum runtime adapter |
-| [caelix-socketio](https://crates.io/crates/caelix-socketio) | Socket.IO integration for Axum |
-| [caelix-microservices](https://crates.io/crates/caelix-microservices) | Typed NATS and Redis transports |
-| [caelix-macros](https://crates.io/crates/caelix-macros) | `#[injectable]`, `#[controller]`, and related macros |
-| [caelix-cli](https://crates.io/crates/caelix-cli) | Application and feature generator |
+| Package                                                               | Purpose                                              |
+| --------------------------------------------------------------------- | ---------------------------------------------------- |
+| [caelix](https://crates.io/crates/caelix)                             | Public framework facade                              |
+| [caelix-core](https://crates.io/crates/caelix-core)                   | Modules, DI, lifecycle, events, and HTTP primitives  |
+| [caelix-actix](https://crates.io/crates/caelix-actix)                 | Actix Web runtime adapter                            |
+| [caelix-axum](https://crates.io/crates/caelix-axum)                   | Axum runtime adapter                                 |
+| [caelix-socketio](https://crates.io/crates/caelix-socketio)           | Socket.IO integration for Axum                       |
+| [caelix-microservices](https://crates.io/crates/caelix-microservices) | Typed NATS and Redis transports                      |
+| [caelix-macros](https://crates.io/crates/caelix-macros)               | `#[injectable]`, `#[controller]`, and related macros |
+| [caelix-cli](https://crates.io/crates/caelix-cli)                     | Application and feature generator                    |
