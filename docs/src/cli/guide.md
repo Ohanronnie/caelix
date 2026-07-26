@@ -16,7 +16,9 @@ After installation, run commands with the `caelix` binary.
 caelix run
 ```
 
-This clears the terminal, then delegates to `cargo run` in the current project. Use `--watch` to restart the application when files under `src/` or `Cargo.toml` change:
+This clears the terminal, including its scrollback buffer, then delegates to
+`cargo run` in the current project. Use `--watch` to restart the application
+when files under `src/` or `Cargo.toml` change:
 
 ```sh
 caelix run --watch

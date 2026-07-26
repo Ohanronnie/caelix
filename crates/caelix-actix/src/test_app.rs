@@ -17,8 +17,7 @@ use bytes::Bytes;
 use caelix_core::UploadConfig;
 use caelix_core::{
     BoxFuture, Container, Module, ProviderDependency, ProviderOverrides, Result, StatusCode,
-    build_container_with_overrides, log_application_started, log_module_routes,
-    register_module_controllers, shutdown_module,
+    build_container_with_overrides, register_module_controllers, shutdown_module,
 };
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -171,10 +170,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
 
     /// Runs the `compile` public API operation.
     pub async fn compile(self) -> Result<TestApplication> {
-        let start = std::time::Instant::now();
         let container = build_container_with_overrides::<M>(self.overrides).await?;
-        log_module_routes::<M>();
-        log_application_started(start.elapsed());
 
         let container = Arc::new(container);
         let body_limit = self.body_limit;

@@ -26,8 +26,8 @@ use caelix_core::openapi::{OpenApiConfig, build_openapi};
 use caelix_core::visit_module_gateways;
 use caelix_core::{
     BoxFuture, Container, HttpResponse as CaelixHttpResponse, IntoCaelixResponse, Module,
-    NotFoundException, ResponseBody, Result, log_application_started, log_listening,
-    log_module_routes, register_module_controllers, shutdown_module,
+    NotFoundException, ResponseBody, Result, log_application_starting, log_module_routes,
+    log_ready, register_module_controllers, shutdown_module,
 };
 use futures_util::StreamExt;
 use tower::{Layer, Service};
@@ -178,6 +178,7 @@ type RouterLayer = Box<dyn FnOnce(Router) -> Router + Send>;
 
 /// Public Caelix type `Application`.
 pub struct Application {
+    startup_started: Instant,
     container: Arc<Container>,
     configure_fn: fn(&mut dyn std::any::Any),
     gateway_configure_fn: fn(&mut AxumRouterBuilder, Arc<Container>, usize),
@@ -200,6 +201,7 @@ impl Application {
     /// Runs the `new` public API operation.
     pub async fn new<M: Module + 'static>() -> Result<Self> {
         let start = Instant::now();
+        log_application_starting();
         #[cfg(not(feature = "socketio"))]
         let container = build_container::<M>().await?;
         #[cfg(feature = "socketio")]
@@ -212,9 +214,9 @@ impl Application {
             (container, layer)
         };
         log_module_routes::<M>();
-        log_application_started(start.elapsed());
 
         Ok(Self {
+            startup_started: start,
             container: Arc::new(container),
             configure_fn: |router| register_module_controllers::<M>(router),
             gateway_configure_fn: |routes, container, max_message_size| {
@@ -357,7 +359,6 @@ impl Application {
             return shutdown_fn(&container).await.map_err(to_io_error);
         }
 
-        log_listening(addr);
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(listener) => listener,
             Err(error) => {
@@ -365,6 +366,7 @@ impl Application {
                 return Err(error);
             }
         };
+        log_ready(addr, self.startup_started.elapsed());
         let shutdown_fn = self.shutdown_fn;
         let container = self.container.clone();
         let router = self.into_router();

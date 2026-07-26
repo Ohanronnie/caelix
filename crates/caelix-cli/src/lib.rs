@@ -20,6 +20,8 @@ use notify::RecursiveMode;
 use notify_debouncer_mini::new_debouncer;
 use toml_edit::{DocumentMut, Item, Value};
 
+const CLEAR_TERMINAL: &[u8] = b"\x1B[2J\x1B[3J\x1B[H";
+
 /// Public Caelix type alias `Result`.
 pub type Result<T> = std::result::Result<T, CliError>;
 
@@ -489,7 +491,7 @@ fn cargo_doctor_command(cwd: &Path) -> ProcessCommand {
 fn clear_screen() -> Result<()> {
     let mut stdout = io::stdout();
     stdout
-        .write_all(b"\x1B[2J\x1B[H")
+        .write_all(CLEAR_TERMINAL)
         .map_err(|source| CliError::Io {
             path: PathBuf::from("<stdout>"),
             source,
@@ -1350,6 +1352,11 @@ mod tests {
         let output = run_from(["caelix", "run"], ".").unwrap();
 
         assert_eq!(output, "cargo run\n");
+    }
+
+    #[test]
+    fn terminal_clear_removes_viewport_and_scrollback() {
+        assert_eq!(CLEAR_TERMINAL, b"\x1B[2J\x1B[3J\x1B[H");
     }
 
     #[test]

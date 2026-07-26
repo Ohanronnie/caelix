@@ -254,6 +254,7 @@ pub struct ControllerDef {
     pub register_fn: fn(&mut dyn Any),
     /// The `route_log_fn` value.
     pub route_log_fn: fn(),
+    pub(crate) route_count_fn: fn() -> usize,
     #[cfg(feature = "openapi")]
     pub(crate) openapi_routes_fn: fn() -> &'static [crate::openapi::OpenApiRouteDef],
     provider: ProviderDef,
@@ -274,6 +275,7 @@ impl ControllerDef {
         Self {
             register_fn: |any| C::register_routes(any),
             route_log_fn: || crate::log_controller_routes::<C>(),
+            route_count_fn: || C::routes().len(),
             #[cfg(feature = "openapi")]
             openapi_routes_fn: || C::openapi_routes(),
             provider,
@@ -352,10 +354,9 @@ pub trait Gateway: Injectable {
 
 /// Public Caelix type `ModuleDef`.
 pub struct ModuleDef {
-    type_id: TypeId,
+    pub(crate) type_id: TypeId,
     type_name: &'static str,
-    metadata_fn: fn() -> ModuleMetadata,
-    pub(crate) route_log_fn: fn(),
+    pub(crate) metadata_fn: fn() -> ModuleMetadata,
 }
 impl ModuleDef {
     /// Runs the `of` public API operation.
@@ -364,7 +365,6 @@ impl ModuleDef {
             type_id: TypeId::of::<M>(),
             type_name: std::any::type_name::<M>(),
             metadata_fn: M::register,
-            route_log_fn: || crate::log_module_routes::<M>(),
         }
     }
 }
@@ -910,7 +910,7 @@ async fn initialize_graph(graph: &ModuleGraph, container: &mut Container) -> cra
                 return Err(error);
             }
         }
-        crate::log_module_initialized(node.type_name, std::time::Duration::ZERO);
+        crate::log_module_initialized(node.type_name);
     }
     Ok(())
 }
@@ -983,7 +983,6 @@ pub async fn build_container<M: Module + 'static>() -> Result<Container> {
 pub async fn build_container_with_setup<M: Module + 'static>(
     setup: impl FnOnce(&mut Container),
 ) -> Result<Container> {
-    crate::log_application_starting();
     let mut container = Container::new();
     setup(&mut container);
     if let Err(error) = register_module::<M>(&mut container).await {
@@ -1005,7 +1004,6 @@ pub async fn build_container_with_setup<M: Module + 'static>(
 pub async fn build_container_with_overrides<M: Module + 'static>(
     overrides: ProviderOverrides,
 ) -> crate::Result<Container> {
-    crate::log_application_starting();
     let mut container = Container::new();
     container.seed_overrides(overrides);
     if let Err(error) = register_module::<M>(&mut container).await {

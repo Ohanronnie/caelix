@@ -1,8 +1,8 @@
 use std::{
+    collections::HashSet,
     env, fmt,
     io::{self, BufWriter, Write},
     panic::{self, PanicHookInfo},
-    process,
     sync::{
         Arc, Once, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -24,14 +24,12 @@ use tracing_subscriber::{
 use crate::{Controller, HttpException, Module, RouteDef};
 
 const RESET: &str = "\x1b[0m";
-const BRAND: &str = "\x1b[38;5;45m";
-const PID: &str = "\x1b[38;5;141m";
-const TIME: &str = "\x1b[38;5;245m";
-const CONTEXT: &str = "\x1b[38;5;111m";
-const INFO: &str = "\x1b[38;5;39m";
+const TIMESTAMP: &str = "\x1b[38;5;245m";
+const INFO: &str = "\x1b[38;5;82m";
+const DEBUG: &str = "\x1b[38;5;177m";
 const WARN: &str = "\x1b[38;5;214m";
 const ERROR: &str = "\x1b[38;5;203m";
-const DEBUG: &str = "\x1b[38;5;177m";
+const TARGET: &str = "\x1b[38;5;45m";
 const OK_STATUS: &str = "\x1b[38;5;82m";
 const ACCESS_LOG_QUEUE_CAPACITY: usize = 65_536;
 const ACCESS_LOG_BATCH_SIZE: usize = 1_024;
@@ -99,7 +97,7 @@ impl Logger {
     /// Runs the `new` public API operation.
     pub fn new(context: impl Into<String>) -> Self {
         Self {
-            context: short_type_name(&context.into()).to_string(),
+            context: context.into(),
         }
     }
 
@@ -178,32 +176,23 @@ fn format_log_line(
     message: &str,
     elapsed: Option<Duration>,
 ) -> String {
-    let pid = process::id();
     let timestamp = current_timestamp();
-    let level_label = format!("{:>5}", level.label());
+    let target = log_target(context);
     let elapsed = elapsed
-        .map(|duration| format!(" {}", format_elapsed(duration)))
+        .map(|duration| format!(" in {}", format_elapsed(duration)))
         .unwrap_or_default();
-    let message = match level {
-        LogLevel::Error => format!("{}{}{}", ERROR, message, RESET),
-        _ => message.to_string(),
-    };
 
     format!(
-        "{}[Caelix]{} {}{}{}  - {}{}{} {}{}{} {}[{}]{} {}{}",
-        BRAND,
-        RESET,
-        PID,
-        pid,
-        RESET,
-        TIME,
+        "{}[{}Z{} {}{:<5}{} {}{}{}]{} {}{}",
+        TIMESTAMP,
         timestamp,
         RESET,
         level.color(),
-        level_label,
+        level.label(),
         RESET,
-        CONTEXT,
-        context,
+        TARGET,
+        target,
+        TIMESTAMP,
         RESET,
         message,
         elapsed
@@ -214,9 +203,19 @@ fn format_elapsed(duration: Duration) -> String {
     let milliseconds = duration.as_millis();
 
     if milliseconds > 0 {
-        format!("+{milliseconds}ms")
+        format!("{milliseconds}ms")
     } else {
-        format!("+{}µs", duration.as_micros())
+        format!("{}µs", duration.as_micros())
+    }
+}
+
+fn log_target(context: &str) -> String {
+    match context {
+        "bootstrap" | "routes" | "server" | "module" | "provider" | "controller" | "route"
+        | "HTTP" => format!("caelix::{}", context.to_ascii_lowercase()),
+        "ExceptionHandler" => "caelix::error".to_string(),
+        context if context.contains("::") => context.to_string(),
+        context => format!("app::{context}"),
     }
 }
 
@@ -228,16 +227,14 @@ fn current_timestamp() -> String {
     let days = (total_seconds / 86_400) as i64;
     let seconds_of_day = total_seconds % 86_400;
     let (year, month, day) = civil_from_days(days);
-    let hour_24 = seconds_of_day / 3_600;
+    let hour = seconds_of_day / 3_600;
     let minute = (seconds_of_day % 3_600) / 60;
     let second = seconds_of_day % 60;
-    let period = if hour_24 < 12 { "AM" } else { "PM" };
-    let hour_12 = match hour_24 % 12 {
-        0 => 12,
-        hour => hour,
-    };
 
-    format!("{month:02}/{day:02}/{year:04}, {hour_12:02}:{minute:02}:{second:02} {period}")
+    format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{:03}",
+        duration.subsec_millis()
+    )
 }
 
 fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
@@ -306,6 +303,7 @@ fn init_tracing() {
             .with_level(false)
             .with_target(false)
             .with_ansi(false)
+            .with_max_level(Level::TRACE)
             .with_writer(CaelixMakeWriter)
             .event_format(CaelixFormatter)
             .finish();
@@ -430,49 +428,34 @@ impl Visit for MessageVisitor {
 
 /// Runs the `log_application_starting` public API operation.
 pub fn log_application_starting() {
-    log(
-        "Application",
-        LogLevel::Info,
-        "Starting Caelix application...",
-        None,
-    );
+    log("bootstrap", LogLevel::Info, "Building application", None);
 }
 
-/// Runs the `log_application_started` public API operation.
-pub fn log_application_started(elapsed: Duration) {
+/// Logs that the server has successfully bound and is ready to accept traffic.
+pub fn log_ready(addr: &str, elapsed: Duration) {
     log(
-        "Application",
+        "server",
         LogLevel::Info,
-        "Caelix application successfully started",
+        format!("Listening on http://{addr}"),
         Some(elapsed),
-    );
-}
-
-/// Runs the `log_listening` public API operation.
-pub fn log_listening(addr: &str) {
-    log(
-        "Application",
-        LogLevel::Info,
-        format!("Caelix application listening on {}", addr),
-        None,
     );
 }
 
 /// Runs the `log_module_initialized` public API operation.
-pub fn log_module_initialized(module: &str, elapsed: Duration) {
+pub fn log_module_initialized(module: &str) {
     log(
-        "InstanceLoader",
-        LogLevel::Info,
-        format!("{} dependencies initialized", short_type_name(module)),
-        Some(elapsed),
+        "module",
+        LogLevel::Debug,
+        format!("{} initialized", short_type_name(module)),
+        None,
     );
 }
 
 /// Runs the `log_provider_initialized` public API operation.
 pub fn log_provider_initialized(provider: &str, elapsed: Duration) {
     log(
-        "ProviderLoader",
-        LogLevel::Info,
+        "provider",
+        LogLevel::Debug,
         format!("{} initialized", short_type_name(provider)),
         Some(elapsed),
     );
@@ -487,14 +470,14 @@ pub fn log_controller_routes<C: Controller>() {
     }
 
     log(
-        "RoutesResolver",
-        LogLevel::Info,
+        "controller",
+        LogLevel::Debug,
         format!(
-            "{} {{{}}}:",
+            "{} {}",
             short_type_name(std::any::type_name::<C>()),
             C::base_path()
         ),
-        Some(Duration::ZERO),
+        None,
     );
 
     for route in routes {
@@ -505,14 +488,10 @@ pub fn log_controller_routes<C: Controller>() {
 /// Runs the `log_route_mapped` public API operation.
 pub fn log_route_mapped(route: &RouteDef) {
     log(
-        "RouterExplorer",
-        LogLevel::Info,
-        format!(
-            "Mapped {{{}, {}}} route",
-            route.path,
-            route.method.to_uppercase()
-        ),
-        Some(Duration::ZERO),
+        "route",
+        LogLevel::Debug,
+        format!("{:<6} {}", route.method.to_uppercase(), route.path),
+        None,
     );
 }
 
@@ -867,15 +846,46 @@ pub fn http_request_logging_enabled() -> bool {
 
 /// Runs the `log_module_routes` public API operation.
 pub fn log_module_routes<M: Module>() {
-    let metadata = M::register();
+    let mut visited = HashSet::new();
+    let (routes, controllers) = log_routes_for_metadata(M::register(), &mut visited);
+    let route_label = if routes == 1 { "route" } else { "routes" };
+    let controller_label = if controllers == 1 {
+        "controller"
+    } else {
+        "controllers"
+    };
+
+    log(
+        "routes",
+        LogLevel::Info,
+        format!("{routes} {route_label} registered across {controllers} {controller_label}"),
+        None,
+    );
+}
+
+fn log_routes_for_metadata(
+    metadata: crate::ModuleMetadata,
+    visited: &mut HashSet<std::any::TypeId>,
+) -> (usize, usize) {
+    let mut routes = 0;
+    let mut controllers = 0;
 
     for import in &metadata.imports {
-        (import.route_log_fn)();
+        if visited.insert(import.type_id) {
+            let (import_routes, import_controllers) =
+                log_routes_for_metadata((import.metadata_fn)(), visited);
+            routes += import_routes;
+            controllers += import_controllers;
+        }
     }
 
     for controller in &metadata.controllers {
         (controller.route_log_fn)();
+        routes += (controller.route_count_fn)();
+        controllers += 1;
     }
+
+    (routes, controllers)
 }
 
 fn short_type_name(name: &str) -> &str {
@@ -952,10 +962,41 @@ mod tests {
 
     #[test]
     fn elapsed_format_preserves_sub_millisecond_detail() {
-        assert_eq!(format_elapsed(Duration::ZERO), "+0µs");
-        assert_eq!(format_elapsed(Duration::from_micros(742)), "+742µs");
-        assert_eq!(format_elapsed(Duration::from_micros(1_200)), "+1ms");
-        assert_eq!(format_elapsed(Duration::from_millis(42)), "+42ms");
+        assert_eq!(format_elapsed(Duration::ZERO), "0µs");
+        assert_eq!(format_elapsed(Duration::from_micros(742)), "742µs");
+        assert_eq!(format_elapsed(Duration::from_micros(1_200)), "1ms");
+        assert_eq!(format_elapsed(Duration::from_millis(42)), "42ms");
+    }
+
+    #[test]
+    fn startup_format_uses_rust_style_targets() {
+        let line = format_log_line(
+            "server",
+            LogLevel::Info,
+            "Listening on http://127.0.0.1:3000",
+            Some(Duration::from_millis(18)),
+        );
+
+        assert!(line.contains("Z"));
+        assert!(line.contains("INFO"));
+        assert!(line.contains("caelix::server"));
+        assert!(line.contains("Listening on http://127.0.0.1:3000 in 18ms"));
+    }
+
+    #[test]
+    fn log_levels_have_distinct_labels_and_colors() {
+        let levels = [
+            LogLevel::Info,
+            LogLevel::Debug,
+            LogLevel::Warn,
+            LogLevel::Error,
+        ];
+
+        let labels: HashSet<_> = levels.iter().map(|level| level.label()).collect();
+        let colors: HashSet<_> = levels.iter().map(|level| level.color()).collect();
+
+        assert_eq!(labels.len(), levels.len());
+        assert_eq!(colors.len(), levels.len());
     }
 
     #[test]

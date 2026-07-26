@@ -20,8 +20,8 @@ use caelix_core::openapi::{OpenApiConfig, build_openapi};
 use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpException, HttpResponse as CaelixHttpResponse,
     IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException, ResponseBody, Result,
-    build_container, http_request_logging_enabled, log_application_started, log_http_request,
-    log_http_request_info, log_listening, log_module_routes, register_module_controllers,
+    build_container, http_request_logging_enabled, log_application_starting, log_http_request,
+    log_http_request_info, log_module_routes, log_ready, register_module_controllers,
     shutdown_module,
 };
 use futures_util::StreamExt;
@@ -162,6 +162,7 @@ pub fn to_actix_response(response: CaelixHttpResponse) -> HttpResponse {
 
 /// Public Caelix type `Application`.
 pub struct Application {
+    startup_started: Instant,
     container: Arc<Container>,
     configure_fn: fn(&mut web::ServiceConfig),
     gateway_configure_fn: fn(&mut web::ServiceConfig, Arc<Container>, usize),
@@ -378,11 +379,12 @@ impl Application {
     /// Runs the `new` public API operation.
     pub async fn new<M: Module + 'static>() -> Result<Self> {
         let start = Instant::now();
+        log_application_starting();
         let container = build_container::<M>().await?;
         log_module_routes::<M>();
-        log_application_started(start.elapsed());
 
         Ok(Self {
+            startup_started: start,
             container: Arc::new(container),
             configure_fn: |cfg| register_module_controllers::<M>(cfg),
             gateway_configure_fn: |cfg, container, max| {
@@ -520,8 +522,6 @@ impl Application {
         });
         let openapi = self.openapi.clone();
 
-        log_listening(&addr);
-
         let result = if logging.access_log_enabled() {
             let logging_container = container.clone();
             let openapi_with_logging = openapi.clone();
@@ -568,7 +568,10 @@ impl Application {
             .workers(workers)
             .bind(addr.as_str())
             {
-                Ok(server) => server.run(),
+                Ok(server) => {
+                    log_ready(&addr, self.startup_started.elapsed());
+                    server.run()
+                }
                 Err(err) => {
                     let _ = self.shutdown().await;
                     return Err(err);
@@ -605,7 +608,10 @@ impl Application {
             .workers(workers)
             .bind(addr.as_str())
             {
-                Ok(server) => server.run(),
+                Ok(server) => {
+                    log_ready(&addr, self.startup_started.elapsed());
+                    server.run()
+                }
                 Err(err) => {
                     let _ = self.shutdown().await;
                     return Err(err);
