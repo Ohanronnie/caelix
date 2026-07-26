@@ -21,7 +21,7 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
-use crate::{Controller, HttpException, Module, RouteDef};
+use crate::{Controller, HttpException, Module, RequestContext, RouteDef};
 
 const RESET: &str = "\x1b[0m";
 const TIMESTAMP: &str = "\x1b[38;5;245m";
@@ -271,11 +271,20 @@ pub fn log(context: &str, level: LogLevel, message: impl AsRef<str>, elapsed: Op
 
 /// Runs the `log_http_exception` public API operation.
 pub fn log_http_exception(exception: &HttpException) {
+    log_http_exception_message(exception, None);
+}
+
+/// Logs a server-side HTTP exception with request correlation metadata.
+pub fn log_http_exception_with_context(exception: &HttpException, context: &RequestContext) {
+    log_http_exception_message(exception, Some(context));
+}
+
+fn log_http_exception_message(exception: &HttpException, context: Option<&RequestContext>) {
     if !exception.status.is_server_error() {
         return;
     }
 
-    let message = match &exception.source {
+    let mut message = match &exception.source {
         Some(source) => format!(
             "{} {}: {} | source: {source:#}",
             exception.status.as_u16(),
@@ -290,7 +299,41 @@ pub fn log_http_exception(exception: &HttpException) {
         ),
     };
 
+    if let Some(context) = context {
+        let service = configured_service_name();
+        let environment = configured_environment();
+        message.push_str(&format!(
+            " | method={} path={:?} request_id={:?} trace_id={:?} service={:?} environment={:?}",
+            context.method(),
+            context.path(),
+            context.request_id(),
+            context.trace_id(),
+            service,
+            environment,
+        ));
+    }
+
     Logger::new("ExceptionHandler").error(message);
+}
+
+fn configured_service_name() -> String {
+    configured_metadata_value(&["CAELIX_SERVICE_NAME", "OTEL_SERVICE_NAME"], "application")
+}
+
+fn configured_environment() -> String {
+    configured_metadata_value(
+        &["CAELIX_ENVIRONMENT", "APP_ENV", "ENVIRONMENT"],
+        "development",
+    )
+}
+
+fn configured_metadata_value(names: &[&str], fallback: &str) -> String {
+    names
+        .iter()
+        .find_map(|name| env::var(name).ok())
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| fallback.to_owned())
 }
 
 pub(crate) fn init_logging() {

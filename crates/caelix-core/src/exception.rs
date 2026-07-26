@@ -371,17 +371,20 @@ impl InternalServerErrorException {
     }
 }
 
-#[cfg(feature = "sqlx")]
-impl From<sqlx::Error> for HttpException {
-    fn from(err: sqlx::Error) -> Self {
-        InternalServerErrorException::new(err)
-    }
-}
+impl<E> From<E> for HttpException
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        let err = err.into();
 
-#[cfg(feature = "validator")]
-impl From<validator::ValidationErrors> for HttpException {
-    fn from(err: validator::ValidationErrors) -> Self {
-        BadRequestException::new("Validation failed").with_errors(format_validation_errors(&err))
+        #[cfg(feature = "validator")]
+        if let Some(validation_errors) = err.downcast_ref::<validator::ValidationErrors>() {
+            return BadRequestException::new("Validation failed")
+                .with_errors(format_validation_errors(validation_errors));
+        }
+
+        InternalServerErrorException::new(err)
     }
 }
 

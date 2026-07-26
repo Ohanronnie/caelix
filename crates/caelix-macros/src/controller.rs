@@ -1224,7 +1224,12 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             quote! {
                 let #interceptor_name = match container.resolve::<#interceptor_type>() {
                     Ok(value) => value,
-                    Err(err) => { caelix::log_http_exception(&err); return #response_adapter(caelix::IntoCaelixResponse::into_response(err)); }
+                    Err(err) => {
+                        caelix::log_http_exception_with_context(&err, &ctx);
+                        return #response_adapter(ctx.attach_correlation_headers(
+                            caelix::IntoCaelixResponse::into_response(err)
+                        ));
+                    }
                 };
                 let #interceptor_ref_name = &#interceptor_name;
                 let next = caelix::Next::new(move || {
@@ -1238,6 +1243,8 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             || extractor_args.iter().any(|(extractor, _, _, _, _)| {
                 matches!(extractor, Extractor::User | Extractor::Cookie(_))
             });
+        let request_context_binding =
+            needs_request_context.then(|| quote! { let request_context = &ctx; });
         let (request_headers, request_method, request_path) = match backend {
             Backend::Actix => (
                 quote! { req.headers() },
@@ -1273,21 +1280,40 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
             }
             let ctx = caelix::RequestContext::new(#request_method, #request_path, headers);
+            #request_context_binding
             #(
                 let guard = match container.resolve::<#guard_types>() {
                     Ok(value) => value,
-                    Err(err) => { caelix::log_http_exception(&err); return #response_adapter(caelix::IntoCaelixResponse::into_response(err)); }
+                    Err(err) => {
+                        caelix::log_http_exception_with_context(&err, &ctx);
+                        return #response_adapter(ctx.attach_correlation_headers(
+                            caelix::IntoCaelixResponse::into_response(err)
+                        ));
+                    }
                 };
                 match caelix::Guard::can_activate(&*guard, &ctx).await {
                     Ok(true) => {}
-                    Ok(false) => return #response_adapter(caelix::IntoCaelixResponse::into_response(caelix::ForbiddenException::new("Access denied"))),
-                    Err(err) => { caelix::log_http_exception(&err); return #response_adapter(caelix::IntoCaelixResponse::into_response(err)); }
+                    Ok(false) => return #response_adapter(ctx.attach_correlation_headers(
+                        caelix::IntoCaelixResponse::into_response(
+                            caelix::ForbiddenException::new("Access denied")
+                        )
+                    )),
+                    Err(err) => {
+                        caelix::log_http_exception_with_context(&err, &ctx);
+                        return #response_adapter(ctx.attach_correlation_headers(
+                            caelix::IntoCaelixResponse::into_response(err)
+                        ));
+                    }
                 }
             )*
-            let request_context = &ctx;
             let controller = match container.resolve::<#struct_type>() {
                 Ok(value) => value,
-                Err(err) => { caelix::log_http_exception(&err); return #response_adapter(caelix::IntoCaelixResponse::into_response(err)); }
+                Err(err) => {
+                    caelix::log_http_exception_with_context(&err, &ctx);
+                    return #response_adapter(ctx.attach_correlation_headers(
+                        caelix::IntoCaelixResponse::into_response(err)
+                    ));
+                }
             };
             let next = caelix::Next::new(move || Box::pin(async move {
                 #payload_setup
@@ -1296,57 +1322,29 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             }));
             #(#interceptor_chain)*
             match next.run().await {
-                Ok(value) => #response_adapter(value),
-                Err(err) => { caelix::log_http_exception(&err); #response_adapter(caelix::IntoCaelixResponse::into_response(err)) }
+                Ok(value) => #response_adapter(ctx.attach_correlation_headers(value)),
+                Err(err) => {
+                    caelix::log_http_exception_with_context(&err, &ctx);
+                    #response_adapter(ctx.attach_correlation_headers(
+                        caelix::IntoCaelixResponse::into_response(err)
+                    ))
+                }
             }
         };
-        let direct_body = quote! {
-            let controller = match container.resolve::<#struct_type>() {
-                Ok(value) => value,
-                Err(err) => { caelix::log_http_exception(&err); return #response_adapter(caelix::IntoCaelixResponse::into_response(err)); }
-            };
-            let result = async move {
-                #payload_setup
-                let value = controller.#method_name(#(#call_args),*).await?;
-                Ok(caelix::IntoCaelixResponse::into_response(value))
-            }.await;
-            match result {
-                Ok(value) => #response_adapter(value),
-                Err(err) => { caelix::log_http_exception(&err); #response_adapter(caelix::IntoCaelixResponse::into_response(err)) }
-            }
-        };
-        let wrapper_body = if needs_request_context {
-            request_context_body
-        } else {
-            direct_body
-        };
-
-        let wrapper = match (backend, needs_request_context) {
-            (Backend::Actix, true) => quote! {
+        let wrapper = match backend {
+            Backend::Actix => quote! {
                 async fn #wrapper_name(
                     container: caelix::__actix_web::web::Data<caelix::Container>,
                     req: caelix::__actix_web::HttpRequest,
                     #(#wrapper_params),*
-                ) -> caelix::__actix_web::HttpResponse { #wrapper_body }
+                ) -> caelix::__actix_web::HttpResponse { #request_context_body }
             },
-            (Backend::Actix, false) => quote! {
-                async fn #wrapper_name(
-                    container: caelix::__actix_web::web::Data<caelix::Container>,
-                    #(#wrapper_params),*
-                ) -> caelix::__actix_web::HttpResponse { #wrapper_body }
-            },
-            (Backend::Axum, true) => quote! {
+            Backend::Axum => quote! {
                 async fn #wrapper_name(
                     caelix::__axum::extract::State(container): caelix::__axum::extract::State<std::sync::Arc<caelix::Container>>,
                     request_info: caelix::AxumRequestInfo,
                     #(#wrapper_params,)*
-                ) -> caelix::__axum::response::Response { #wrapper_body }
-            },
-            (Backend::Axum, false) => quote! {
-                async fn #wrapper_name(
-                    caelix::__axum::extract::State(container): caelix::__axum::extract::State<std::sync::Arc<caelix::Container>>,
-                    #(#wrapper_params),*
-                ) -> caelix::__axum::response::Response { #wrapper_body }
+                ) -> caelix::__axum::response::Response { #request_context_body }
             },
         };
         wrappers.push(wrapper);

@@ -1,6 +1,6 @@
 [package]
 name = "caelix"
-version = "0.0.31"
+version = "0.0.32"
 edition = "2024"
 description = "Public Caelix framework crate."
 license = "MIT"
@@ -22,12 +22,12 @@ microservices-nats = ["dep:caelix-microservices", "caelix-microservices/nats", "
 microservices-redis = ["dep:caelix-microservices", "caelix-microservices/redis", "dep:tokio", "caelix-macros/microservices", "caelix-macros/tokio"]
 
 [dependencies]
-caelix-actix = { path = "../caelix-actix", version = "0.0.31", optional = true, default-features = false }
-caelix-axum = { path = "../caelix-axum", version = "0.0.31", optional = true, default-features = false }
-caelix-socketio = { path = "../caelix-socketio", version = "0.0.31", optional = true }
-caelix-core = { path = "../caelix-core", version = "0.0.31", default-features = false }
-caelix-macros = { path = "../caelix-macros", version = "0.0.31", default-features = false }
-caelix-microservices = { path = "../caelix-microservices", version = "0.0.31", optional = true, default-features = false }
+caelix-actix = { path = "../caelix-actix", version = "0.0.32", optional = true, default-features = false }
+caelix-axum = { path = "../caelix-axum", version = "0.0.32", optional = true, default-features = false }
+caelix-socketio = { path = "../caelix-socketio", version = "0.0.32", optional = true }
+caelix-core = { path = "../caelix-core", version = "0.0.32", default-features = false }
+caelix-macros = { path = "../caelix-macros", version = "0.0.32", default-features = false }
+caelix-microservices = { path = "../caelix-microservices", version = "0.0.32", optional = true, default-features = false }
 tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
 
 [lib]
@@ -47,6 +47,7 @@ required-features = ["microservices-redis"]
 
 [dev-dependencies]
 actix-web = { version = "4.14.0", default-features = false, features = ["macros", "ws"] }
+anyhow.workspace = true
 http-body-util.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

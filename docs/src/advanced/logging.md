@@ -22,6 +22,23 @@ for manual construction. `CAELIX_LOG` selects `error`, `warn`, `info`/`log`, or
 debug. Framework startup, module/provider initialization, route mapping,
 readiness, shutdown, and internal server failures use the same logger.
 
+Generated controller routes include correlation metadata on every logged
+server error:
+
+```text
+[2026-07-26T14:32:08.190Z ERROR caelix::error] 500 Internal Server Error: Internal Server Error | source: database unavailable | method=GET path="/orders" request_id="9e285a20-9405-4cc8-8941-0f758d84f524" trace_id="4bf92f3577b34da6a3ce929d0e0e4736" service="orders-api" environment="production"
+```
+
+Caelix accepts `X-Request-Id` and `X-Trace-Id`, and understands the trace ID
+inside a W3C `traceparent` header. Missing request IDs are generated as UUIDs;
+invalid correlation headers are ignored. `X-Request-Id` and `X-Trace-Id` are
+included on the response so clients can report them.
+
+Set `CAELIX_SERVICE_NAME` and `CAELIX_ENVIRONMENT` to identify the deployment.
+`OTEL_SERVICE_NAME` is also accepted for the service name; `APP_ENV` and
+`ENVIRONMENT` are environment fallbacks. Defaults are `application` and
+`development`.
+
 Default startup output is intentionally compact:
 
 ```text

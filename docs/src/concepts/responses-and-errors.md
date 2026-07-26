@@ -140,13 +140,25 @@ return Err(BadRequestException::new("Validation failed").with_errors(errors));
 Server error responses are production-safe: if an `HttpException` has a 5xx status, the response body message is `Internal Server Error` rather than the internal error text. Generated controller routes log returned 5xx exceptions through the `ExceptionHandler` logger, including the internal `source` when one is attached.
 
 ```rust
-let user = repository
-    .find(id)
-    .await
-    .map_err(InternalServerErrorException::new)?;
+let user = repository.find(id).await?;
 ```
 
-The internal source is retained on `HttpException::source`, but the client receives only:
+`caelix::Result<T>` accepts `?` from any error convertible into
+`anyhow::Error`. This includes `anyhow::Result`, standard errors such as
+`std::io::Error`, and conventional third-party errors that are `Send`, `Sync`,
+and `'static`. Unexpected errors become `500 Internal Server Error` exceptions.
+Use a typed Caelix exception when the failure should produce a deliberate
+non-500 response.
+
+```rust
+async fn load_config() -> Result<String> {
+    let config = tokio::fs::read_to_string("config.toml").await?;
+    Ok(config)
+}
+```
+
+The original error and its context chain are retained on
+`HttpException::source`, but the client receives only:
 
 ```json
 {

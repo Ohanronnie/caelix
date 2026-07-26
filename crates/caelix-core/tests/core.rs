@@ -1028,6 +1028,84 @@ fn http_exception_into_response_serializes_error_body() {
     );
 }
 
+#[derive(Debug)]
+struct RepositoryError;
+
+impl std::fmt::Display for RepositoryError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("repository unavailable")
+    }
+}
+
+impl std::error::Error for RepositoryError {}
+
+fn propagate_anyhow_error() -> Result<()> {
+    Err(anyhow::anyhow!("configuration could not be loaded"))?;
+    Ok(())
+}
+
+fn propagate_io_error() -> Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "configuration is unreadable",
+    ))?;
+    Ok(())
+}
+
+fn propagate_custom_error() -> Result<()> {
+    Err(RepositoryError)?;
+    Ok(())
+}
+
+#[test]
+fn anyhow_compatible_errors_propagate_into_caelix_result() {
+    let anyhow_exception = propagate_anyhow_error().unwrap_err();
+    assert_eq!(anyhow_exception.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        anyhow_exception.source.as_ref().unwrap().to_string(),
+        "configuration could not be loaded"
+    );
+
+    let io_exception = propagate_io_error().unwrap_err();
+    assert_eq!(io_exception.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        io_exception
+            .source
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<std::io::Error>()
+            .unwrap()
+            .kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+
+    let custom_exception = propagate_custom_error().unwrap_err();
+    assert_eq!(custom_exception.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        custom_exception
+            .source
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<RepositoryError>()
+            .is_some()
+    );
+}
+
+#[test]
+fn automatically_converted_errors_serialize_as_sanitized_server_errors() {
+    let response = propagate_custom_error().unwrap_err().into_response();
+
+    assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(response.body_bytes().unwrap()).unwrap(),
+        json!({
+            "status": 500,
+            "error": "Internal Server Error",
+            "message": "Internal Server Error"
+        })
+    );
+}
+
 #[test]
 fn server_error_responses_do_not_serialize_source_or_internal_messages() {
     let response = BadGatewayException::new("upstream database password leaked")

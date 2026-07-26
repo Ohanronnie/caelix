@@ -25,7 +25,7 @@ cd demo-api
 caelix run
 ```
 
-The generated application uses `caelix = "0.0.31"` from crates.io:
+The generated application uses `caelix = "0.0.32"` from crates.io:
 
 ```text
 demo-api/
@@ -176,8 +176,7 @@ impl PostsService {
         )
         .bind(limit.unwrap_or(20))
         .fetch_all(&self.config.pool)
-        .await
-        .map_err(caelix::InternalServerErrorException::new)?;
+        .await?;
 
         Ok(posts)
     }
@@ -188,8 +187,7 @@ impl PostsService {
         )
         .bind(id)
         .fetch_optional(&self.config.pool)
-        .await
-        .map_err(caelix::InternalServerErrorException::new)?;
+        .await?;
 
         post.ok_or_else(|| NotFoundException::new(format!("post {id} not found")))
     }
@@ -201,8 +199,7 @@ impl PostsService {
         .bind(input.title)
         .bind(input.body)
         .fetch_one(&self.config.pool)
-        .await
-        .map_err(caelix::InternalServerErrorException::new)?;
+        .await?;
 
         self.events
             .emit(PostCreated {

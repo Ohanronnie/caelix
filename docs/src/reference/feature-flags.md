@@ -8,7 +8,7 @@ broker-only process.
 | `actix` | Actix `Application`, `TestApplication`, runtime macros, `Logging`, `to_actix_response` | mutually exclusive with `axum` |
 | `axum` | Axum `Application`, `TestApplication`, runtime macros, `AxumRouterBuilder`, `to_axum_response` | mutually exclusive with `actix` |
 | `socketio` | Socket.IO types and `Application::with_socket_io`; selects `axum` | unavailable with Actix |
-| `sqlx` | `From<sqlx::Error>` exception conversion | combines with either runtime |
+| `sqlx` | Compatibility feature; SQLx errors work with `?` without enabling it | combines with either runtime |
 | `validator` | `#[validate]` and `validator` re-export | combines with either runtime |
 | `openapi` | OpenAPI metadata/config, Swagger UI, controller markers | requires an HTTP runtime to serve docs |
 | `uploads` | `UploadedFile`, `MultipartForm`, upload extractors/configuration | combines with either runtime |
@@ -17,16 +17,16 @@ broker-only process.
 
 ```toml
 # Default Actix
-caelix = "0.0.31"
+caelix = "0.0.32"
 
 # Axum
-caelix = { version = "0.0.31", default-features = false, features = ["axum"] }
+caelix = { version = "0.0.32", default-features = false, features = ["axum"] }
 
 # Actix with request facilities
-caelix = { version = "0.0.31", features = ["uploads", "validator", "openapi"] }
+caelix = { version = "0.0.32", features = ["uploads", "validator", "openapi"] }
 
 # Broker-only process with both transports
-caelix = { version = "0.0.31", default-features = false, features = [
+caelix = { version = "0.0.32", default-features = false, features = [
   "microservices-nats",
   "microservices-redis",
 ] }
