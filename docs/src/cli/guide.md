@@ -16,9 +16,9 @@ After installation, run commands with the `caelix` binary.
 caelix run
 ```
 
-This clears the terminal, including its scrollback buffer, then delegates to
-`cargo run` in the current project. Use `--watch` to restart the application
-when files under `src/` or `Cargo.toml` change:
+This resets the terminal, clears its viewport and scrollback buffer, then
+delegates to `cargo run` in the current project. Use `--watch` to restart the
+application when files under `src/` or `Cargo.toml` change:
 
 ```sh
 caelix run --watch
@@ -60,7 +60,7 @@ The command creates:
 - `src/lib.rs`
 - `src/app.rs`
 
-The default generated `Cargo.toml` uses `caelix = "0.0.28"` from crates.io and the Actix backend. The Axum option disables default features and enables `axum` instead.
+The default generated `Cargo.toml` uses `caelix = "0.0.29"` from crates.io and the Actix backend. The Axum option disables default features and enables `axum` instead.
 
 The generated `AGENTS.md` gives AI coding agents the app-level Caelix conventions: explicit module registration, provider/controller registration, injectable field shape, service-level cache behavior, and the usual `cargo test` check.
 

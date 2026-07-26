@@ -20,7 +20,7 @@ use notify::RecursiveMode;
 use notify_debouncer_mini::new_debouncer;
 use toml_edit::{DocumentMut, Item, Value};
 
-const CLEAR_TERMINAL: &[u8] = b"\x1B[2J\x1B[3J\x1B[H";
+const CLEAR_TERMINAL: &[u8] = b"\x1Bc\x1B[2J\x1B[3J\x1B[H";
 
 /// Public Caelix type alias `Result`.
 pub type Result<T> = std::result::Result<T, CliError>;
@@ -875,9 +875,9 @@ pub fn render_app_cargo_toml(package_name: &str) -> String {
 
 fn render_app_cargo_toml_for_backend(package_name: &str, backend: BackendChoice) -> String {
     let backend_dependencies = match backend {
-        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.28\"",
+        BackendChoice::Actix => "actix-web = \"4.14.0\"\ncaelix = \"0.0.29\"",
         BackendChoice::Axum => {
-            "caelix = { version = \"0.0.28\", default-features = false, features = [\"axum\"] }\ntower-http = { version = \"0.7\", features = [\"trace\", \"compression-full\"] }"
+            "caelix = { version = \"0.0.29\", default-features = false, features = [\"axum\"] }\ntower-http = { version = \"0.7\", features = [\"trace\", \"compression-full\"] }"
         }
     };
     format!(
@@ -1356,7 +1356,7 @@ mod tests {
 
     #[test]
     fn terminal_clear_removes_viewport_and_scrollback() {
-        assert_eq!(CLEAR_TERMINAL, b"\x1B[2J\x1B[3J\x1B[H");
+        assert_eq!(CLEAR_TERMINAL, b"\x1Bc\x1B[2J\x1B[3J\x1B[H");
     }
 
     #[test]

@@ -19,7 +19,7 @@ self.logger.debug("retry state updated");
 for manual construction. `CAELIX_LOG` selects `error`, `warn`, `info`/`log`, or
 `debug`. If absent or invalid, Caelix reads an applicable `caelix`,
 `caelix_core`, or `caelix-core` directive from `RUST_LOG`, then defaults to
-info. Framework startup, module/provider initialization, route mapping,
+debug. Framework startup, module/provider initialization, route mapping,
 readiness, shutdown, and internal server failures use the same logger.
 
 Default startup output is intentionally compact:
@@ -30,10 +30,10 @@ Default startup output is intentionally compact:
 [2026-07-26T14:32:08.187Z INFO  caelix::server] Listening on http://127.0.0.1:3000 in 12ms
 ```
 
-The `ready` event is written only after the server successfully binds. Set
-`CAELIX_LOG=debug` to include individual module, provider, controller, and route
-events. In-process `TestApplication` compilation does not emit server startup
-events.
+The `ready` event is written only after the server successfully binds.
+Individual module, provider, controller, and route events are included by
+default. Set `CAELIX_LOG=info` for compact startup output. In-process
+`TestApplication` compilation does not emit server startup events.
 
 ## Actix access logs
 

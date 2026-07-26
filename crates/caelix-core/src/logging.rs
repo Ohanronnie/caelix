@@ -916,7 +916,7 @@ fn configured_log_priority() -> u8 {
                     .ok()
                     .and_then(|value| parse_rust_log_level(&value))
             })
-            .unwrap_or(LogLevel::Info.priority())
+            .unwrap_or(LogLevel::Debug.priority())
     })
 }
 
