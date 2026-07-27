@@ -270,6 +270,12 @@ impl<'a> TestRequestBuilder<'a> {
         self
     }
 
+    /// Appends a request header without replacing existing values.
+    pub fn append_header(mut self, name: &str, value: &str) -> Self {
+        self.request = self.request.append_header((name, value));
+        self
+    }
+
     /// Runs the `set_payload` public API operation.
     pub fn set_payload(mut self, bytes: impl Into<Bytes>) -> Self {
         self.request = self.request.set_payload(bytes);

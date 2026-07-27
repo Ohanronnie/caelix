@@ -29,6 +29,18 @@ enum ThrottleAnnotation {
     Skip,
 }
 
+fn stable_identifier_hash(value: &str) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    value
+        .as_bytes()
+        .iter()
+        .fold(FNV_OFFSET_BASIS, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME)
+        })
+}
+
 fn parse_throttle(attr: &syn::Attribute) -> syn::Result<ThrottleAnnotation> {
     let list = attr.meta.require_list()?;
     let values = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(list.tokens.clone())?;
@@ -1466,8 +1478,16 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             } else { base }
         }).collect::<Vec<_>>();
 
-        let route_state_name =
-            format_ident!("__CaelixRouteState_{}_{}", controller_ident, method_name);
+        let route_state_identity = format!(
+            "{}::{method_name}::{verb}::{full_path}",
+            quote!(#struct_type)
+        );
+        let route_state_hash = stable_identifier_hash(&route_state_identity);
+        let route_state_name = format_ident!(
+            "__CaelixRouteState_{}_{}_{route_state_hash:016x}",
+            controller_ident,
+            method_name
+        );
         let guard_state_fields = guard_types
             .iter()
             .enumerate()
@@ -1674,6 +1694,18 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             }
         };
         let request_context_body = quote! {
+            for __caelix_header_name in ["x-request-id", "traceparent", "x-trace-id"] {
+                let mut __caelix_values =
+                    #request_headers.get_all(__caelix_header_name).into_iter();
+                if __caelix_values.next().is_some() && __caelix_values.next().is_some() {
+                    return #response_adapter(caelix::IntoCaelixResponse::into_response(
+                        caelix::BadRequestException::new(format!(
+                            "duplicate correlation header '{}'",
+                            __caelix_header_name,
+                        )),
+                    ));
+                }
+            }
             for (_, value) in #request_headers.iter() {
                 if value.to_str().is_err() {
                     return #response_adapter(caelix::IntoCaelixResponse::into_response(

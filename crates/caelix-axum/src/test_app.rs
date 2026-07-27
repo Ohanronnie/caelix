@@ -272,6 +272,14 @@ impl<'a> TestRequestBuilder<'a> {
         self
     }
 
+    /// Appends a request header without replacing existing values.
+    pub fn append_header(mut self, name: &str, value: &str) -> Self {
+        let name = HeaderName::from_bytes(name.as_bytes()).expect("invalid test request header");
+        let value = HeaderValue::from_str(value).expect("invalid test request header value");
+        self.request.headers_mut().append(name, value);
+        self
+    }
+
     /// Runs the `set_payload` public API operation.
     pub fn set_payload(mut self, bytes: impl Into<Bytes>) -> Self {
         *self.request.body_mut() = Body::from(bytes.into());

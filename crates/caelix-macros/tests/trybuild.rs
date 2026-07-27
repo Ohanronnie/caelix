@@ -11,6 +11,7 @@ fn injectable_macro_compile_contracts() {
 fn controller_macro_compile_contracts() {
     let t = trybuild::TestCases::new();
     t.pass("tests/ui/controller_with_extractors.rs");
+    t.pass("tests/ui/controller_namespaced_state_names.rs");
     t.compile_fail("tests/ui/controller_rejects_pattern_extractor.rs");
     #[cfg(feature = "uploads")]
     t.compile_fail("tests/ui/controller_rejects_missing_upload_validator.rs");
