@@ -1694,22 +1694,28 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             }
         };
         let request_context_body = quote! {
-            for __caelix_header_name in ["x-request-id", "traceparent", "x-trace-id"] {
-                let mut __caelix_values =
-                    #request_headers.get_all(__caelix_header_name).into_iter();
-                if __caelix_values.next().is_some() && __caelix_values.next().is_some() {
+            let mut __caelix_request_id_seen = false;
+            let mut __caelix_traceparent_seen = false;
+            let mut __caelix_trace_id_seen = false;
+            for (__caelix_header_name, __caelix_header_value) in #request_headers.iter() {
+                if __caelix_header_value.to_str().is_err() {
+                    return #response_adapter(caelix::IntoCaelixResponse::into_response(
+                        caelix::BadRequestException::new("invalid request header value"),
+                    ));
+                }
+
+                let __caelix_seen = match __caelix_header_name.as_str() {
+                    "x-request-id" => &mut __caelix_request_id_seen,
+                    "traceparent" => &mut __caelix_traceparent_seen,
+                    "x-trace-id" => &mut __caelix_trace_id_seen,
+                    _ => continue,
+                };
+                if std::mem::replace(__caelix_seen, true) {
                     return #response_adapter(caelix::IntoCaelixResponse::into_response(
                         caelix::BadRequestException::new(format!(
                             "duplicate correlation header '{}'",
                             __caelix_header_name,
                         )),
-                    ));
-                }
-            }
-            for (_, value) in #request_headers.iter() {
-                if value.to_str().is_err() {
-                    return #response_adapter(caelix::IntoCaelixResponse::into_response(
-                        caelix::BadRequestException::new("invalid request header value"),
                     ));
                 }
             }

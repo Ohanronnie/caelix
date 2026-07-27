@@ -84,3 +84,30 @@ async fn generated_routes_reject_mixed_validity_duplicate_correlation_headers() 
         "duplicate correlation header 'x-request-id'"
     );
 }
+
+#[caelix::test]
+async fn generated_routes_accept_single_and_absent_correlation_headers() {
+    let app = TestApplication::new::<CorrelationModule>().await.unwrap();
+
+    app.get("/correlation/")
+        .send()
+        .await
+        .unwrap()
+        .assert_status(StatusCode::OK);
+
+    for (name, value) in [
+        ("x-request-id", "request-one"),
+        (
+            "traceparent",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        ),
+        ("x-trace-id", "trace-one"),
+    ] {
+        app.get("/correlation/")
+            .header(name, value)
+            .send()
+            .await
+            .unwrap()
+            .assert_status(StatusCode::OK);
+    }
+}
