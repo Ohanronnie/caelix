@@ -70,6 +70,14 @@ between overlapping patterns; use clear static prefixes such as `/search` or
 `/by-email/{email}` instead of creating several routes that can match the same
 path. Caelix logs the registered route table at startup.
 
+Basic named parameters such as `{id}` and `/{org_id}/users/{user_id}` work on
+both supported HTTP backends. Caelix passes route patterns through to the
+selected backend, however, so backend-specific regex and catch-all patterns
+are not portable. For example, Actix uses `/{path:.*}` for a catch-all route,
+while Axum uses `/{*path}`. Use those patterns only when the application's
+selected backend is part of its route contract; Caelix does not translate them
+between routing syntaxes.
+
 Controller parameters use `#[param]`, `#[query]`, `#[body]`, `#[file]`,
 `#[files]`, `#[multipart]`, `#[user]`, and `#[cookie("name")]`.
 `#[validate]` validates a decoded value. See [Validation](validation.md) for

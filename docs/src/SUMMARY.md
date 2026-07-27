@@ -1,9 +1,6 @@
-# Summary
+# Start Here
 
-[Introduction](introduction.md)
-
-# Why Caelix
-
+- [Introduction](introduction.md)
 - [Why Caelix](why-caelix/overview.md)
 - [Choosing Actix or Axum](why-caelix/choosing-actix-or-axum.md)
 - [Benchmarks](why-caelix/benchmark-methodology.md)

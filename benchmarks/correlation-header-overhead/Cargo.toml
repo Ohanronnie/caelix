@@ -1,0 +1,18 @@
+[workspace]
+
+[package]
+name = "caelix-correlation-header-benchmark"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = []
+baseline-actix = ["dep:caelix-baseline", "caelix-baseline/actix"]
+baseline-axum = ["dep:caelix-baseline", "caelix-baseline/axum"]
+current-actix = ["dep:caelix-current", "caelix-current/actix"]
+current-axum = ["dep:caelix-current", "caelix-current/axum"]
+
+[dependencies]
+caelix-baseline = { package = "caelix", version = "=0.0.35", default-features = false, optional = true }
+caelix-current = { package = "caelix", path = "../../crates/caelix", default-features = false, optional = true }

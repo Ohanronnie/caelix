@@ -17,6 +17,12 @@ UUID. `trace_id()` reads the W3C `traceparent` trace ID, then `X-Trace-Id`, and
 finally falls back to the request ID. Generated controller responses include
 both identifiers as response headers.
 
+Each correlation header (`X-Request-Id`, `traceparent`, and `X-Trace-Id`) may
+appear at most once. Generated routes reject a duplicate correlation header or
+a non-text request-header value with `400 Bad Request` before constructing the
+request context, applying throttling, running guards or interceptors, or
+calling the controller.
+
 `bearer_token()` reads the `Authorization` header and strips the exact `Bearer ` prefix:
 
 ```text

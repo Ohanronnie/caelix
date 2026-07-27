@@ -1,37 +1,36 @@
-# Results
+# Correlation Header Validation Benchmark
 
-Caelix HTTP overhead benchmark run on 2026-07-27 against Caelix `0.0.33`.
+This benchmark measures the generated-route change in Caelix `0.0.36` that
+validates request headers and detects duplicate correlation headers in one
+`HeaderMap::iter()` pass. It compares the published `0.0.35` implementation
+with `0.0.36`; it is not a comparison with a plain Actix or Axum application.
+
+The run was performed on 2026-07-27. Results are specific to this machine and
+load profile, so treat small differences as noise rather than a general runtime
+ranking.
 
 ## Environment
 
-- Ubuntu 24.04.3 on Linux 6.12.13 (`x86_64`)
-- AMD EPYC 9V74
-- 9 logical CPUs visible, with an 8-CPU cgroup quota
-- 15 GiB RAM and no swap
-- Rust 1.97.1
-- `wrk` 4.1.0 from Ubuntu packages
+- Apple M1 Pro with 10 logical CPUs and 16 GiB RAM
+- macOS 27.0.0 (`arm64`)
+- Rust 1.96.0
+- `wrk` 4.2.0 (`kqueue`)
+- Caelix `0.0.35` baseline and Caelix `0.0.36` candidate
+- Actix Web 4.14.0 and Axum 0.8.9
 
 ## Configuration
 
-- Caelix 0.0.33, Actix Web 4.14.0, and Axum 0.8.9
-- 8 server workers/runtime threads for every binary
-- `wrk -t8 -c1000 -d30s --latency`
-- 3-second warm-up before each measurement
-- 3 independently restarted runs, with run order alternated
-- Actix access logging disabled
-- Release profile: `opt-level=3`, thin LTO, one codegen unit, aborting panic,
-  and stripped binaries
+Every binary served `GET /hello` through a generated Caelix controller and
+returned the same JSON string response. The request contained the normal `Host`
+header but no correlation headers, so each route performed the production
+header validation and generated correlation identifiers.
 
-Every app served `GET /hello` with:
-
-```json
-{ "message": "Hello, world!" }
-```
-
-Caelix adds matching `x-request-id` and `x-trace-id` UUID headers by default.
-The plain Actix and Axum handlers explicitly performed the same UUID generation
-and returned the same headers, status, JSON body, content type, and content
-length.
+- `wrk -t4 -c256 -d10s --latency`
+- 2-second warm-up before each measurement
+- 3 independently restarted runs per implementation
+- Actix used 4 workers; Axum used its default multi-thread Tokio runtime
+- Default Cargo release profile
+- Run order alternated between the baseline and candidate for each backend
 
 ## Median results
 
@@ -39,54 +38,39 @@ length.
   <table class="benchmark-results">
     <thead>
       <tr>
-        <th>Pair</th>
-        <th>Implementation</th>
+        <th>Backend</th>
+        <th>Caelix version</th>
         <th>Requests/s</th>
         <th>Delta</th>
         <th>p50</th>
         <th>p90</th>
         <th>p99</th>
-        <th>RSS after</th>
       </tr>
     </thead>
     <tbody>
-      <tr><th>Actix</th><td>Plain Actix</td><td>644,724</td><td>baseline</td><td>0.777 ms</td><td>5.63 ms</td><td>13.88 ms</td><td>17.78 MB</td></tr>
-      <tr><th>Actix</th><td><strong>Caelix Actix</strong></td><td><strong>586,480</strong></td><td>-9.03%</td><td><strong>0.990 ms</strong></td><td><strong>5.80 ms</strong></td><td><strong>14.92 ms</strong></td><td><strong>17.74 MB</strong></td></tr>
-      <tr><th>Axum</th><td>Plain Axum</td><td>467,921</td><td>baseline</td><td>1.800 ms</td><td>4.19 ms</td><td>9.99 ms</td><td>22.72 MB</td></tr>
-      <tr><th>Axum</th><td><strong>Caelix Axum</strong></td><td><strong>359,737</strong></td><td>-23.12%</td><td><strong>2.480 ms</strong></td><td><strong>5.01 ms</strong></td><td><strong>9.91 ms</strong></td><td><strong>19.86 MB</strong></td></tr>
+      <tr><th>Actix</th><td>0.0.35</td><td>153,560</td><td>baseline</td><td>1.63 ms</td><td>1.77 ms</td><td>2.02 ms</td></tr>
+      <tr><th>Actix</th><td><strong>0.0.36</strong></td><td><strong>152,761</strong></td><td>-0.52%</td><td><strong>1.64 ms</strong></td><td><strong>1.77 ms</strong></td><td><strong>2.05 ms</strong></td></tr>
+      <tr><th>Axum</th><td>0.0.35</td><td>153,908</td><td>baseline</td><td>1.48 ms</td><td>1.81 ms</td><td>2.33 ms</td></tr>
+      <tr><th>Axum</th><td><strong>0.0.36</strong></td><td><strong>154,185</strong></td><td>+0.18%</td><td><strong>1.47 ms</strong></td><td><strong>1.86 ms</strong></td><td><strong>2.48 ms</strong></td></tr>
     </tbody>
   </table>
 </div>
 
-Mean throughput deltas were -8.91% for Caelix Actix and -22.38% for Caelix
-Axum. The direction did not change when order was reversed.
+The median throughput difference is below 1% for both backends, so this run
+finds the optimization neutral. It preserves the duplicate-correlation-header
+protection while removing three `get_all()` searches and a separate validation
+pass from every generated route request.
 
-One socket read error occurred during one Caelix Axum run, across approximately
-32.8 million Caelix Axum requests. No non-2xx responses were reported.
+## Reproduce
 
-RSS with 1,000 connections is allocator-sensitive. Actix memory was effectively
-equal. Axum RSS varied enough between runs that its apparent Caelix advantage
-should not be treated as a firm memory result.
+The benchmark source, baseline lockfile, runner, and measured CSV are in
+[`benchmarks/correlation-header-overhead`](https://github.com/Ohanronnie/caelix/tree/main/benchmarks/correlation-header-overhead).
+Install `wrk`, then run:
 
-## Throughput runs
+```sh
+benchmarks/correlation-header-overhead/scripts/run.sh
+```
 
-<div class="benchmark-table-wrap">
-  <table class="benchmark-results benchmark-throughput-runs">
-    <thead>
-      <tr>
-        <th>Implementation</th>
-        <th>Run 1</th>
-        <th>Run 2</th>
-        <th>Run 3</th>
-        <th>Median</th>
-        <th>Mean</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><th>Plain Actix</th><td>645,111</td><td>638,400</td><td>644,724</td><td>644,724</td><td>642,745</td></tr>
-      <tr><th>Caelix Actix</th><td>573,916</td><td>595,952</td><td>586,480</td><td>586,480</td><td>585,450</td></tr>
-      <tr><th>Plain Axum</th><td>467,921</td><td>465,991</td><td>471,055</td><td>467,921</td><td>468,322</td></tr>
-      <tr><th>Caelix Axum</th><td>371,998</td><td>359,737</td><td>358,825</td><td>359,737</td><td>363,520</td></tr>
-    </tbody>
-  </table>
-</div>
+The runner rebuilds isolated release binaries for the baseline and current
+source, writes per-run output under `results/raw/`, and updates
+`results/summary.csv`.
