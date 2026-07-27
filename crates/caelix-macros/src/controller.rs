@@ -738,6 +738,15 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     let base_path = parse_macro_input!(args as LitStr).value();
     let mut impl_block = parse_macro_input!(input as ItemImpl);
     let struct_type = impl_block.self_ty.clone();
+    let controller_ident = match struct_type.as_ref() {
+        Type::Path(path) => path
+            .path
+            .segments
+            .last()
+            .map(|segment| segment.ident.clone())
+            .unwrap_or_else(|| format_ident!("Controller")),
+        _ => format_ident!("Controller"),
+    };
     let mut controller_guards = Vec::new();
     let mut controller_interceptors = Vec::new();
     let mut controller_throttle = None;
@@ -830,6 +839,8 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     };
     let mut wrappers = Vec::new();
     let mut registrations = Vec::new();
+    let mut container_registrations = Vec::new();
+    let mut route_states = Vec::new();
     let mut routes = Vec::new();
     let mut route_dependencies = Vec::new();
     let mut route_throttle_policies = Vec::new();
@@ -1128,10 +1139,10 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                             trust_content_type_header: options.trust_content_type_header,
                             validator: options.validator,
                         };
-                        if let Some(validator) = &upload.validator {
-                            if invalid_upload_validators.contains(&validator.to_string()) {
-                                upload.validator = None;
-                            }
+                        if let Some(validator) = &upload.validator
+                            && invalid_upload_validators.contains(&validator.to_string())
+                        {
+                            upload.validator = None;
                         }
                         Some(upload)
                     } else {
@@ -1166,7 +1177,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 Some(caelix::ThrottlePolicy::new(#limit, #window))
             },
             Some(ThrottleAnnotation::Skip) => quote! { None },
-            None => quote! { __caelix_throttle.as_ref().map(|service| service.policy()) },
+            None => quote! { state.throttle.as_ref().map(|service| service.policy()) },
         };
         let throttle_enabled = !matches!(effective_throttle, Some(ThrottleAnnotation::Skip));
         #[cfg(feature = "openapi")]
@@ -1253,8 +1264,25 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             })
             .collect::<Vec<_>>();
         let mut wrapper_params = wrapper_params;
-        if has_payload {
+        let mut wrapper_arg_names = ordered_extractors
+            .iter()
+            .filter_map(|(extractor, name, _, _, _)| match (backend, extractor) {
+                (_, Extractor::User | Extractor::Cookie(_)) => None,
+                (Backend::Actix, Extractor::Param | Extractor::Query) => Some((*name).clone()),
+                (
+                    Backend::Actix,
+                    Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files,
+                ) => None,
+                (Backend::Axum, Extractor::Param | Extractor::Query) => Some((*name).clone()),
+                (
+                    Backend::Axum,
+                    Extractor::Body | Extractor::Multipart | Extractor::File | Extractor::Files,
+                ) => None,
+            })
+            .collect::<Vec<_>>();
+        if has_payload && matches!(backend, Backend::Actix) {
             wrapper_params.push(quote! { __caelix_payload: caelix::RawRequestPayload });
+            wrapper_arg_names.push(format_ident!("__caelix_payload"));
         }
 
         let body_extractors = extractor_args
@@ -1438,33 +1466,102 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             } else { base }
         }).collect::<Vec<_>>();
 
-        let interceptor_chain = interceptor_types.iter().rev().enumerate().map(|(index, interceptor_type)| {
-            let interceptor_name = format_ident!("__caelix_interceptor_{index}");
-            let interceptor_ref_name = format_ident!("__caelix_interceptor_ref_{index}");
-            quote! {
-                let #interceptor_name = match container.resolve::<#interceptor_type>() {
-                    Ok(value) => value,
-                    Err(err) => {
-                        caelix::log_http_exception_with_context(&err, &ctx);
-                        return #response_adapter(ctx.attach_correlation_headers(
-                            caelix::IntoCaelixResponse::into_response(err)
-                        ));
-                    }
-                };
-                let #interceptor_ref_name = &#interceptor_name;
-                let next = caelix::Next::new(move || {
-                    caelix::Interceptor::intercept(&**#interceptor_ref_name, request_context, next)
-                });
+        let route_state_name =
+            format_ident!("__CaelixRouteState_{}_{}", controller_ident, method_name);
+        let guard_state_fields = guard_types
+            .iter()
+            .enumerate()
+            .map(|(index, _)| format_ident!("guard_{index}"))
+            .collect::<Vec<_>>();
+        let interceptor_state_fields = interceptor_types
+            .iter()
+            .enumerate()
+            .map(|(index, _)| format_ident!("interceptor_{index}"))
+            .collect::<Vec<_>>();
+        let guard_state_declarations = guard_state_fields
+            .iter()
+            .zip(guard_types.iter())
+            .map(|(field, ty)| quote! { #field: std::sync::Arc<#ty> })
+            .collect::<Vec<_>>();
+        let interceptor_state_declarations = interceptor_state_fields
+            .iter()
+            .zip(interceptor_types.iter())
+            .map(|(field, ty)| quote! { #field: std::sync::Arc<#ty> })
+            .collect::<Vec<_>>();
+        let guard_state_initializers = guard_state_fields
+            .iter()
+            .zip(guard_types.iter())
+            .map(|(field, ty)| {
+                quote! {
+                    #field: container.resolve::<#ty>()
+                        .expect("validated route guard must be registered")
+                }
+            })
+            .collect::<Vec<_>>();
+        let interceptor_state_initializers = interceptor_state_fields
+            .iter()
+            .zip(interceptor_types.iter())
+            .map(|(field, ty)| {
+                quote! {
+                    #field: container.resolve::<#ty>()
+                        .expect("validated route interceptor must be registered")
+                }
+            })
+            .collect::<Vec<_>>();
+        let throttle_state_initializer = if throttle_enabled {
+            quote! { container.resolve::<caelix::Throttle>().ok() }
+        } else {
+            quote! { None }
+        };
+        route_states.push(quote! {
+            #[allow(non_camel_case_types)]
+            struct #route_state_name {
+                controller: std::sync::Arc<#struct_type>,
+                throttle: Option<std::sync::Arc<caelix::Throttle>>,
+                #(#guard_state_declarations,)*
+                #(#interceptor_state_declarations,)*
             }
-        }).collect::<Vec<_>>();
+
+            impl #route_state_name {
+                fn new(container: &caelix::Container) -> Self {
+                    Self {
+                        controller: container.resolve::<#struct_type>()
+                            .expect("validated route controller must be registered"),
+                        throttle: #throttle_state_initializer,
+                        #(#guard_state_initializers,)*
+                        #(#interceptor_state_initializers,)*
+                    }
+                }
+            }
+        });
+
+        let interceptor_chain = interceptor_state_fields
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(index, field)| {
+                let interceptor_ref_name = format_ident!("__caelix_interceptor_ref_{index}");
+                quote! {
+                    let #interceptor_ref_name = &state.#field;
+                    let next = caelix::Next::new(move || {
+                        caelix::Interceptor::intercept(
+                            &**#interceptor_ref_name,
+                            request_context,
+                            next,
+                        )
+                    });
+                }
+            })
+            .collect::<Vec<_>>();
 
         let needs_request_context = !guard_types.is_empty()
             || !interceptor_types.is_empty()
             || extractor_args.iter().any(|(extractor, _, _, _, _)| {
                 matches!(extractor, Extractor::User | Extractor::Cookie(_))
             });
-        let request_context_binding =
-            needs_request_context.then(|| quote! { let request_context = &ctx; });
+        let request_context_binding = needs_request_context.then(
+            || quote! { let request_context = ctx.as_ref().expect("request context required"); },
+        );
         let (request_headers, request_method, request_path, request_peer) = match backend {
             Backend::Actix => (
                 quote! { req.headers() },
@@ -1473,30 +1570,35 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 quote! { req.peer_addr() },
             ),
             Backend::Axum => (
-                quote! { request_info.headers() },
-                quote! { request_info.method().as_str() },
-                quote! { request_info.path() },
-                quote! { request_info.peer_addr() },
+                quote! { request.headers() },
+                quote! { request.method().as_str() },
+                quote! { request.path() },
+                quote! { request.peer_addr() },
             ),
         };
         let throttle_check = if throttle_enabled {
             quote! {
-                let __caelix_throttle = container.resolve::<caelix::Throttle>().ok();
                 if let Some(__caelix_policy) = #throttle_policy {
-                    let Some(__caelix_throttle) = __caelix_throttle else {
+                    let Some(__caelix_throttle) = state.throttle.as_ref() else {
                         let err = caelix::InternalServerErrorException::new(std::io::Error::other(
                             "throttled route requires ThrottleModule",
                         ));
-                        return #response_adapter(ctx.attach_correlation_headers(
+                        return #response_adapter(correlation.attach_headers(
                             caelix::IntoCaelixResponse::into_response(err)
                         ));
                     };
-                    match __caelix_throttle.check(&ctx, #verb, #full_path, __caelix_policy).await {
+                    let __caelix_context = ctx.as_ref().expect("throttled route requires context");
+                    match __caelix_throttle.check(
+                        __caelix_context,
+                        #verb,
+                        #full_path,
+                        __caelix_policy,
+                    ).await {
                         Ok(Some(response)) => return #response_adapter(
-                            ctx.attach_correlation_headers(response)
+                            correlation.attach_headers(response)
                         ),
                         Ok(None) => {}
-                        Err(err) => return #response_adapter(ctx.attach_correlation_headers(
+                        Err(err) => return #response_adapter(correlation.attach_headers(
                             caelix::IntoCaelixResponse::into_response(err)
                         )),
                     }
@@ -1506,10 +1608,14 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             quote! {}
         };
         let payload_buffering = if has_payload {
+            let raw_payload = match backend {
+                Backend::Actix => quote! { __caelix_payload },
+                Backend::Axum => quote! { request.take_payload() },
+            };
             quote! {
-                let __caelix_payload = match __caelix_payload.buffer().await {
+                let __caelix_payload = match #raw_payload.buffer().await {
                     Ok(payload) => payload,
-                    Err(err) => return #response_adapter(ctx.attach_correlation_headers(
+                    Err(err) => return #response_adapter(correlation.attach_headers(
                         caelix::IntoCaelixResponse::into_response(err)
                     )),
                 };
@@ -1517,106 +1623,165 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
         } else {
             quote! {}
         };
+        let guard_checks = guard_state_fields
+            .iter()
+            .map(|field| {
+                quote! {
+                    match caelix::Guard::can_activate(
+                        &*state.#field,
+                        ctx.as_ref().expect("guarded route requires context"),
+                    ).await {
+                        Ok(true) => {}
+                        Ok(false) => return #response_adapter(correlation.attach_headers(
+                            caelix::IntoCaelixResponse::into_response(
+                                caelix::ForbiddenException::new("Access denied")
+                            )
+                        )),
+                        Err(err) => {
+                            caelix::log_http_exception_with_correlation(
+                                &err,
+                                #request_method,
+                                #request_path,
+                                &correlation,
+                            );
+                            return #response_adapter(correlation.attach_headers(
+                                caelix::IntoCaelixResponse::into_response(err)
+                            ));
+                        }
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        let handler_execution = if interceptor_types.is_empty() {
+            quote! {
+                let controller = &state.controller;
+                let __caelix_result: caelix::Result<caelix::HttpResponse> = async {
+                    #payload_setup
+                    let value = controller.#method_name(#(#call_args),*).await?;
+                    Ok(caelix::IntoCaelixResponse::into_response(value))
+                }.await;
+            }
+        } else {
+            quote! {
+                let controller = &state.controller;
+                let next = caelix::Next::new(move || Box::pin(async move {
+                    #payload_setup
+                    let value = controller.#method_name(#(#call_args),*).await?;
+                    Ok(caelix::IntoCaelixResponse::into_response(value))
+                }));
+                #(#interceptor_chain)*
+                let __caelix_result = next.run().await;
+            }
+        };
         let request_context_body = quote! {
-            let mut headers: std::collections::HashMap<String, String> =
-                std::collections::HashMap::with_capacity(#request_headers.len());
-            for (name, value) in #request_headers.iter() {
-                let value = match value.to_str() {
-                    Ok(value) => value,
-                    Err(_) => return #response_adapter(caelix::IntoCaelixResponse::into_response(
+            for (_, value) in #request_headers.iter() {
+                if value.to_str().is_err() {
+                    return #response_adapter(caelix::IntoCaelixResponse::into_response(
                         caelix::BadRequestException::new("invalid request header value"),
-                    )),
-                };
-                let name = name.as_str().to_string();
-                if name.eq_ignore_ascii_case("cookie") {
-                    headers.entry(name)
-                        .and_modify(|existing| {
-                            existing.push_str("; ");
-                            existing.push_str(value);
-                        })
-                        .or_insert_with(|| value.to_string());
-                } else if name.eq_ignore_ascii_case("x-forwarded-for") {
-                    headers.entry(name)
-                        .and_modify(|existing| {
-                            existing.push_str(", ");
-                            existing.push_str(value);
-                        })
-                        .or_insert_with(|| value.to_string());
-                } else {
-                    headers.insert(name, value.to_string());
-                }
-            }
-            let mut ctx = caelix::RequestContext::new(#request_method, #request_path, headers);
-            if let Some(peer_addr) = #request_peer {
-                ctx = ctx.with_peer_addr(peer_addr);
-            }
-            #throttle_check
-            #request_context_binding
-            #(
-                let guard = match container.resolve::<#guard_types>() {
-                    Ok(value) => value,
-                    Err(err) => {
-                        caelix::log_http_exception_with_context(&err, &ctx);
-                        return #response_adapter(ctx.attach_correlation_headers(
-                            caelix::IntoCaelixResponse::into_response(err)
-                        ));
-                    }
-                };
-                match caelix::Guard::can_activate(&*guard, &ctx).await {
-                    Ok(true) => {}
-                    Ok(false) => return #response_adapter(ctx.attach_correlation_headers(
-                        caelix::IntoCaelixResponse::into_response(
-                            caelix::ForbiddenException::new("Access denied")
-                        )
-                    )),
-                    Err(err) => {
-                        caelix::log_http_exception_with_context(&err, &ctx);
-                        return #response_adapter(ctx.attach_correlation_headers(
-                            caelix::IntoCaelixResponse::into_response(err)
-                        ));
-                    }
-                }
-            )*
-            #payload_buffering
-            let controller = match container.resolve::<#struct_type>() {
-                Ok(value) => value,
-                Err(err) => {
-                    caelix::log_http_exception_with_context(&err, &ctx);
-                    return #response_adapter(ctx.attach_correlation_headers(
-                        caelix::IntoCaelixResponse::into_response(err)
                     ));
                 }
+            }
+            let correlation = caelix::CorrelationContext::from_header_values(
+                #request_headers.get("x-request-id").and_then(|value| value.to_str().ok()),
+                #request_headers.get("traceparent").and_then(|value| value.to_str().ok()),
+                #request_headers.get("x-trace-id").and_then(|value| value.to_str().ok()),
+            );
+            let mut ctx = if #needs_request_context || state.throttle.is_some() {
+                let mut headers: std::collections::HashMap<String, String> =
+                    std::collections::HashMap::with_capacity(#request_headers.len());
+                for (name, value) in #request_headers.iter() {
+                    let value = match value.to_str() {
+                        Ok(value) => value,
+                        Err(_) => unreachable!("request headers were validated"),
+                    };
+                    let name = name.as_str().to_string();
+                    if name == "cookie" {
+                        headers.entry(name)
+                            .and_modify(|existing| {
+                                existing.push_str("; ");
+                                existing.push_str(value);
+                            })
+                            .or_insert_with(|| value.to_string());
+                    } else if name == "x-forwarded-for" {
+                        headers.entry(name)
+                            .and_modify(|existing| {
+                                existing.push_str(", ");
+                                existing.push_str(value);
+                            })
+                            .or_insert_with(|| value.to_string());
+                    } else {
+                        headers.insert(name, value.to_string());
+                    }
+                }
+                let mut context = caelix::RequestContext::from_normalized_headers_with_correlation(
+                    #request_method,
+                    #request_path,
+                    headers,
+                    correlation.clone(),
+                );
+                if let Some(peer_addr) = #request_peer {
+                    context = context.with_peer_addr(peer_addr);
+                }
+                Some(context)
+            } else {
+                None
             };
-            let next = caelix::Next::new(move || Box::pin(async move {
-                #payload_setup
-                let value = controller.#method_name(#(#call_args),*).await?;
-                Ok(caelix::IntoCaelixResponse::into_response(value))
-            }));
-            #(#interceptor_chain)*
-            match next.run().await {
-                Ok(value) => #response_adapter(ctx.attach_correlation_headers(value)),
+            #throttle_check
+            #request_context_binding
+            #(#guard_checks)*
+            #payload_buffering
+            #handler_execution
+            match __caelix_result {
+                Ok(value) => #response_adapter(correlation.attach_headers(value)),
                 Err(err) => {
-                    caelix::log_http_exception_with_context(&err, &ctx);
-                    #response_adapter(ctx.attach_correlation_headers(
+                    caelix::log_http_exception_with_correlation(
+                        &err,
+                        #request_method,
+                        #request_path,
+                        &correlation,
+                    );
+                    #response_adapter(correlation.attach_headers(
                         caelix::IntoCaelixResponse::into_response(err)
                     ))
                 }
             }
         };
+        let legacy_wrapper_name = format_ident!("{}_legacy", wrapper_name);
         let wrapper = match backend {
             Backend::Actix => quote! {
                 async fn #wrapper_name(
-                    container: caelix::__actix_web::web::Data<caelix::Container>,
+                    state: caelix::__actix_web::web::Data<#route_state_name>,
                     req: caelix::__actix_web::HttpRequest,
                     #(#wrapper_params),*
                 ) -> caelix::__actix_web::HttpResponse { #request_context_body }
+
+                async fn #legacy_wrapper_name(
+                    container: caelix::__actix_web::web::Data<caelix::Container>,
+                    req: caelix::__actix_web::HttpRequest,
+                    #(#wrapper_params),*
+                ) -> caelix::__actix_web::HttpResponse {
+                    let state = caelix::__actix_web::web::Data::new(
+                        #route_state_name::new(container.get_ref())
+                    );
+                    Self::#wrapper_name(state, req, #(#wrapper_arg_names),*).await
+                }
             },
             Backend::Axum => quote! {
                 async fn #wrapper_name(
-                    caelix::__axum::extract::State(container): caelix::__axum::extract::State<std::sync::Arc<caelix::Container>>,
-                    request_info: caelix::AxumRequestInfo,
+                    state: std::sync::Arc<#route_state_name>,
+                    mut request: caelix::CaelixRequest,
                     #(#wrapper_params,)*
                 ) -> caelix::__axum::response::Response { #request_context_body }
+
+                async fn #legacy_wrapper_name(
+                    caelix::__axum::extract::State(container):
+                        caelix::__axum::extract::State<std::sync::Arc<caelix::Container>>,
+                    #(#wrapper_params,)*
+                    request: caelix::CaelixRequest,
+                ) -> caelix::__axum::response::Response {
+                    let state = std::sync::Arc::new(#route_state_name::new(&container));
+                    Self::#wrapper_name(state, request, #(#wrapper_arg_names),*).await
+                }
             },
         };
         wrappers.push(wrapper);
@@ -1624,8 +1789,52 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
         let display_path = full_path.replace("{", ":").replace("}", "");
         let handler_name = method_name.to_string();
         registrations.push(match backend {
-            Backend::Actix => quote! { cfg.route(#full_path, caelix::__actix_web::web::#backend_verb().to(#struct_type::#wrapper_name)); },
-            Backend::Axum => quote! { cfg.route(#full_path, caelix::__axum::routing::#backend_verb(#struct_type::#wrapper_name)); },
+            Backend::Actix => quote! {
+                cfg.route(
+                    #full_path,
+                    caelix::__actix_web::web::#backend_verb()
+                        .to(#struct_type::#legacy_wrapper_name),
+                );
+            },
+            Backend::Axum => quote! {
+                cfg.route(
+                    #full_path,
+                    caelix::__axum::routing::#backend_verb(#struct_type::#legacy_wrapper_name),
+                );
+            },
+        });
+        container_registrations.push(match backend {
+            Backend::Actix => quote! {
+                cfg.app_data(caelix::__actix_web::web::Data::new(
+                    #route_state_name::new(&container)
+                ));
+                cfg.route(
+                    #full_path,
+                    caelix::__actix_web::web::#backend_verb()
+                        .to(#struct_type::#wrapper_name),
+                );
+            },
+            Backend::Axum => quote! {
+                let state = std::sync::Arc::new(#route_state_name::new(&container));
+                cfg.route(
+                    #full_path,
+                    caelix::__axum::routing::#backend_verb({
+                        move |
+                            #(#wrapper_params,)*
+                            request: caelix::CaelixRequest
+                        | {
+                            let state = state.clone();
+                            async move {
+                                #struct_type::#wrapper_name(
+                                    state,
+                                    request,
+                                    #(#wrapper_arg_names),*
+                                ).await
+                            }
+                        }
+                    }),
+                );
+            },
         });
         routes.push(quote! { caelix::RouteDef { method: #verb, path: #display_path, handler: #handler_name } });
 
@@ -1855,6 +2064,16 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             #(#registrations)*
         },
     };
+    let register_routes_with_container = match backend {
+        Backend::Actix => quote! {
+            let Some(cfg) = cfg_any.downcast_mut::<caelix::__actix_web::web::ServiceConfig>() else { return; };
+            #(#container_registrations)*
+        },
+        Backend::Axum => quote! {
+            let Some(cfg) = cfg_any.downcast_mut::<caelix::AxumRouterBuilder>() else { return; };
+            #(#container_registrations)*
+        },
+    };
     #[cfg(feature = "openapi")]
     let openapi_controller_methods = quote! {
         fn openapi_routes() -> &'static [caelix::openapi::OpenApiRouteDef] {
@@ -1874,6 +2093,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     quote! {
         #(#errors)*
         #impl_block
+        #(#route_states)*
         impl caelix::Controller for #struct_type {
             fn base_path() -> &'static str { #base_path }
             fn route_dependencies() -> Vec<caelix::ProviderDependency> {
@@ -1885,6 +2105,12 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             }
             fn routes() -> &'static [caelix::RouteDef] { &[#(#routes),*] }
             fn register_routes(cfg_any: &mut dyn std::any::Any) { #register_routes }
+            fn register_routes_with_container(
+                cfg_any: &mut dyn std::any::Any,
+                container: std::sync::Arc<caelix::Container>,
+            ) {
+                #register_routes_with_container
+            }
             #openapi_controller_methods
         }
         impl #struct_type { #(#wrappers)* #openapi_route_functions }

@@ -252,6 +252,9 @@ fn noop_lifecycle() -> LifecycleFn {
 pub struct ControllerDef {
     /// The `register_fn` value.
     pub register_fn: fn(&mut dyn Any),
+    /// Container-aware route registration used by HTTP runtime adapters.
+    #[doc(hidden)]
+    pub register_with_container_fn: fn(&mut dyn Any, Arc<Container>),
     /// The `route_log_fn` value.
     pub route_log_fn: fn(),
     pub(crate) route_count_fn: fn() -> usize,
@@ -275,6 +278,9 @@ impl ControllerDef {
         }
         Self {
             register_fn: |any| C::register_routes(any),
+            register_with_container_fn: |any, container| {
+                C::register_routes_with_container(any, container)
+            },
             route_log_fn: || crate::log_controller_routes::<C>(),
             route_count_fn: || C::routes().len(),
             validate_routes_fn: C::validate_routes,
@@ -1152,6 +1158,21 @@ pub fn register_module_controllers<M: Module + 'static>(any: &mut dyn Any) {
         for node in graph.nodes {
             for controller in &node.metadata.controllers {
                 (controller.register_fn)(any);
+            }
+        }
+    }
+}
+
+/// Registers module controllers while capturing initialized singleton providers.
+#[doc(hidden)]
+pub fn register_module_controllers_with_container<M: Module + 'static>(
+    any: &mut dyn Any,
+    container: Arc<Container>,
+) {
+    if let Ok(graph) = ModuleGraph::discover::<M>() {
+        for node in graph.nodes {
+            for controller in &node.metadata.controllers {
+                (controller.register_with_container_fn)(any, container.clone());
             }
         }
     }

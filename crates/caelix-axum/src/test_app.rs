@@ -18,7 +18,7 @@ use bytes::Bytes;
 use caelix_core::UploadConfig;
 use caelix_core::{
     BoxFuture, Container, IntoCaelixResponse, Module, ProviderDependency, ProviderOverrides,
-    Result, StatusCode, build_container_with_overrides, register_module_controllers,
+    Result, StatusCode, build_container_with_overrides, register_module_controllers_with_container,
     shutdown_module,
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -176,7 +176,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
 
         let container = Arc::new(container);
         let mut routes = AxumRouterBuilder::new();
-        register_module_controllers::<M>(&mut routes);
+        register_module_controllers_with_container::<M>(&mut routes, container.clone());
         crate::websocket::configure_gateway_routes::<M>(
             &mut routes,
             container.clone(),

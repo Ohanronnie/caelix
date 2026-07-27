@@ -28,7 +28,7 @@ use caelix_core::visit_module_gateways;
 use caelix_core::{
     BoxFuture, Container, HttpResponse as CaelixHttpResponse, IntoCaelixResponse, Module,
     NotFoundException, ResponseBody, Result, log_application_starting, log_module_routes,
-    log_ready, register_module_controllers, shutdown_module,
+    log_ready, register_module_controllers_with_container, shutdown_module,
 };
 use futures_util::StreamExt;
 use tower::{Layer, Service};
@@ -190,7 +190,7 @@ type RouterLayer = Box<dyn FnOnce(Router) -> Router + Send>;
 pub struct Application {
     startup_started: Instant,
     container: Arc<Container>,
-    configure_fn: fn(&mut dyn std::any::Any),
+    configure_fn: fn(&mut dyn std::any::Any, Arc<Container>),
     gateway_configure_fn: fn(&mut AxumRouterBuilder, Arc<Container>, usize),
     shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, caelix_core::Result<()>>,
     body_limit: usize,
@@ -228,7 +228,9 @@ impl Application {
         Ok(Self {
             startup_started: start,
             container: Arc::new(container),
-            configure_fn: |router| register_module_controllers::<M>(router),
+            configure_fn: |router, container| {
+                register_module_controllers_with_container::<M>(router, container)
+            },
             gateway_configure_fn: |routes, container, max_message_size| {
                 crate::websocket::configure_gateway_routes::<M>(routes, container, max_message_size)
             },
@@ -318,7 +320,7 @@ impl Application {
     /// Runs the `into_router` public API operation.
     pub fn into_router(self) -> Router {
         let mut routes = AxumRouterBuilder::new();
-        (self.configure_fn)(&mut routes);
+        (self.configure_fn)(&mut routes, self.container.clone());
         (self.gateway_configure_fn)(
             &mut routes,
             self.container.clone(),

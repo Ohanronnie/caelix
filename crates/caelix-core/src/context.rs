@@ -3,19 +3,70 @@ use std::{
     any::{Any, TypeId},
     collections::HashMap,
     net::SocketAddr,
-    sync::{Arc, RwLock},
+    sync::{Arc, OnceLock, RwLock},
 };
+
+/// Request correlation identifiers shared by lightweight and full request paths.
+#[derive(Clone)]
+#[doc(hidden)]
+pub struct CorrelationContext {
+    request_id: String,
+    trace_id: String,
+}
+
+impl CorrelationContext {
+    /// Builds correlation identifiers from the relevant incoming header values.
+    #[doc(hidden)]
+    pub fn from_header_values(
+        request_id: Option<&str>,
+        traceparent: Option<&str>,
+        trace_id: Option<&str>,
+    ) -> Self {
+        let request_id = request_id
+            .and_then(valid_correlation_id)
+            .map(str::to_owned)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let trace_id = traceparent
+            .and_then(trace_id_from_traceparent)
+            .or_else(|| trace_id.and_then(valid_correlation_id))
+            .unwrap_or(&request_id)
+            .to_owned();
+        Self {
+            request_id,
+            trace_id,
+        }
+    }
+
+    /// Returns the accepted incoming `X-Request-Id`, or a generated UUID.
+    pub fn request_id(&self) -> &str {
+        &self.request_id
+    }
+
+    /// Returns the W3C `traceparent` trace ID, `X-Trace-Id`, or request ID fallback.
+    pub fn trace_id(&self) -> &str {
+        &self.trace_id
+    }
+
+    /// Adds these correlation identifiers to an HTTP response.
+    pub fn attach_headers(&self, mut response: crate::HttpResponse) -> crate::HttpResponse {
+        response.headers.retain(|(name, _)| {
+            !name.eq_ignore_ascii_case("x-request-id") && !name.eq_ignore_ascii_case("x-trace-id")
+        });
+        response.insert_header("X-Request-Id", self.request_id.clone());
+        response.insert_header("X-Trace-Id", self.trace_id.clone());
+        response
+    }
+}
 
 /// Public Caelix type `RequestContext`.
 pub struct RequestContext {
     method: String,
     path: String,
-    request_id: String,
-    trace_id: String,
+    correlation: CorrelationContext,
     headers: HashMap<String, String>,
-    cookies: HashMap<String, String>,
+    cookies: OnceLock<HashMap<String, String>>,
     peer_addr: Option<SocketAddr>,
-    extensions: RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
+    extensions: RwLock<Option<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>>,
 }
 
 impl RequestContext {
@@ -29,31 +80,40 @@ impl RequestContext {
             .into_iter()
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .collect::<HashMap<_, _>>();
-        let cookies = parse_cookies(headers.get("cookie").map(String::as_str));
-        let request_id = headers
-            .get("x-request-id")
-            .and_then(|value| valid_correlation_id(value))
-            .map(str::to_owned)
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let trace_id = headers
-            .get("traceparent")
-            .and_then(|value| trace_id_from_traceparent(value))
-            .or_else(|| {
-                headers
-                    .get("x-trace-id")
-                    .and_then(|value| valid_correlation_id(value))
-            })
-            .unwrap_or(&request_id)
-            .to_owned();
+        Self::from_normalized_headers(method, path, headers)
+    }
+
+    /// Builds a context from already lowercase header names without copying them again.
+    #[doc(hidden)]
+    pub fn from_normalized_headers(
+        method: impl Into<String>,
+        path: impl Into<String>,
+        headers: HashMap<String, String>,
+    ) -> Self {
+        let correlation = CorrelationContext::from_header_values(
+            headers.get("x-request-id").map(String::as_str),
+            headers.get("traceparent").map(String::as_str),
+            headers.get("x-trace-id").map(String::as_str),
+        );
+        Self::from_normalized_headers_with_correlation(method, path, headers, correlation)
+    }
+
+    /// Builds a context while reusing correlation identifiers already parsed by the adapter.
+    #[doc(hidden)]
+    pub fn from_normalized_headers_with_correlation(
+        method: impl Into<String>,
+        path: impl Into<String>,
+        headers: HashMap<String, String>,
+        correlation: CorrelationContext,
+    ) -> Self {
         Self {
             method: method.into(),
             path: path.into(),
-            request_id,
-            trace_id,
+            correlation,
             headers,
-            cookies,
+            cookies: OnceLock::new(),
             peer_addr: None,
-            extensions: RwLock::new(HashMap::new()),
+            extensions: RwLock::new(None),
         }
     }
 
@@ -80,31 +140,33 @@ impl RequestContext {
 
     /// Returns the accepted incoming `X-Request-Id`, or a generated UUID.
     pub fn request_id(&self) -> &str {
-        &self.request_id
+        self.correlation.request_id()
     }
 
     /// Returns the W3C `traceparent` trace ID, `X-Trace-Id`, or request ID fallback.
     pub fn trace_id(&self) -> &str {
-        &self.trace_id
+        self.correlation.trace_id()
+    }
+
+    pub(crate) fn correlation(&self) -> &CorrelationContext {
+        &self.correlation
     }
 
     /// Adds this request's correlation identifiers to an HTTP response.
-    pub fn attach_correlation_headers(
-        &self,
-        mut response: crate::HttpResponse,
-    ) -> crate::HttpResponse {
-        response.headers.retain(|(name, _)| {
-            !name.eq_ignore_ascii_case("x-request-id") && !name.eq_ignore_ascii_case("x-trace-id")
-        });
-        response.insert_header("X-Request-Id", self.request_id.clone());
-        response.insert_header("X-Trace-Id", self.trace_id.clone());
-        response
+    pub fn attach_correlation_headers(&self, response: crate::HttpResponse) -> crate::HttpResponse {
+        self.correlation.attach_headers(response)
     }
 
     /// Runs the `header` public API operation.
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
-            .get(&name.to_ascii_lowercase())
+            .get(name)
+            .or_else(|| {
+                name.bytes()
+                    .any(|byte| byte.is_ascii_uppercase())
+                    .then(|| self.headers.get(&name.to_ascii_lowercase()))
+                    .flatten()
+            })
             .map(String::as_str)
     }
 
@@ -115,7 +177,10 @@ impl RequestContext {
 
     /// Returns the first cookie with `name`.
     pub fn cookie(&self, name: &str) -> Option<&str> {
-        self.cookies.get(name).map(String::as_str)
+        self.cookies
+            .get_or_init(|| parse_cookies(self.headers.get("cookie").map(String::as_str)))
+            .get(name)
+            .map(String::as_str)
     }
 
     /// Runs the `set` public API operation.
@@ -125,19 +190,19 @@ impl RequestContext {
             .map_err(|_| {
                 crate::exception::startup_error("request context extensions lock poisoned")
             })?
+            .get_or_insert_with(HashMap::new)
             .insert(TypeId::of::<T>(), Arc::new(value));
         Ok(())
     }
 
     /// Runs the `get` public API operation.
     pub fn get<T: Send + Sync + 'static>(&self) -> Result<Option<Arc<T>>> {
-        let value = self
-            .extensions
-            .read()
-            .map_err(|_| {
-                crate::exception::startup_error("request context extensions lock poisoned")
-            })?
-            .get(&TypeId::of::<T>())
+        let extensions = self.extensions.read().map_err(|_| {
+            crate::exception::startup_error("request context extensions lock poisoned")
+        })?;
+        let value = extensions
+            .as_ref()
+            .and_then(|extensions| extensions.get(&TypeId::of::<T>()))
             .cloned();
 
         let Some(value) = value else {
@@ -230,6 +295,26 @@ mod tests {
         assert_eq!(ctx.cookie("dup"), Some("first"));
         assert_eq!(ctx.cookie("name"), Some("value"));
         assert_eq!(ctx.cookie("broken"), None);
+    }
+
+    #[test]
+    fn defers_cookie_parsing_and_extension_storage_until_used() {
+        let ctx = RequestContext::new(
+            "GET",
+            "/",
+            HashMap::from([("Cookie".into(), "session=abc".into())]),
+        );
+
+        assert!(ctx.cookies.get().is_none());
+        assert!(ctx.extensions.read().unwrap().is_none());
+        assert_eq!(ctx.get::<String>().unwrap(), None);
+        assert!(ctx.extensions.read().unwrap().is_none());
+
+        assert_eq!(ctx.cookie("session"), Some("abc"));
+        assert!(ctx.cookies.get().is_some());
+
+        ctx.set("authenticated".to_string()).unwrap();
+        assert!(ctx.extensions.read().unwrap().is_some());
     }
 
     #[test]

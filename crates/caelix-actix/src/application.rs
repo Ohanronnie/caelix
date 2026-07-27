@@ -21,8 +21,8 @@ use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpException, HttpResponse as CaelixHttpResponse,
     IntoCaelixResponse, Module, NotFoundException, PayloadTooLargeException, ResponseBody, Result,
     build_container, http_request_logging_enabled, log_application_starting, log_http_request,
-    log_http_request_info, log_module_routes, log_ready, register_module_controllers,
-    shutdown_module,
+    log_http_request_info, log_module_routes, log_ready,
+    register_module_controllers_with_container, shutdown_module,
 };
 use futures_util::StreamExt;
 
@@ -164,7 +164,7 @@ pub fn to_actix_response(response: CaelixHttpResponse) -> HttpResponse {
 pub struct Application {
     startup_started: Instant,
     container: Arc<Container>,
-    configure_fn: fn(&mut web::ServiceConfig),
+    configure_fn: fn(&mut web::ServiceConfig, Arc<Container>),
     gateway_configure_fn: fn(&mut web::ServiceConfig, Arc<Container>, usize),
     shutdown_fn: for<'a> fn(&'a Container) -> BoxFuture<'a, caelix_core::Result<()>>,
     body_limit: usize,
@@ -310,7 +310,8 @@ pub(crate) fn configure_caelix_services(
     cfg: &mut web::ServiceConfig,
     body_limit: usize,
     #[cfg(feature = "uploads")] upload_config: UploadConfig,
-    configure_fn: fn(&mut web::ServiceConfig),
+    configure_fn: fn(&mut web::ServiceConfig, Arc<Container>),
+    container: Arc<Container>,
     openapi: Option<&OpenApiServices>,
 ) {
     cfg.app_data(json_config(body_limit));
@@ -321,7 +322,7 @@ pub(crate) fn configure_caelix_services(
     }));
     cfg.app_data(path_config());
     cfg.app_data(query_config());
-    configure_fn(cfg);
+    configure_fn(cfg, container);
     #[cfg(feature = "openapi")]
     if let Some(openapi) = openapi {
         let ui_base = openapi.config.ui_path.trim_end_matches('/');
@@ -386,7 +387,9 @@ impl Application {
         Ok(Self {
             startup_started: start,
             container: Arc::new(container),
-            configure_fn: |cfg| register_module_controllers::<M>(cfg),
+            configure_fn: |cfg, container| {
+                register_module_controllers_with_container::<M>(cfg, container)
+            },
             gateway_configure_fn: |cfg, container, max| {
                 crate::websocket::configure_gateway_routes::<M>(cfg, container, max)
             },
@@ -458,6 +461,7 @@ impl Application {
             #[cfg(feature = "uploads")]
             self.upload_config.clone(),
             self.configure_fn,
+            self.container.clone(),
             self.openapi.as_ref(),
         );
     }
@@ -475,6 +479,7 @@ impl Application {
         let websocket_max_message_size = self.websocket_max_message_size;
         let gateway_configure_fn = self.gateway_configure_fn;
         let openapi = self.openapi.clone();
+        let route_container = container.clone();
 
         let _app = App::new()
             .app_data(web::Data::from(container.clone()))
@@ -486,6 +491,7 @@ impl Application {
                         #[cfg(feature = "uploads")]
                         upload_config.clone(),
                         configure_fn,
+                        route_container.clone(),
                         openapi.as_ref(),
                     )
                 }
@@ -527,6 +533,7 @@ impl Application {
             let openapi_with_logging = openapi.clone();
             let access_log_format = logging.access_log_format();
             let server = match HttpServer::new(move || {
+                let route_container = logging_container.clone();
                 App::new()
                     .app_data(web::Data::from(logging_container.clone()))
                     .wrap_fn(move |req, service| {
@@ -554,6 +561,7 @@ impl Application {
                                 #[cfg(feature = "uploads")]
                                 upload_config.clone(),
                                 configure_fn,
+                                route_container.clone(),
                                 openapi.as_ref(),
                             )
                         }
@@ -581,6 +589,7 @@ impl Application {
             server.await
         } else {
             let server = match HttpServer::new(move || {
+                let route_container = container.clone();
                 App::new()
                     .app_data(web::Data::from(container.clone()))
                     .configure({
@@ -594,6 +603,7 @@ impl Application {
                                 #[cfg(feature = "uploads")]
                                 upload_config.clone(),
                                 configure_fn,
+                                route_container.clone(),
                                 openapi.as_ref(),
                             )
                         }
@@ -714,17 +724,7 @@ mod tests {
         }
 
         fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
-            Box::pin(async move {
-                DOCTOR_CONSTRUCTION_COUNT.fetch_add(1, Ordering::SeqCst);
-                Ok(Self)
-            })
-        }
-
-        fn on_module_init(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
-            Box::pin(async move {
-                DOCTOR_INIT_COUNT.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            })
+            Box::pin(async move { Ok(Self) })
         }
     }
 
@@ -870,7 +870,17 @@ mod tests {
         }
 
         fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
-            Box::pin(async move { Ok(Self) })
+            Box::pin(async move {
+                DOCTOR_CONSTRUCTION_COUNT.fetch_add(1, Ordering::SeqCst);
+                Ok(Self)
+            })
+        }
+
+        fn on_module_init(&self) -> caelix_core::BoxFuture<'_, caelix_core::Result<()>> {
+            Box::pin(async move {
+                DOCTOR_INIT_COUNT.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
         }
     }
 
@@ -1205,7 +1215,8 @@ mod tests {
                 DEFAULT_BODY_LIMIT_BYTES,
                 #[cfg(feature = "uploads")]
                 UploadConfig::default(),
-                |_| {},
+                |_, _| {},
+                Arc::new(Container::new()),
                 None,
             )
         }))

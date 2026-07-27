@@ -21,7 +21,7 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
-use crate::{Controller, HttpException, Module, RequestContext, RouteDef};
+use crate::{Controller, CorrelationContext, HttpException, Module, RequestContext, RouteDef};
 
 const RESET: &str = "\x1b[0m";
 const TIMESTAMP: &str = "\x1b[38;5;245m";
@@ -276,10 +276,41 @@ pub fn log_http_exception(exception: &HttpException) {
 
 /// Logs a server-side HTTP exception with request correlation metadata.
 pub fn log_http_exception_with_context(exception: &HttpException, context: &RequestContext) {
-    log_http_exception_message(exception, Some(context));
+    log_http_exception_message(
+        exception,
+        Some(RequestLogContext {
+            method: context.method(),
+            path: context.path(),
+            correlation: context.correlation(),
+        }),
+    );
 }
 
-fn log_http_exception_message(exception: &HttpException, context: Option<&RequestContext>) {
+/// Logs a server-side HTTP exception from the lightweight request path.
+#[doc(hidden)]
+pub fn log_http_exception_with_correlation(
+    exception: &HttpException,
+    method: &str,
+    path: &str,
+    correlation: &CorrelationContext,
+) {
+    log_http_exception_message(
+        exception,
+        Some(RequestLogContext {
+            method,
+            path,
+            correlation,
+        }),
+    );
+}
+
+struct RequestLogContext<'a> {
+    method: &'a str,
+    path: &'a str,
+    correlation: &'a CorrelationContext,
+}
+
+fn log_http_exception_message(exception: &HttpException, context: Option<RequestLogContext<'_>>) {
     if !exception.status.is_server_error() {
         return;
     }
@@ -304,10 +335,10 @@ fn log_http_exception_message(exception: &HttpException, context: Option<&Reques
         let environment = configured_environment();
         message.push_str(&format!(
             " | method={} path={:?} request_id={:?} trace_id={:?} service={:?} environment={:?}",
-            context.method(),
-            context.path(),
-            context.request_id(),
-            context.trace_id(),
+            context.method,
+            context.path,
+            context.correlation.request_id(),
+            context.correlation.trace_id(),
             service,
             environment,
         ));

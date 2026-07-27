@@ -1,6 +1,6 @@
-use std::any::Any;
+use std::{any::Any, sync::Arc};
 
-use crate::{ProviderDependency, Result};
+use crate::{Container, ProviderDependency, Result};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Public Caelix type `RouteDef`.
@@ -37,6 +37,12 @@ pub trait Controller {
     }
     /// Public Caelix API.
     fn register_routes(cfg: &mut dyn Any);
+
+    /// Registers routes with the initialized application container.
+    #[doc(hidden)]
+    fn register_routes_with_container(cfg: &mut dyn Any, _container: Arc<Container>) {
+        Self::register_routes(cfg);
+    }
 
     #[cfg(feature = "openapi")]
     #[doc(hidden)]

@@ -21,7 +21,7 @@ pub use application::{
 };
 /// Re-exported public API used by generated multipart controller wrappers.
 #[doc(hidden)]
-pub use request_payload::{RawRequestPayload, RequestPayload};
+pub use request_payload::{CaelixRequest, RawRequestPayload, RequestPayload};
 /// Re-exported public API.
 pub use test_app::{TestApplication, TestApplicationBuilder, TestRequestBuilder, TestResponse};
 /// Re-exported public API.

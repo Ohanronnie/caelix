@@ -18,7 +18,7 @@ use bytes::Bytes;
 use caelix_core::UploadConfig;
 use caelix_core::{
     BoxFuture, Container, Module, ProviderDependency, ProviderOverrides, Result, StatusCode,
-    build_container_with_overrides, register_module_controllers, shutdown_module,
+    build_container_with_overrides, register_module_controllers_with_container, shutdown_module,
 };
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -177,7 +177,8 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
         let body_limit = self.body_limit;
         #[cfg(feature = "uploads")]
         let upload_config = self.upload_config;
-        let configure_fn: fn(&mut web::ServiceConfig) = |cfg| register_module_controllers::<M>(cfg);
+        let configure_fn: fn(&mut web::ServiceConfig, Arc<Container>) =
+            |cfg, container| register_module_controllers_with_container::<M>(cfg, container);
         #[cfg(feature = "openapi")]
         let openapi = match self.openapi {
             Some(config) => {
@@ -190,6 +191,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
             None => None,
         };
 
+        let route_container = container.clone();
         let app = App::new()
             .app_data(web::Data::from(container.clone()))
             .configure(move |cfg| {
@@ -199,6 +201,7 @@ impl<M: Module + 'static> TestApplicationBuilder<M> {
                     #[cfg(feature = "uploads")]
                     upload_config.clone(),
                     configure_fn,
+                    route_container.clone(),
                     {
                         #[cfg(feature = "openapi")]
                         {

@@ -1,14 +1,14 @@
 use axum::{
     body::{Body, to_bytes},
-    extract::FromRequest,
-    http::Request,
+    extract::{ConnectInfo, FromRequest},
+    http::{HeaderMap, Method, Request, Uri},
     response::Response,
 };
 use bytes::Bytes;
 use caelix_core::{BadRequestException, Result};
 #[cfg(feature = "uploads")]
 use caelix_core::{MultipartForm, upload_limit_error};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, net::SocketAddr};
 
 use crate::application::UploadRuntimeConfig;
 
@@ -29,6 +29,45 @@ pub struct RawRequestPayload {
     body_limit: usize,
     #[cfg(feature = "uploads")]
     upload: UploadRuntimeConfig,
+}
+
+/// Body-consuming generated-handler request that owns Axum's original parts.
+#[doc(hidden)]
+pub struct CaelixRequest {
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    peer_addr: Option<SocketAddr>,
+    payload: Option<RawRequestPayload>,
+}
+
+impl CaelixRequest {
+    /// Returns the incoming HTTP method.
+    pub fn method(&self) -> &Method {
+        &self.method
+    }
+
+    /// Returns the matched request URI path.
+    pub fn path(&self) -> &str {
+        self.uri.path()
+    }
+
+    /// Returns the original Axum header map without cloning it.
+    pub fn headers(&self) -> &HeaderMap {
+        &self.headers
+    }
+
+    /// Returns the immediate socket peer address.
+    pub fn peer_addr(&self) -> Option<SocketAddr> {
+        self.peer_addr
+    }
+
+    /// Takes the unbuffered body payload after guards and throttling run.
+    pub fn take_payload(&mut self) -> RawRequestPayload {
+        self.payload
+            .take()
+            .expect("generated request payload can only be taken once")
+    }
 }
 
 impl RawRequestPayload {
@@ -137,6 +176,52 @@ where
             body_limit,
             #[cfg(feature = "uploads")]
             upload,
+        })
+    }
+}
+
+impl<S> FromRequest<S> for CaelixRequest
+where
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request(
+        request: Request<Body>,
+        _: &S,
+    ) -> std::result::Result<Self, Self::Rejection> {
+        let (parts, body) = request.into_parts();
+        let upload = parts
+            .extensions
+            .get::<UploadRuntimeConfig>()
+            .cloned()
+            .unwrap_or_else(|| UploadRuntimeConfig {
+                #[cfg(feature = "uploads")]
+                config: caelix_core::UploadConfig::default(),
+                body_limit: crate::application::DEFAULT_BODY_LIMIT_BYTES,
+            });
+        let content_type = parts
+            .headers
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(ToOwned::to_owned);
+        let peer_addr = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|value| value.0);
+        let body_limit = upload.body_limit;
+        Ok(Self {
+            method: parts.method,
+            uri: parts.uri,
+            headers: parts.headers,
+            peer_addr,
+            payload: Some(RawRequestPayload {
+                content_type,
+                body,
+                body_limit,
+                #[cfg(feature = "uploads")]
+                upload,
+            }),
         })
     }
 }

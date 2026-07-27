@@ -104,9 +104,9 @@ pub use tokio as __tokio;
 #[cfg(feature = "axum")]
 /// Re-exported public API.
 pub use caelix_axum::{
-    Application, AxumRequestInfo, AxumRouterBuilder, DEFAULT_BODY_LIMIT_BYTES, RawRequestPayload,
-    RequestPayload, TestApplication, TestApplicationBuilder, TestRequestBuilder, TestResponse,
-    to_axum_response,
+    Application, AxumRequestInfo, AxumRouterBuilder, CaelixRequest, DEFAULT_BODY_LIMIT_BYTES,
+    RawRequestPayload, RequestPayload, TestApplication, TestApplicationBuilder, TestRequestBuilder,
+    TestResponse, to_axum_response,
 };
 
 /// Socket.IO APIs, available only with the Axum-selecting `socketio` feature.
