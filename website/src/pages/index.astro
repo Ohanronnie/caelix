@@ -1,0 +1,123 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { getDocsUrl } from "../lib/docs";
+---
+
+<BaseLayout
+  title="Caelix · Structured Rust services"
+  description="Caelix gives Rust backend applications clear, explicit structure through modules, services, and controllers."
+>
+  <main class="home" data-pagefind-body>
+    <section class="home-hero">
+      <div>
+        <p class="eyebrow">A Rust backend framework</p>
+        <h1>Give your Rust services a clear architecture.</h1>
+        <p class="home-lede">
+          Caelix gives backend applications a clear, explicit structure: modules
+          compose the system, services own the work, and controllers expose it.
+        </p>
+        <div class="home-actions">
+          <a
+            class="button button-primary"
+            href={getDocsUrl("getting-started/overview")}>Get started →</a
+          >
+          <a
+            class="button button-secondary"
+            href="https://github.com/Ohanronnie/caelix">View on GitHub ↗</a
+          >
+        </div>
+        <div class="install-command" aria-label="Install Caelix CLI">
+          <b>$</b><code>cargo install caelix-cli</code><button
+            type="button"
+            data-copy-command="cargo install caelix-cli">Copy</button
+          >
+        </div>
+      </div>
+      <div class="architecture-card" aria-label="Caelix application structure">
+        <div class="architecture-top">
+          <i></i><i></i><i></i><span style="margin-left: .35rem"
+            >src/app.module.rs</span
+          >
+        </div>
+        <pre
+          class="architecture-code"><code><span class="accent">use</span> caelix::&#123;Module, ModuleMetadata&#125;;
+
+<span class="accent">pub struct</span> AppModule;
+
+<span class="accent">impl</span> Module <span class="accent">for</span> AppModule &#123;
+    <span class="accent">fn</span> register() <span class="accent">-&gt;</span> ModuleMetadata &#123;
+        ModuleMetadata::new()
+            .provider::&lt;UsersService&gt;()
+            .controller::&lt;UsersController&gt;()
+    &#125;
+&#125;</code></pre>
+      </div>
+    </section>
+
+    <section class="path-section" aria-labelledby="paths-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">A framework for application code</p><h2
+            id="paths-title"
+          >
+            Start small. Stay organized.
+          </h2>
+        </div>
+        <p>
+          Build a minimal route, then bring in the boundaries your application
+          needs—without losing a clear picture of how it fits together.
+        </p>
+      </div>
+      <div class="path-grid">
+        <a
+          class="path-card"
+          href={getDocsUrl("getting-started/minimal-application")}
+          ><span>01</span><strong>Create an application →</strong><p>
+            Start with a module and a controller.
+          </p></a
+        >
+        <a class="path-card" href={getDocsUrl("concepts/modules")}
+          ><span>02</span><strong>Compose with modules →</strong><p>
+            Keep imports and registrations visible.
+          </p></a
+        >
+        <a class="path-card" href={getDocsUrl("advanced/microservices")}
+          ><span>03</span><strong>Extend the system →</strong><p>
+            Add events, gateways, and microservices.
+          </p></a
+        >
+      </div>
+    </section>
+
+    <section class="path-section" aria-labelledby="explore-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Explore Caelix</p><h2 id="explore-title">
+            Useful paths through the framework.
+          </h2>
+        </div>
+      </div>
+      <div class="path-grid path-grid--explore">
+        <a class="path-card" href={getDocsUrl("concepts/providers")}
+          ><span>Providers</span><strong>Typed dependency injection →</strong><p
+          >
+            Make dependencies explicit and testable.
+          </p></a
+        >
+        <a class="path-card" href={getDocsUrl("concepts/controllers")}
+          ><span>Controllers</span><strong>Routes and request handling →</strong
+          ><p>Keep transport concerns at the edge.</p></a
+        >
+        <a class="path-card" href={getDocsUrl("advanced/openapi")}
+          ><span>Tooling</span><strong>OpenAPI and Swagger UI →</strong><p>
+            Document the API your application exposes.
+          </p></a
+        >
+        <a class="path-card" href={getDocsUrl("why-caelix/overview")}
+          ><span>Why Caelix</span><strong>Choose your backend boundary →</strong
+          ><p>See what Caelix shares across Actix and Axum.</p></a
+        >
+      </div>
+    </section>
+  </main>
+</BaseLayout>

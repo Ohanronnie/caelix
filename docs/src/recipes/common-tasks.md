@@ -58,6 +58,10 @@ async fn create(&self, #[body] #[validate] input: CreateUser) -> Result<Response
 }
 ```
 
+Enable the `validator` feature and define the field rules on the DTO. The full
+guide covers body, query, and path validation plus client error responses:
+[Validation](../concepts/validation.md).
+
 ## Emit Events After Writes
 
 Import `EventModule`, inject or resolve `EventBus` in a service, perform the write, then emit a cloned event type.

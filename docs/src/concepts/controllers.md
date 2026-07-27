@@ -53,11 +53,86 @@ impl UsersController {
 
 Supported route attributes are `#[get]`, `#[post]`, `#[patch]`, `#[put]`, and `#[delete]`.
 
+## Route paths and methods
+
+The controller path is a shared prefix; each method contributes its own path.
+Use `""` for the prefix itself and `{name}` for a route parameter:
+
+| Controller path           | Method path          | Resulting route      |
+| ------------------------- | -------------------- | -------------------- |
+| `#[controller("/users")]` | `#[get("")]`         | `GET /users`         |
+| `#[controller("/users")]` | `#[post("")]`        | `POST /users`        |
+| `#[controller("/users")]` | `#[get("/{id}")]`    | `GET /users/{id}`    |
+| `#[controller("/users")]` | `#[delete("/{id}")]` | `DELETE /users/{id}` |
+
+Keep route shapes unambiguous. Avoid relying on registration order to decide
+between overlapping patterns; use clear static prefixes such as `/search` or
+`/by-email/{email}` instead of creating several routes that can match the same
+path. Caelix logs the registered route table at startup.
+
 Controller parameters use `#[param]`, `#[query]`, `#[body]`, `#[file]`,
 `#[files]`, `#[multipart]`, `#[user]`, and `#[cookie("name")]`.
-`#[validate]` validates a decoded value. See the canonical [Extractors](extractors.md)
-guide for accepted Rust types, feature requirements, combinations, order, and
-error behavior. Extractor arguments must be simple identifiers.
+`#[validate]` validates a decoded value. See [Validation](validation.md) for
+DTO rules, client error responses, and body/query/path examples; see
+[Extractors](extractors.md) for accepted Rust types and extractor
+combinations. Extractor arguments must be simple identifiers.
+
+## Keep controllers at the HTTP edge
+
+Controllers should decode request data, choose HTTP statuses, and delegate
+application work. Put database queries, transactions, ownership rules shared by
+several entry points, and third-party calls in injectable services.
+
+```rust
+#[post("")]
+async fn create(
+    &self,
+    #[user] actor: CurrentUser,
+    #[body] #[validate] input: CreateUserDto,
+) -> Result<Response<UserDto>> {
+    let user = self.users.create(actor, input).await?;
+    Ok(Response::WithStatus(StatusCode::CREATED, user))
+}
+```
+
+Use `Response::Body` for a `200` JSON response,
+`Response::WithStatus(StatusCode::CREATED, value)` for creates, and
+`Response::no_content()` for successful deletes that return `204`. See
+[Responses and Errors](responses-and-errors.md) for streaming, files, typed
+exceptions, and error conversion.
+
+## Route-level policy
+
+Apply guards and interceptors at the controller when every route shares the
+policy, or on a method when it is exceptional:
+
+```rust
+#[controller("/admin")]
+#[use_guard(AuthGuard)]
+#[use_guard(AdminGuard)]
+#[use_interceptor(AuditInterceptor)]
+impl AdminController {
+    #[get("/users")]
+    async fn list_users(&self) -> Result<Vec<UserDto>> {
+        self.users.list().await
+    }
+}
+```
+
+Controller-level guards run before method-level guards. Interceptors wrap the
+handler in onion order, so the first declared interceptor observes the request
+first and the response last. Use [Authentication and
+Authorization](../advanced/authentication-and-authorization.md) for a full
+guard pattern and [Guards and Interceptors](../advanced/guards-and-interceptors.md)
+for lifecycle details.
+
+## Document controller contracts
+
+With the `openapi` feature, controllers contribute operations to the generated
+document. Request bodies, path/query/cookie extractors, files, and basic
+successful responses are inferred; add `#[response]`, `#[errors]`,
+`#[request_header]`, and `#[security]` when the contract needs richer metadata.
+See [OpenAPI and Swagger UI](../advanced/openapi.md).
 
 ## Routing example
 

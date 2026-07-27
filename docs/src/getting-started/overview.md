@@ -11,6 +11,8 @@ and NATS/Redis microservices behind feature flags.
 
 ## Start A Project
 
+### Install And Run
+
 Install the CLI from crates.io:
 
 ```sh
@@ -25,7 +27,9 @@ cd demo-api
 caelix run
 ```
 
-The generated application uses `caelix = "0.0.33"` from crates.io:
+### Generated Application Structure
+
+The generated application uses the latest Caelix release from crates.io:
 
 ```text
 demo-api/
@@ -38,7 +42,9 @@ demo-api/
 
 `src/main.rs` starts the Actix adapter. `src/app.rs` contains the root `AppModule`.
 
-## Build A Blog Feature
+## Build A Blog Application
+
+### Generate The Feature Module
 
 Generate a feature module:
 
@@ -55,6 +61,8 @@ src/posts/
   mod.rs
   service.rs
 ```
+
+### Configure The Application
 
 Enable typed configuration and define the application settings:
 
@@ -88,6 +96,8 @@ Every struct field needs a `#[config(env = "...")]` mapping. Associated
 constants and methods, such as `SERVICE_NAME` and `is_production`, are literal
 application policy and do not need environment variables; they can live beside
 the loaded fields on the same type.
+
+### Add A Database Provider
 
 Keep the database pool in its own provider:
 
@@ -132,6 +142,8 @@ impl Module for DatabaseModule {
 }
 ```
 
+### Register The Modules
+
 Generated feature files are not wired into the root app automatically. Register the config and blog module in `src/lib.rs` and `src/app.rs`:
 
 ```rust
@@ -162,6 +174,8 @@ impl Module for AppModule {
 }
 ```
 
+### Create The Posts Table
+
 Create a table for posts:
 
 ```sql
@@ -171,6 +185,8 @@ create table posts (
   body text not null
 );
 ```
+
+### Implement The Posts Service
 
 Now replace the generated placeholder with DTOs, SQLx writes, and a post-created event emitted after the insert succeeds.
 
@@ -257,6 +273,8 @@ impl PostsService {
 }
 ```
 
+### Add Controller Routes
+
 Then add controller routes using path params, query params, JSON bodies, typed responses, and typed errors:
 
 ```rust
@@ -292,6 +310,8 @@ impl PostsController {
     }
 }
 ```
+
+### Register The Event Handler
 
 Register event support explicitly with `EventModule`. Import it before `PostsService`, because the service injects `Arc<EventBus>`.
 
@@ -334,6 +354,8 @@ impl Module for PostsModule {
     }
 }
 ```
+
+### Run The Feature
 
 Run the app and try the feature:
 

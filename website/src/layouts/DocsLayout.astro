@@ -1,0 +1,113 @@
+---
+import type { MarkdownHeading } from "astro";
+import Sidebar from "../components/Sidebar.astro";
+import BaseLayout from "./BaseLayout.astro";
+import {
+  getDocsUrl,
+  type NavigationItem,
+  type NavigationSection,
+} from "../lib/docs";
+
+interface Props {
+  title: string;
+  id: string;
+  headings: MarkdownHeading[];
+  navigation: NavigationSection[];
+  previous?: NavigationItem;
+  next?: NavigationItem;
+}
+
+const { title, id, headings, navigation, previous, next } = Astro.props;
+const toc = headings.filter(
+  (heading) => heading.depth >= 2 && heading.depth <= 3,
+);
+---
+
+<BaseLayout title={`${title} · Caelix`} documentation>
+  <div class="page-shell">
+    <Sidebar navigation={navigation} currentId={id} />
+    <main class="doc-main">
+      <div class="doc-grid">
+        <article class="article-content" data-pagefind-body>
+          <slot />
+          {
+            (previous || next) && (
+              <nav class="page-pager" aria-label="Documentation pagination">
+                {previous ? (
+                  <a href={getDocsUrl(previous.id)}>
+                    <span>← Previous</span>
+                    <strong>{previous.title}</strong>
+                  </a>
+                ) : (
+                  <span />
+                )}
+                {next ? (
+                  <a href={getDocsUrl(next.id)}>
+                    <span>Next →</span>
+                    <strong>{next.title}</strong>
+                  </a>
+                ) : (
+                  <span />
+                )}
+              </nav>
+            )
+          }
+          <p class="article-tools">
+            <a
+              href={`https://github.com/Ohanronnie/caelix/edit/main/docs/src/${id}.md`}
+              >Edit this page on GitHub ↗</a
+            >
+          </p>
+        </article>
+        {
+          toc.length > 0 && (
+            <nav class="on-this-page" aria-label="On this page">
+              <p>On this page</p>
+              {toc.map((heading) => (
+                <a
+                  class={`toc-depth-${heading.depth}`}
+                  href={`#${heading.slug}`}
+                  data-toc-link
+                >
+                  {heading.text}
+                </a>
+              ))}
+            </nav>
+          )
+        }
+      </div>
+    </main>
+  </div>
+</BaseLayout>
+
+<script>
+  const tocLinks = Array.from(
+    document.querySelectorAll<HTMLAnchorElement>("[data-toc-link]"),
+  );
+  const headings = tocLinks.flatMap((link) => {
+    const id = link.getAttribute("href")?.slice(1);
+    const heading = id ? document.getElementById(id) : null;
+    return heading ? [{ heading, link }] : [];
+  });
+
+  const setCurrent = (id: string) => {
+    tocLinks.forEach((link) => {
+      link.toggleAttribute(
+        "aria-current",
+        link.getAttribute("href") === `#${id}`,
+      );
+    });
+  };
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const active = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (active) setCurrent(active.target.id);
+    },
+    { rootMargin: "-15% 0px -70%" },
+  );
+
+  headings.forEach(({ heading }) => observer.observe(heading));
+</script>

@@ -2,8 +2,8 @@
 
 Enable the `openapi` feature. Caelix re-exports `utoipa`, including `ToSchema`, so no separate dependency is required:
 
-```toml
-caelix = { version = "0.0.33", features = ["openapi"] }
+```sh
+cargo add caelix --features openapi
 ```
 
 Opt in when building the application. Caelix serves OpenAPI 3.1 JSON at `/openapi.json` and Swagger UI at `/docs`.
@@ -17,6 +17,130 @@ let app = Application::new::<AppModule>()
 ```
 
 `OpenApiConfig::json_path(...)` and `OpenApiConfig::ui_path(...)` customize these paths. They must not collide with controller routes.
+
+## What Caelix publishes
+
+At startup, Caelix walks the complete imported module graph and builds one
+OpenAPI 3.1 document from registered controller routes. Each operation has its
+HTTP method, final path, operation ID, inferred request/response metadata, and
+any explicit documentation markers on the controller method.
+
+The document is served from `json_path` and Swagger UI is served from `ui_path`:
+
+```rust
+use caelix::openapi::OpenApiConfig;
+
+let openapi = OpenApiConfig::new("Payments API", "2026.07")
+    .json_path("/api/openapi.json")
+    .ui_path("/api/docs");
+
+let app = Application::new::<AppModule>()
+    .await?
+    .with_openapi(openapi)?;
+```
+
+Paths are normalized to begin with `/`. Keep the JSON and UI endpoints outside
+your public controller route space so startup can reject collisions clearly.
+
+## Schemas, parameters, and inferred operations
+
+Derive `ToSchema` for DTOs that appear in explicit OpenAPI request or response
+documentation. Caelix re-exports `utoipa`, so the feature does not require a
+separate direct dependency:
+
+```rust
+use caelix::openapi::ToSchema;
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize, Serialize, ToSchema)]
+struct CreatePayment {
+    amount_cents: i64,
+    currency: String,
+}
+
+#[derive(Serialize, ToSchema)]
+struct Payment {
+    id: String,
+    amount_cents: i64,
+    currency: String,
+}
+```
+
+Caelix documents these route declarations automatically:
+
+| Controller declaration              | OpenAPI contribution                                           |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `#[get("/{id}")]`                   | method and path operation                                      |
+| `#[param] id: i64`                  | required path parameter                                        |
+| `#[query] page: u32`                | query parameter                                                |
+| `#[cookie("session")]`              | cookie parameter                                               |
+| `#[body] input: Dto`                | JSON request body                                              |
+| `#[file]` / `#[files]`              | multipart binary property, including declared file constraints |
+| `#[multipart]`                      | free-form multipart body                                       |
+| `Result<T>` / `Result<Response<T>>` | successful `200` response when it can be inferred              |
+
+Use explicit markers whenever the operation has a non-`200` success status,
+raw/streaming body, response headers, known errors, or security requirements.
+That makes the public contract precise instead of relying on return-type
+inference.
+
+## Describe responses, headers, and errors
+
+`#[response]` controls the successful response. It accepts a positional body
+type or `body = Type`, an optional integer `status`, a `content_type`, and
+optional response `headers` tuples of `(name, schema, description)`:
+
+```rust
+#[post("")]
+#[response(
+    status = 201,
+    body = Payment,
+    headers(("Location", String, "Canonical payment URL"))
+)]
+#[errors(BadRequestException, ConflictException)]
+async fn create(&self, #[body] input: CreatePayment) -> Result<Response<Payment>> {
+    // ...
+}
+```
+
+`#[errors(...)]` produces the standard Caelix error envelope for each listed
+exception status. Global or route throttling also documents `429 Too Many
+Requests` automatically. Use `#[request_header]` for headers the client sends
+outside the body:
+
+```rust
+#[request_header(
+    name = "Idempotency-Key",
+    schema = String,
+    required,
+    description = "Unique key for safely retrying a write"
+)]
+#[post("")]
+async fn create(&self, #[body] input: CreatePayment) -> Result<Response<Payment>> {
+    // ...
+}
+```
+
+The marker documents a header; it does not extract, authenticate, or enforce
+it at runtime. Implement that behavior in a guard, interceptor, or controller
+extractor/service policy.
+
+## Keep the contract and runtime aligned
+
+OpenAPI records the route contract; it does not change the controller runtime.
+Keep these concerns paired in source:
+
+| Contract declaration             | Runtime behavior to keep beside it                                 |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `#[security(...)]`               | `#[use_guard(...)]` and the credential-verification guard          |
+| `#[errors(...)]`                 | Typed exceptions returned by the service/controller                |
+| `#[response(status = 201, ...)]` | `Response::WithStatus(StatusCode::CREATED, ...)`                   |
+| `#[request_header(...)]`         | The guard, interceptor, or service policy that requires the header |
+| `#[body] #[validate]`            | DTO field rules and the `validator` feature                        |
+
+Validation rejects invalid request data with Caelix’s standard `400` error
+envelope. Document any additional client errors with `#[errors(...)]`; the
+full validation rules are in [Validation](../concepts/validation.md).
 
 Document DTOs with `utoipa::ToSchema`. The controller macro infers JSON request
 bodies from `#[body]`, multipart request bodies from upload routes, and

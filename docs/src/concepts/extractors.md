@@ -4,20 +4,22 @@ Controller extractors turn HTTP request data into typed method arguments. Their
 behavior is shared by Actix and Axum; applications do not use backend extractor
 types in controller signatures.
 
-| Attribute | Accepted Rust type | Feature |
-| --- | --- | --- |
-| `#[param]` | any Serde-deserializable scalar, tuple, or struct | runtime |
-| `#[query]` | any Serde-deserializable type | runtime |
-| `#[body]` | any Serde-deserializable DTO | runtime; `uploads` for multipart |
-| `#[user]` | a cloneable concrete type stored in `RequestContext` | runtime |
-| `#[cookie("name")]` | `String` or `Option<String>` | runtime |
-| `#[file]` | `UploadedFile` or `Option<UploadedFile>` | `uploads` |
-| `#[files]` | `Vec<UploadedFile>` | `uploads` |
-| `#[multipart]` | `MultipartForm` | `uploads` |
-| `#[validate]` | a value implementing `validator::Validate` | `validator` |
+| Attribute           | Accepted Rust type                                   | Feature                          |
+| ------------------- | ---------------------------------------------------- | -------------------------------- |
+| `#[param]`          | any Serde-deserializable scalar, tuple, or struct    | runtime                          |
+| `#[query]`          | any Serde-deserializable type                        | runtime                          |
+| `#[body]`           | any Serde-deserializable DTO                         | runtime; `uploads` for multipart |
+| `#[user]`           | a cloneable concrete type stored in `RequestContext` | runtime                          |
+| `#[cookie("name")]` | `String` or `Option<String>`                         | runtime                          |
+| `#[file]`           | `UploadedFile` or `Option<UploadedFile>`             | `uploads`                        |
+| `#[files]`          | `Vec<UploadedFile>`                                  | `uploads`                        |
+| `#[multipart]`      | `MultipartForm`                                      | `uploads`                        |
+| `#[validate]`       | a value implementing `validator::Validate`           | `validator`                      |
 
 Arguments must be simple identifiers. Each extracted parameter has exactly one
 extractor marker; `#[validate]` is an additional marker on a decoded value.
+See [Validation](validation.md) for DTO rules, error responses, and examples
+for body, query, and path values.
 
 ## Path, query, body, user, and cookie values
 
@@ -54,7 +56,8 @@ multipart mandatory. If every file is optional, JSON remains valid and supplies
 
 File checks run in request order: declared size, declared or detected MIME type,
 then the async controller validator named by `validate = method`. DTO
-`#[validate]` runs after successful decoding. See [Multipart Uploads](../advanced/multipart-uploads.md)
+`#[validate]` runs after successful decoding. See [Validation](validation.md)
+for DTO validation and [Multipart Uploads](../advanced/multipart-uploads.md)
 for file types, lifecycle, and `#[upload(limit = bytes)]`.
 
 ## Failure normalization and order

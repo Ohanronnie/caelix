@@ -6,10 +6,9 @@ broker consumers. Handler metadata is transport-neutral; a running
 
 ## Select a transport
 
-```toml
-[dependencies]
-caelix = { version = "0.0.33", default-features = false, features = ["microservices-nats"] }
-serde = { version = "1", features = ["derive"] }
+```sh
+cargo add caelix --no-default-features --features microservices-nats
+cargo add serde --features derive
 ```
 
 Use `microservices-redis` for Redis, or enable both when one binary needs both
@@ -80,6 +79,52 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 `.microservice::<T>()` registers `T` as a normal provider, so constructor
 injection and lifecycle hooks work unchanged. Startup builds the container,
 collects handler definitions, validates topology, connects, and subscribes.
+
+## Send a command and event
+
+Use the same transport options in a caller. `request` sends a typed command and
+waits for a typed reply; `emit` publishes a durable event and returns after the
+broker accepts it.
+
+```rust
+use caelix::{MicroserviceClient, NatsTransportOptions, Result};
+
+async fn call_math() -> Result<Total> {
+    let client = MicroserviceClient::connect(
+        NatsTransportOptions::new("nats://127.0.0.1:4222")
+            .service_name("gateway")
+            .jetstream_stream("CAELIX_EVENTS"),
+    )
+    .await?;
+
+    let total: Total = client.request("math.sum", Sum { left: 2, right: 3 }).await?;
+    client.emit("audit.created", AuditEvent { order_id: 42 }).await?;
+    Ok(total)
+}
+```
+
+Use the command payload’s own idempotency key for writes that may be retried.
+For event handlers, persist `MessageContext::event_id()` with the business
+effect so an at-least-once delivery cannot apply it twice.
+
+## Start with Redis instead
+
+The handler and module source stays the same. Select Redis, configure a stable
+consumer-group name, and name the shared event Stream:
+
+```rust
+use caelix::{MicroserviceApplication, RedisTransportOptions};
+
+let options = RedisTransportOptions::new("redis://127.0.0.1/")
+    .service_name("math")
+    .event_stream("caelix:events");
+
+MicroserviceApplication::<AppModule>::new(options).await?.run().await?;
+```
+
+Redis requires version 6.2 or later. Choose the transport guide for its
+topology, retry, and operational constraints: [NATS](microservices-nats.md) or
+[Redis](microservices-redis.md).
 
 Continue with [Handlers and Client](microservices-handlers-and-client.md), then
 the [NATS](microservices-nats.md) or [Redis](microservices-redis.md) transport

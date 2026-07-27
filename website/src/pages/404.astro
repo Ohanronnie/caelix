@@ -1,0 +1,14 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { getBaseUrl } from "../lib/docs";
+---
+
+<BaseLayout title="Page not found · Caelix">
+  <main class="home">
+    <p class="eyebrow">404</p><h1>That page is not here.</h1><p
+      class="home-lede"
+    >
+      The documentation may have moved to a clean URL.
+    </p><a class="button button-primary" href={getBaseUrl()}>Go to Caelix →</a>
+  </main>
+</BaseLayout>

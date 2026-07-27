@@ -1,0 +1,90 @@
+---
+import Header from "../components/Header.astro";
+import SearchDialog from "../components/SearchDialog.astro";
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+  documentation?: boolean;
+}
+
+const {
+  title,
+  description = "Caelix is a structured Rust backend framework.",
+  documentation = false,
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23b84d25'/%3E%3Ctext x='16' y='22' fill='white' font-size='18' text-anchor='middle' font-family='serif'%3EC%3C/text%3E%3C/svg%3E"
+    />
+    <title>{title}</title>
+    <script is:inline>
+      const savedTheme = localStorage.getItem("caelix-theme");
+      document.documentElement.dataset.theme =
+        savedTheme ||
+        (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    </script>
+  </head>
+  <body class:list={{ "docs-page": documentation }}>
+    <Header />
+    <slot />
+    <SearchDialog />
+    <footer class="site-footer">
+      Caelix · A Rust framework for explicit, structured backend applications.
+    </footer>
+    <script>
+      document
+        .querySelectorAll<HTMLElement>(".article-content pre")
+        .forEach((pre) => {
+          const code = pre.querySelector("code");
+          if (!code || pre.querySelector(".copy-code")) return;
+          const button = document.createElement("button");
+          button.className = "copy-code";
+          button.type = "button";
+          button.textContent = "Copy";
+          button.addEventListener("click", async () => {
+            await copyText(code.textContent ?? "");
+            button.textContent = "Copied";
+            setTimeout(() => (button.textContent = "Copy"), 1600);
+          });
+          pre.append(button);
+        });
+
+      document
+        .querySelectorAll<HTMLButtonElement>("[data-copy-command]")
+        .forEach((button) => {
+          button.addEventListener("click", async () => {
+            await copyText(button.dataset.copyCommand ?? "");
+            button.textContent = "Copied";
+            setTimeout(() => (button.textContent = "Copy"), 1600);
+          });
+        });
+
+      async function copyText(text: string) {
+        if (navigator.clipboard?.writeText) {
+          try {
+            await navigator.clipboard.writeText(text);
+            return;
+          } catch {}
+        }
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.append(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+    </script>
+  </body>
+</html>

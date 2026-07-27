@@ -297,9 +297,8 @@ API described above.
 
 Axum is selected explicitly because Actix is Caelix's default runtime:
 
-```toml
-[dependencies]
-caelix = { version = "0.0.33", default-features = false, features = ["axum"] }
+```sh
+cargo add caelix --no-default-features --features axum
 ```
 
 The `axum` feature and the `actix` feature are mutually exclusive. With this
@@ -394,9 +393,8 @@ The Caelix integration is backed by
 [`socketioxide`](https://crates.io/crates/socketioxide) and selects Axum
 transitively:
 
-```toml
-[dependencies]
-caelix = { version = "0.0.33", default-features = false, features = ["socketio"] }
+```sh
+cargo add caelix --no-default-features --features socketio
 ```
 
 This feature cannot be combined with the default Actix backend. It exposes

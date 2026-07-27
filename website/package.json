@@ -1,0 +1,31 @@
+{
+  "name": "caelix-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "check": "astro check && bun run scripts/validate-docs.ts",
+    "build:site": "astro build",
+    "search": "pagefind --site ../book",
+    "redirects": "bun run scripts/generate-legacy-redirects.ts",
+    "verify:output": "bun run scripts/validate-output.ts",
+    "build": "bun run check && bun run build:site && bun run search && bun run redirects && bun run verify:output",
+    "preview": "bun run scripts/serve-preview.ts",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@astrojs/sitemap": "^3.6.0",
+    "@playwright/test": "^1.55.0",
+    "@types/bun": "^1.2.21",
+    "@types/node": "^24.3.0",
+    "astro": "^5.13.2",
+    "pagefind": "^1.4.0",
+    "prettier": "^3.9.6",
+    "prettier-plugin-astro": "^0.14.1",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.3.0"
+  }
+}

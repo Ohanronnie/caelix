@@ -1,0 +1,41 @@
+---
+import type { NavigationSection } from "../lib/docs";
+import SidebarItem from "./SidebarItem.astro";
+
+interface Props {
+  navigation: NavigationSection[];
+  currentId: string;
+}
+
+const { navigation, currentId } = Astro.props;
+---
+
+<aside
+  class="sidebar"
+  id="docs-sidebar"
+  data-docs-sidebar
+  data-open="false"
+  aria-label="Documentation navigation"
+>
+  {
+    navigation.map((section) => (
+      <details class="sidebar-section" open>
+        <summary class="sidebar-section-title">{section.title}</summary>
+        <ul class="sidebar-list">
+          {section.items.map((item) => (
+            <SidebarItem item={item} currentId={currentId} />
+          ))}
+        </ul>
+      </details>
+    ))
+  }
+  <button
+    class="sidebar-theme-toggle"
+    type="button"
+    data-theme-toggle
+    aria-label="Use dark theme"
+    title="Toggle color theme"
+  >
+    ◐
+  </button>
+</aside>

@@ -2,9 +2,8 @@
 
 Enable typed configuration with the `config` feature:
 
-```toml
-[dependencies]
-caelix = { version = "0.0.33", features = ["config"] }
+```sh
+cargo add caelix --features config
 ```
 
 ## Define a configuration type

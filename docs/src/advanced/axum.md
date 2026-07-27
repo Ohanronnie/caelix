@@ -14,9 +14,8 @@ the protocol-specific APIs, see [WebSockets](websockets.md) and
 Actix is the default backend, so an Axum application disables default features
 and enables `axum` explicitly:
 
-```toml
-[dependencies]
-caelix = { version = "0.0.33", default-features = false, features = ["axum"] }
+```sh
+cargo add caelix --no-default-features --features axum
 ```
 
 The `actix` and `axum` features are mutually exclusive. Most applications
@@ -24,11 +23,10 @@ only need the `caelix` dependency and the `#[caelix::main]` macro. Add direct
 Axum and Tokio dependencies when your application calls native Axum APIs such
 as `axum::serve` or `tokio::net::TcpListener`:
 
-```toml
-[dependencies]
-caelix = { version = "0.0.33", default-features = false, features = ["axum"] }
-axum = "0.8.8"
-tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread"] }
+```sh
+cargo add caelix --no-default-features --features axum
+cargo add axum
+cargo add tokio --features macros,net,rt-multi-thread
 ```
 
 Caelix's generated controller code uses its own hidden Axum re-exports, so
