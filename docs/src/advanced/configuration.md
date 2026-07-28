@@ -44,6 +44,12 @@ impl AppConfig {
 }
 ```
 
+`Validate` must come from Caelix's re-export (as shown above), or from the
+same `validator` 0.21 release that Caelix uses. Do not mix validator major/minor
+releases: its derive macro implements a version-specific Rust trait, so a
+configuration type derived with a different release cannot be validated by
+Caelix.
+
 The derive processes only struct fields. Adding another field without
 `#[config(...)]` is a compile-time error; associated constants and methods in an
 `impl` block are the way to keep literal policy alongside environment-backed

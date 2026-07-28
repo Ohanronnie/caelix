@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "caelix"
-version = "0.0.36"
+version = "0.0.37"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-actix"
-version = "0.0.36"
+version = "0.0.37"
 dependencies = [
  "actix-codec",
  "actix-http",
@@ -574,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-axum"
-version = "0.0.36"
+version = "0.0.37"
 dependencies = [
  "axum",
  "bytes",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-cli"
-version = "0.0.36"
+version = "0.0.37"
 dependencies = [
  "clap",
  "ctrlc",
@@ -609,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-core"
-version = "0.0.36"
+version = "0.0.37"
 dependencies = [
  "anyhow",
  "bytes",
@@ -640,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-macros"
-version = "0.0.36"
+version = "0.0.37"
 dependencies = [
  "actix-web",
  "caelix-actix",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-microservices"
-version = "0.0.36"
+version = "0.0.37"
 dependencies = [
  "async-nats",
  "caelix-core",
@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-socketio"
-version = "0.0.36"
+version = "0.0.37"
 dependencies = [
  "caelix-core",
  "serde",
@@ -3603,12 +3603,11 @@ dependencies = [
 
 [[package]]
 name = "validator"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43fb22e1a008ece370ce08a3e9e4447a910e92621bb49b85d6e48a45397e7cfa"
+checksum = "c3d68c6633c483df6780cc5277a417c7c2d1bceee2649d06c8ab6b0fd2dd3c81"
 dependencies = [
  "idna",
- "once_cell",
  "regex",
  "serde",
  "serde_derive",

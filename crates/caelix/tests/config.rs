@@ -2,7 +2,7 @@
 
 use caelix::{
     BoxFuture, Config, ConfigFile, ConfigModule, Container, Deserialize, Injectable, Module,
-    ModuleMetadata, ProviderDependency, ProviderOverrides, Result, Validate, build_container,
+    ModuleMetadata, ProviderDependency, ProviderOverrides, Result, build_container,
     build_container_with_overrides, provider_dependencies,
 };
 use std::{
@@ -10,6 +10,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
 };
+use validator::Validate;
 
 fn deserialize_lowercase<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
 where

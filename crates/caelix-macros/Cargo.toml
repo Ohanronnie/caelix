@@ -1,6 +1,6 @@
 [package]
 name = "caelix-macros"
-version = "0.0.36"
+version = "0.0.37"
 edition = "2024"
 description = "Procedural macros for the Caelix framework."
 license = "MIT"
@@ -24,11 +24,11 @@ config = []
 
 [dev-dependencies]
 actix-web = "4.14.0"
-caelix-actix = { path = "../caelix-actix", version = "0.0.36", features = ["uploads"] }
-caelix-core = { path = "../caelix-core", version = "0.0.36", features = ["config", "uploads"] }
+caelix-actix = { path = "../caelix-actix", version = "0.0.37", features = ["uploads"] }
+caelix-core = { path = "../caelix-core", version = "0.0.37", features = ["config", "uploads"] }
 serde = { workspace = true, features = ["derive"] }
 trybuild.workspace = true
-validator = { version = "0.20", features = ["derive"] }
+validator = { workspace = true, features = ["derive"] }
 
 [dependencies]
 proc-macro2.workspace = true
