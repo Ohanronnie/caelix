@@ -4,7 +4,7 @@ test("homepage leads into the documentation", async ({ page }) => {
   await page.goto("./");
   await expect(page).toHaveTitle(/Caelix/);
   await page.getByRole("link", { name: /Get started/ }).click();
-  await expect(page).toHaveURL(/\/caelix\/getting-started\/overview\/$/);
+  await expect(page).toHaveURL(/\/caelix\/introduction\/$/);
 });
 
 test("homepage links to the Why Caelix guide", async ({ page }) => {
