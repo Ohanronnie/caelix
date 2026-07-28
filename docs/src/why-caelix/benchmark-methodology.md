@@ -1,11 +1,10 @@
-# Correlation Header Validation Benchmark
+# HTTP Overhead Benchmark
 
-This benchmark measures the generated-route change in Caelix `0.0.36` that
-validates request headers and detects duplicate correlation headers in one
-`HeaderMap::iter()` pass. It compares the published `0.0.35` implementation
-with `0.0.36`; it is not a comparison with a plain Actix or Axum application.
+This benchmark measures the HTTP overhead of a generated Caelix controller
+against matched plain Actix and Axum handlers. Each pair uses the same runtime,
+route, JSON response, and correlation response headers.
 
-The run was performed on 2026-07-27. Results are specific to this machine and
+The run was performed on 2026-07-28. Results are specific to this machine and
 load profile, so treat small differences as noise rather than a general runtime
 ranking.
 
@@ -15,22 +14,23 @@ ranking.
 - macOS 27.0.0 (`arm64`)
 - Rust 1.96.0
 - `wrk` 4.2.0 (`kqueue`)
-- Caelix `0.0.35` baseline and Caelix `0.0.36` candidate
+- Caelix `0.0.36`
 - Actix Web 4.14.0 and Axum 0.8.9
 
 ## Configuration
 
-Every binary served `GET /hello` through a generated Caelix controller and
-returned the same JSON string response. The request contained the normal `Host`
-header but no correlation headers, so each route performed the production
-header validation and generated correlation identifiers.
+Every binary served `GET /hello` and returned the same JSON string response.
+Caelix used a generated controller. The plain handlers generated a UUID and
+returned matching `x-request-id` and `x-trace-id` headers, status, content type,
+and response body. The request contained the normal `Host` header but no
+correlation headers.
 
 - `wrk -t4 -c256 -d10s --latency`
 - 2-second warm-up before each measurement
-- 3 independently restarted runs per implementation
+- 3 independently restarted runs per implementation, with each pair alternated
 - Actix used 4 workers; Axum used its default multi-thread Tokio runtime
 - Default Cargo release profile
-- Run order alternated between the baseline and candidate for each backend
+- No socket errors or non-2xx responses were recorded
 
 ## Median results
 
@@ -39,7 +39,7 @@ header validation and generated correlation identifiers.
     <thead>
       <tr>
         <th>Backend</th>
-        <th>Caelix version</th>
+        <th>Implementation</th>
         <th>Requests/s</th>
         <th>Delta</th>
         <th>p50</th>
@@ -48,29 +48,27 @@ header validation and generated correlation identifiers.
       </tr>
     </thead>
     <tbody>
-      <tr><th>Actix</th><td>0.0.35</td><td>153,560</td><td>baseline</td><td>1.63 ms</td><td>1.77 ms</td><td>2.02 ms</td></tr>
-      <tr><th>Actix</th><td><strong>0.0.36</strong></td><td><strong>152,761</strong></td><td>-0.52%</td><td><strong>1.64 ms</strong></td><td><strong>1.77 ms</strong></td><td><strong>2.05 ms</strong></td></tr>
-      <tr><th>Axum</th><td>0.0.35</td><td>153,908</td><td>baseline</td><td>1.48 ms</td><td>1.81 ms</td><td>2.33 ms</td></tr>
-      <tr><th>Axum</th><td><strong>0.0.36</strong></td><td><strong>154,185</strong></td><td>+0.18%</td><td><strong>1.47 ms</strong></td><td><strong>1.86 ms</strong></td><td><strong>2.48 ms</strong></td></tr>
+      <tr><th>Actix</th><td>Plain Actix</td><td>150,715</td><td>baseline</td><td>1.63 ms</td><td>1.80 ms</td><td>2.35 ms</td></tr>
+      <tr><th>Actix</th><td><strong>Caelix Actix</strong></td><td><strong>151,959</strong></td><td>+0.83%</td><td><strong>1.64 ms</strong></td><td><strong>1.80 ms</strong></td><td><strong>2.14 ms</strong></td></tr>
+      <tr><th>Axum</th><td>Plain Axum</td><td>152,687</td><td>baseline</td><td>1.55 ms</td><td>1.79 ms</td><td>2.54 ms</td></tr>
+      <tr><th>Axum</th><td><strong>Caelix Axum</strong></td><td><strong>154,583</strong></td><td>+1.24%</td><td><strong>1.45 ms</strong></td><td><strong>1.87 ms</strong></td><td><strong>2.66 ms</strong></td></tr>
     </tbody>
   </table>
 </div>
 
-The median throughput difference is below 1% for both backends, so this run
-finds the optimization neutral. It preserves the duplicate-correlation-header
-protection while removing three `get_all()` searches and a separate validation
-pass from every generated route request.
+The median throughput difference is within 2% for both backends. On this
+machine and load profile, Caelix is effectively at parity with the matched
+plain handlers; treat the small positive differences as measurement noise.
 
 ## Reproduce
 
-The benchmark source, baseline lockfile, runner, and measured CSV are in
-[`benchmarks/correlation-header-overhead`](https://github.com/Ohanronnie/caelix/tree/main/benchmarks/correlation-header-overhead).
+The benchmark source, runner, and measured CSV are in
+[`benchmarks/http-overhead`](https://github.com/Ohanronnie/caelix/tree/main/benchmarks/http-overhead).
 Install `wrk`, then run:
 
 ```sh
-benchmarks/correlation-header-overhead/scripts/run.sh
+benchmarks/http-overhead/scripts/run.sh
 ```
 
-The runner rebuilds isolated release binaries for the baseline and current
-source, writes per-run output under `results/raw/`, and updates
-`results/summary.csv`.
+The runner rebuilds isolated release binaries for all four implementations,
+writes per-run output under `results/raw/`, and updates `results/summary.csv`.

@@ -1,14 +1,14 @@
-# Correlation Header Validation Benchmark
+# HTTP Overhead Benchmark
 
-This focused benchmark compares generated routes from published Caelix `0.0.35`
-against the current workspace source. It covers both Actix and Axum with a
-minimal controller that exercises correlation-header validation on every
-request.
+This benchmark compares a generated Caelix controller with a matched plain
+Actix or Axum handler. Every implementation serves the same `/hello` response,
+generates a UUID for both correlation response headers, and runs in an isolated
+release target directory.
 
 Install [`wrk`](https://github.com/wg/wrk), then run:
 
 ```sh
-benchmarks/correlation-header-overhead/scripts/run.sh
+benchmarks/http-overhead/scripts/run.sh
 ```
 
 The runner builds each version/backend combination in an isolated target

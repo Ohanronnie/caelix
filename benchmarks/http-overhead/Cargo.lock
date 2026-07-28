@@ -305,48 +305,12 @@ dependencies = [
 
 [[package]]
 name = "caelix"
-version = "0.0.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1448a98ec5353c7d9725030fea939189a6263247b35a8d47a466fefab2036b0d"
-dependencies = [
- "caelix-actix 0.0.35",
- "caelix-axum 0.0.35",
- "caelix-core 0.0.35",
- "caelix-macros 0.0.35",
-]
-
-[[package]]
-name = "caelix"
 version = "0.0.36"
 dependencies = [
- "caelix-actix 0.0.36",
- "caelix-axum 0.0.36",
- "caelix-core 0.0.36",
- "caelix-macros 0.0.36",
-]
-
-[[package]]
-name = "caelix-actix"
-version = "0.0.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "409900e0bb52ccd6a35ddd92b360d83ef772fe6f3410521787a4d0962ada3a56"
-dependencies = [
- "actix-codec",
- "actix-http",
- "actix-web",
- "base64 0.23.0",
- "bytes",
- "bytestring",
- "caelix-core 0.0.35",
- "futures-core",
- "futures-sink",
- "futures-util",
- "num_cpus",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "uuid",
+ "caelix-actix",
+ "caelix-axum",
+ "caelix-core",
+ "caelix-macros",
 ]
 
 [[package]]
@@ -359,7 +323,7 @@ dependencies = [
  "base64 0.23.0",
  "bytes",
  "bytestring",
- "caelix-core 0.0.36",
+ "caelix-core",
  "futures-core",
  "futures-sink",
  "futures-util",
@@ -373,61 +337,17 @@ dependencies = [
 
 [[package]]
 name = "caelix-axum"
-version = "0.0.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f86677bd9ba6f5e66b96eb1ab23a6753e8b2caeb7e3512bffa8a28dc1ae437b"
-dependencies = [
- "axum",
- "bytes",
- "caelix-core 0.0.35",
- "futures-util",
- "http 1.4.2",
- "serde",
- "serde_json",
- "tokio",
- "tower",
- "uuid",
-]
-
-[[package]]
-name = "caelix-axum"
 version = "0.0.36"
 dependencies = [
  "axum",
  "bytes",
- "caelix-core 0.0.36",
+ "caelix-core",
  "futures-util",
  "http 1.4.2",
  "serde",
  "serde_json",
  "tokio",
  "tower",
- "uuid",
-]
-
-[[package]]
-name = "caelix-core"
-version = "0.0.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3f25df31d6911609788b2fb0d5438702521b553feaf6febb33f4e7727cb89c7"
-dependencies = [
- "anyhow",
- "bytes",
- "cookie 0.18.1",
- "crossbeam-channel",
- "futures-core",
- "futures-util",
- "http 1.4.2",
- "ipnet",
- "serde",
- "serde_html_form",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "url",
  "uuid",
 ]
 
@@ -459,19 +379,11 @@ dependencies = [
 name = "caelix-correlation-header-benchmark"
 version = "0.1.0"
 dependencies = [
- "caelix 0.0.35",
- "caelix 0.0.36",
-]
-
-[[package]]
-name = "caelix-macros"
-version = "0.0.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a347bbea8142c3bcc723f91e571e9a560d0c73669e51c5b7210bfb2044baa5de"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.3",
+ "actix-web",
+ "axum",
+ "caelix",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

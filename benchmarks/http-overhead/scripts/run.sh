@@ -27,10 +27,11 @@ build() {
     --manifest-path "$MANIFEST" \
     --release \
     --no-default-features \
-    --features "$implementation"
+    --features "$implementation" \
+    --bin "$implementation"
 }
 
-for implementation in baseline-actix current-actix baseline-axum current-axum; do
+for implementation in plain-actix caelix-actix plain-axum caelix-axum; do
   build "$implementation"
 done
 
@@ -47,7 +48,7 @@ run_one() {
   local round="$1"
   local position="$2"
   local implementation="$3"
-  local binary="$TARGET/$implementation/release/caelix-correlation-header-benchmark"
+  local binary="$TARGET/$implementation/release/$implementation"
   local url="http://127.0.0.1:4101/hello"
   local raw="$RESULTS/raw/round-${round}-${position}-${implementation}.txt"
   local log="$RESULTS/server-logs/round-${round}-${position}-${implementation}.txt"
@@ -82,9 +83,9 @@ run_one() {
 }
 
 orders=(
-  "baseline-actix current-actix baseline-axum current-axum"
-  "current-axum baseline-axum current-actix baseline-actix"
-  "baseline-axum current-axum baseline-actix current-actix"
+  "plain-actix caelix-actix plain-axum caelix-axum"
+  "caelix-axum plain-axum caelix-actix plain-actix"
+  "plain-axum caelix-axum plain-actix caelix-actix"
 )
 
 for round in $(seq 1 "$ROUNDS"); do

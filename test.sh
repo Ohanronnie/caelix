@@ -2,4 +2,4 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-exec "$ROOT/benchmarks/correlation-header-overhead/scripts/run.sh" "$@"
+exec "$ROOT/benchmarks/http-overhead/scripts/run.sh" "$@"

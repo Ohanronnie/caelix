@@ -1,0 +1,41 @@
+[workspace]
+
+[package]
+name = "caelix-correlation-header-benchmark"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = []
+caelix-actix = ["dep:caelix", "caelix/actix"]
+caelix-axum = ["dep:caelix", "caelix/axum"]
+plain-actix = ["dep:actix-web", "dep:uuid"]
+plain-axum = ["dep:axum", "dep:tokio", "dep:uuid"]
+
+[dependencies]
+actix-web = { version = "4.14.0", default-features = false, features = ["macros"], optional = true }
+axum = { version = "0.8.9", optional = true }
+caelix = { path = "../../crates/caelix", default-features = false, optional = true }
+tokio = { version = "1.53.1", default-features = false, features = ["macros", "net", "rt-multi-thread"], optional = true }
+uuid = { version = "1.24.0", features = ["v4"], optional = true }
+
+[[bin]]
+name = "caelix-actix"
+path = "src/bin/caelix_actix.rs"
+required-features = ["caelix-actix"]
+
+[[bin]]
+name = "caelix-axum"
+path = "src/bin/caelix_axum.rs"
+required-features = ["caelix-axum"]
+
+[[bin]]
+name = "plain-actix"
+path = "src/bin/plain_actix.rs"
+required-features = ["plain-actix"]
+
+[[bin]]
+name = "plain-axum"
+path = "src/bin/plain_axum.rs"
+required-features = ["plain-axum"]
