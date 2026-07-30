@@ -249,10 +249,18 @@ exception_openapi_errors!(
 #[derive(serde::Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct ErrorEnvelope {
+    status: u16,
     error: String,
     message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    errors: Option<BTreeMap<String, Vec<String>>>,
+}
+
+#[derive(serde::Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ValidationErrorEnvelope {
+    status: u16,
+    error: String,
+    message: String,
+    errors: BTreeMap<String, Vec<String>>,
 }
 
 /// Builds one immutable OpenAPI 3.1 document from a module and all its imports.
@@ -500,6 +508,17 @@ pub fn error_response<E: OpenApiError>(openapi: &mut OpenApi) -> (String, Respon
         .content
         .insert("application/json".into(), Content::new(Some(schema)));
     (E::status().as_u16().to_string(), response)
+}
+
+/// Builds the standard validation-failure response used for `#[validate]` routes.
+#[doc(hidden)]
+pub fn validation_error_response(openapi: &mut OpenApi) -> (String, Response) {
+    let schema = schema_ref::<ValidationErrorEnvelope>(openapi);
+    let mut response = Response::new("Validation error response");
+    response
+        .content
+        .insert("application/json".into(), Content::new(Some(schema)));
+    (StatusCode::BAD_REQUEST.as_u16().to_string(), response)
 }
 
 #[doc(hidden)]

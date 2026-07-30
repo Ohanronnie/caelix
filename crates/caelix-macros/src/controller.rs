@@ -1884,6 +1884,9 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 || !documented_headers.is_empty()
                 || !documented_errors.is_empty()
                 || !security_expressions.is_empty();
+            let documents_validation_error = extractor_args
+                .iter()
+                .any(|(_, _, _, validated, _)| *validated);
             let summary = method_summary(&method.attrs)
                 .map(|summary| quote! { operation.summary = Some(#summary.to_string()); });
             let body = extractor_args.iter().find_map(|(extractor, _, ty, _, _)| {
@@ -2055,6 +2058,12 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     operation.responses.responses.insert(status, response.into());
                 }
             });
+            let validation_error_response = documents_validation_error.then(|| {
+                quote! {
+                    let (status, response) = caelix::openapi::validation_error_response(openapi);
+                    operation.responses.responses.insert(status, response.into());
+                }
+            });
             let throttle_response = quote! {
                 if #documented_throttle {
                     let (status, response) =
@@ -2082,6 +2091,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                     #(#response_headers)*
                     operation.responses.responses.insert(#status.to_string(), response.into());
                     #(#error_responses)*
+                    #validation_error_response
                     #throttle_response
                     caelix::openapi::operation(#verb, #full_path, operation, openapi);
                 }

@@ -107,6 +107,14 @@ async fn serves_openapi_documentation_with_route_metadata() {
     assert!(operation["responses"].get("400").is_some());
     assert!(operation["responses"].get("409").is_some());
     assert_eq!(
+        operation["responses"]["400"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/ErrorEnvelope"
+    );
+    assert_eq!(
+        operation["responses"]["409"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/ErrorEnvelope"
+    );
+    assert_eq!(
         operation["security"][0]["BearerAuth"],
         serde_json::json!([])
     );
@@ -149,6 +157,16 @@ async fn serves_openapi_documentation_with_route_metadata() {
         document["components"]["schemas"]
             .get("ErrorEnvelope")
             .is_some()
+    );
+    assert!(
+        document["components"]["schemas"]["ErrorEnvelope"]["properties"]
+            .get("status")
+            .is_some()
+    );
+    assert!(
+        document["components"]["schemas"]["ErrorEnvelope"]["properties"]
+            .get("errors")
+            .is_none()
     );
 
     let report = &document["paths"]["/payments/report"]["get"]["responses"]["200"];

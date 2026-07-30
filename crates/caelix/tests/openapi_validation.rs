@@ -83,4 +83,13 @@ async fn validated_extractors_keep_their_openapi_schema_fields() {
             .get("search")
             .is_some()
     );
+    assert_eq!(
+        body["responses"]["400"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/ValidationErrorEnvelope"
+    );
+    assert!(
+        document["components"]["schemas"]["ValidationErrorEnvelope"]["properties"]
+            .get("errors")
+            .is_some()
+    );
 }

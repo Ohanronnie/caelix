@@ -138,9 +138,12 @@ Keep these concerns paired in source:
 | `#[request_header(...)]`         | The guard, interceptor, or service policy that requires the header |
 | `#[body] #[validate]`            | DTO field rules and the `validator` feature                        |
 
-Validation rejects invalid request data with Caelix’s standard `400` error
-envelope. Document any additional client errors with `#[errors(...)]`; the
-full validation rules are in [Validation](../concepts/validation.md).
+Validation rejects invalid request data with a documented `400`
+`ValidationErrorEnvelope`, including an `errors` map of field messages. Other
+`#[errors(...)]` responses use the shared `ErrorEnvelope`, which contains only
+`status`, `error`, and `message`. Document additional client errors with
+`#[errors(...)]`; the full validation rules are in
+[Validation](../concepts/validation.md).
 
 Document DTOs with `utoipa::ToSchema`. The controller macro infers JSON request
 bodies from `#[body]`, multipart request bodies from upload routes, and
