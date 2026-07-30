@@ -68,6 +68,8 @@ pub enum CliError {
     /// Public Caelix API.
     CargoUpdateFailed(Option<i32>),
     /// Public Caelix API.
+    CargoSelfUpdateFailed(Option<i32>),
+    /// Public Caelix API.
     Watcher(String),
     /// Public Caelix API.
     SignalHandler(ctrlc::Error),
@@ -106,6 +108,16 @@ impl fmt::Display for CliError {
                 Some(code) => write!(f, "`cargo update -p caelix` failed with exit code {code}"),
                 None => write!(f, "`cargo update -p caelix` was terminated by a signal"),
             },
+            Self::CargoSelfUpdateFailed(code) => match code {
+                Some(code) => write!(
+                    f,
+                    "`cargo install --force caelix-cli` failed with exit code {code}"
+                ),
+                None => write!(
+                    f,
+                    "`cargo install --force caelix-cli` was terminated by a signal"
+                ),
+            },
             Self::Watcher(message) => write!(f, "{message}"),
             Self::SignalHandler(source) => write!(f, "failed to install Ctrl+C handler: {source}"),
         }
@@ -132,7 +144,7 @@ enum Command {
     /// Generate a Caelix service, controller, or module
     #[command(alias = "g")]
     Generate(GenerateArgs),
-    /// Update the caelix dependency in the current Cargo.toml
+    /// Update the caelix dependency in the current Cargo.toml and the installed CLI
     Update,
     /// Run the current Caelix application
     Run(RunArgs),
@@ -527,12 +539,16 @@ fn update_caelix_dependency(cwd: &Path) -> Result<String> {
 
     match outcome {
         UpdateOutcome::AlreadyLatest { current } => {
-            Ok(format!("Already on the latest version ({current}).\n"))
+            run_cargo_self_update()?;
+            Ok(format!(
+                "Already on the latest version ({current}).\nUpdated the installed Caelix CLI.\n"
+            ))
         }
         UpdateOutcome::Updated { previous, latest } => {
             run_cargo_update(cwd)?;
+            run_cargo_self_update()?;
             Ok(format!(
-                "caelix {previous} -> {latest}\nUpdated Cargo.toml. Ran `cargo update -p caelix`.\n"
+                "caelix {previous} -> {latest}\nUpdated Cargo.toml. Ran `cargo update -p caelix`.\nUpdated the installed Caelix CLI.\n"
             ))
         }
     }
@@ -577,6 +593,27 @@ fn run_cargo_update(cwd: &Path) -> Result<()> {
     } else {
         Err(CliError::CargoUpdateFailed(status.code()))
     }
+}
+
+fn run_cargo_self_update() -> Result<()> {
+    let status = cargo_self_update_command()
+        .status()
+        .map_err(|source| CliError::Io {
+            path: PathBuf::from("cargo"),
+            source,
+        })?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(CliError::CargoSelfUpdateFailed(status.code()))
+    }
+}
+
+fn cargo_self_update_command() -> ProcessCommand {
+    let mut command = ProcessCommand::new("cargo");
+    command.args(["install", "--force", "caelix-cli"]);
+    command
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -717,6 +754,7 @@ fn generate_new(args: NewArgs, cwd: &Path) -> Result<String> {
     })?;
     let cargo_toml = render_app_cargo_toml_for_backend(&package_name, args.backend);
     create_file(target_dir.join("Cargo.toml"), &cargo_toml)?;
+    create_file(target_dir.join(".gitignore"), render_gitignore())?;
     create_file(target_dir.join("AGENTS.md"), render_agents_md())?;
     create_file(target_dir.join("src/main.rs"), &render_main_rs(&crate_name))?;
     create_file(target_dir.join("src/lib.rs"), render_lib_rs())?;
@@ -899,6 +937,10 @@ edition = "2024"
 serde = {{ version = "1.0.228", features = ["derive"] }}
 "#
     )
+}
+
+fn render_gitignore() -> &'static str {
+    "/target/\n.env\n"
 }
 
 fn render_main_rs(crate_name: &str) -> String {
@@ -1578,5 +1620,19 @@ caelix = "0.0.3"
             }
         );
         assert_eq!(fs::read_to_string(path).unwrap(), content);
+    }
+
+    #[test]
+    fn self_update_installs_the_latest_cli_release() {
+        let command = cargo_self_update_command();
+
+        assert_eq!(command.get_program(), "cargo");
+        assert_eq!(
+            command
+                .get_args()
+                .map(|argument| argument.to_string_lossy())
+                .collect::<Vec<_>>(),
+            ["install", "--force", "caelix-cli"]
+        );
     }
 }

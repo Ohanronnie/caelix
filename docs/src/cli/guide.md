@@ -55,6 +55,7 @@ caelix new demo-api --backend axum
 The command creates:
 
 - `Cargo.toml`
+- `.gitignore`
 - `AGENTS.md`
 - `src/main.rs`
 - `src/lib.rs`
@@ -102,12 +103,13 @@ impl Module for AppModule {
 caelix update
 ```
 
-This command reads the current `caelix` dependency from `Cargo.toml`, fetches the latest published `caelix` version from crates.io, and updates only that dependency when a newer version exists. It preserves existing `Cargo.toml` comments, formatting, dependency order, and feature settings.
+This command reads the current `caelix` dependency from `Cargo.toml`, fetches the latest published `caelix` version from crates.io, and updates only that dependency when a newer version exists. It preserves existing `Cargo.toml` comments, formatting, dependency order, and feature settings. Once the dependency update completes (or is already current), it refreshes the installed CLI from crates.io.
 
 After editing `Cargo.toml`, the CLI runs:
 
 ```sh
 cargo update -p caelix
+cargo install --force caelix-cli
 ```
 
 `caelix update` does not regenerate or re-sync scaffolded source files.
