@@ -145,6 +145,8 @@ full validation rules are in [Validation](../concepts/validation.md).
 Document DTOs with `utoipa::ToSchema`. The controller macro infers JSON request
 bodies from `#[body]`, multipart request bodies from upload routes, and
 successful `200` responses from `Result<T>` and `Result<Response<T>>`.
+`#[validate]` preserves the same typed OpenAPI schema; it only adds runtime
+validation.
 
 For a route with `#[body]` and `#[file]`, OpenAPI adds
 `multipart/form-data`: the DTO fields remain schema-backed and file fields are
