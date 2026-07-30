@@ -315,26 +315,30 @@ fn log_http_exception_message(exception: &HttpException, context: Option<Request
         return;
     }
 
-    let mut message = match &exception.source {
-        Some(source) => format!(
-            "{} {}: {} | source: {source:#}",
-            exception.status.as_u16(),
-            exception.error,
-            exception.message
-        ),
-        None => format!(
-            "{} {}: {}",
-            exception.status.as_u16(),
-            exception.error,
-            exception.message
-        ),
-    };
+    let message = format_http_exception_message(exception, context);
+
+    Logger::new("ExceptionHandler").error(message);
+}
+
+fn format_http_exception_message(
+    exception: &HttpException,
+    context: Option<RequestLogContext<'_>>,
+) -> String {
+    let mut message = format!("{} {}", exception.status.as_u16(), exception.error);
+    message.push_str(&format!("\n  message: {}", exception.message));
+
+    if let Some(source) = &exception.source {
+        message.push_str("\n  caused by:");
+        for (index, cause) in source.chain().enumerate() {
+            message.push_str(&format!("\n    {index}: {cause}"));
+        }
+    }
 
     if let Some(context) = context {
         let service = configured_service_name();
         let environment = configured_environment();
         message.push_str(&format!(
-            " | method={} path={:?} request_id={:?} trace_id={:?} service={:?} environment={:?}",
+            "\n  request: {} {:?}\n  correlation: request_id={:?} trace_id={:?}\n  deployment: service={:?} environment={:?}",
             context.method,
             context.path,
             context.correlation.request_id(),
@@ -344,7 +348,7 @@ fn log_http_exception_message(exception: &HttpException, context: Option<Request
         ));
     }
 
-    Logger::new("ExceptionHandler").error(message);
+    message
 }
 
 fn configured_service_name() -> String {
@@ -964,8 +968,30 @@ fn log_routes_for_metadata(
     (routes, controllers)
 }
 
-fn short_type_name(name: &str) -> &str {
-    name.rsplit("::").next().unwrap_or(name)
+fn short_type_name(name: &str) -> String {
+    let mut shortened = String::with_capacity(name.len());
+    let mut path_segment_start = 0usize;
+    let mut characters = name.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        if character == ':' && characters.peek() == Some(&':') {
+            shortened.truncate(path_segment_start);
+            characters.next();
+            path_segment_start = shortened.len();
+            continue;
+        }
+
+        shortened.push(character);
+        if matches!(
+            character,
+            '<' | '>' | ',' | '(' | ')' | '[' | ']' | '&' | '*'
+        ) || character.is_whitespace()
+        {
+            path_segment_start = shortened.len();
+        }
+    }
+
+    shortened
 }
 
 fn color_status(status: u16) -> String {
@@ -1082,6 +1108,42 @@ mod tests {
         assert_eq!(parse_bool("false"), Some(false));
         assert_eq!(parse_bool("off"), Some(false));
         assert_eq!(parse_bool("sometimes"), None);
+    }
+
+    #[test]
+    fn short_type_name_preserves_generic_arguments() {
+        assert_eq!(
+            short_type_name("my_app::config::ConfigModule<my_app::config::AppConfig>"),
+            "ConfigModule<AppConfig>"
+        );
+        assert_eq!(
+            short_type_name("my_app::module::Wrapper<my_app::Inner<my_app::Value>>"),
+            "Wrapper<Inner<Value>>"
+        );
+    }
+
+    #[test]
+    fn http_exception_format_includes_causes_and_request_metadata() {
+        let exception = HttpException::new(
+            http::StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+            "request processing failed",
+        )
+        .with_source(anyhow::anyhow!("database connection refused"));
+        let correlation =
+            CorrelationContext::from_header_values(Some("request-123"), None, Some("trace-456"));
+        let message = format_http_exception_message(
+            &exception,
+            Some(RequestLogContext {
+                method: "POST",
+                path: "/orders",
+                correlation: &correlation,
+            }),
+        );
+
+        assert!(message.starts_with(
+            "500 Internal Server Error\n  message: request processing failed\n  caused by:\n    0: database connection refused\n  request: POST \"/orders\"\n  correlation: request_id=\"request-123\" trace_id=\"trace-456\"\n  deployment: service="
+        ));
     }
 
     #[test]

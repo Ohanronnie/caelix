@@ -23,10 +23,18 @@ debug. Framework startup, module/provider initialization, route mapping,
 readiness, shutdown, and internal server failures use the same logger.
 
 Generated controller routes include correlation metadata on every logged
-server error:
+server error. Error output is formatted as a compact diagnostic block, with
+the original error chain retained for operators while the HTTP response stays
+sanitized:
 
 ```text
-[2026-07-26T14:32:08.190Z ERROR caelix::error] 500 Internal Server Error: Internal Server Error | source: database unavailable | method=GET path="/orders" request_id="9e285a20-9405-4cc8-8941-0f758d84f524" trace_id="4bf92f3577b34da6a3ce929d0e0e4736" service="orders-api" environment="production"
+[2026-07-26T14:32:08.190Z ERROR caelix::error] 500 Internal Server Error
+  message: Internal Server Error
+  caused by:
+    0: database unavailable
+  request: GET "/orders"
+  correlation: request_id="9e285a20-9405-4cc8-8941-0f758d84f524" trace_id="4bf92f3577b34da6a3ce929d0e0e4736"
+  deployment: service="orders-api" environment="production"
 ```
 
 Caelix accepts `X-Request-Id` and `X-Trace-Id`, and understands the trace ID
