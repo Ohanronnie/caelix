@@ -1603,9 +1603,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         let err = caelix::InternalServerErrorException::new(std::io::Error::other(
                             "throttled route requires ThrottleModule",
                         ));
-                        return #response_adapter(correlation.attach_headers(
-                            caelix::IntoCaelixResponse::into_response(err)
-                        ));
+                        return #response_adapter(caelix::IntoCaelixResponse::into_response(err));
                     };
                     let __caelix_context = ctx.as_ref().expect("throttled route requires context");
                     match __caelix_throttle.check(
@@ -1614,13 +1612,11 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         #full_path,
                         __caelix_policy,
                     ).await {
-                        Ok(Some(response)) => return #response_adapter(
-                            correlation.attach_headers(response)
-                        ),
+                        Ok(Some(response)) => return #response_adapter(response),
                         Ok(None) => {}
-                        Err(err) => return #response_adapter(correlation.attach_headers(
+                        Err(err) => return #response_adapter(
                             caelix::IntoCaelixResponse::into_response(err)
-                        )),
+                        ),
                     }
                 }
             }
@@ -1635,9 +1631,9 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
             quote! {
                 let __caelix_payload = match #raw_payload.buffer().await {
                     Ok(payload) => payload,
-                    Err(err) => return #response_adapter(correlation.attach_headers(
+                    Err(err) => return #response_adapter(
                         caelix::IntoCaelixResponse::into_response(err)
-                    )),
+                    ),
                 };
             }
         } else {
@@ -1652,21 +1648,20 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         ctx.as_ref().expect("guarded route requires context"),
                     ).await {
                         Ok(true) => {}
-                        Ok(false) => return #response_adapter(correlation.attach_headers(
+                        Ok(false) => return #response_adapter(
                             caelix::IntoCaelixResponse::into_response(
                                 caelix::ForbiddenException::new("Access denied")
                             )
-                        )),
+                        ),
                         Err(err) => {
-                            caelix::log_http_exception_with_correlation(
+                            caelix::log_http_exception_with_request(
                                 &err,
                                 #request_method,
                                 #request_path,
-                                &correlation,
                             );
-                            return #response_adapter(correlation.attach_headers(
+                            return #response_adapter(
                                 caelix::IntoCaelixResponse::into_response(err)
-                            ));
+                            );
                         }
                     }
                 }
@@ -1693,44 +1688,18 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                 let __caelix_result = next.run().await;
             }
         };
-        let request_context_body = quote! {
-            let mut __caelix_request_id_seen = false;
-            let mut __caelix_traceparent_seen = false;
-            let mut __caelix_trace_id_seen = false;
-            for (__caelix_header_name, __caelix_header_value) in #request_headers.iter() {
-                if __caelix_header_value.to_str().is_err() {
-                    return #response_adapter(caelix::IntoCaelixResponse::into_response(
-                        caelix::BadRequestException::new("invalid request header value"),
-                    ));
-                }
-
-                let __caelix_seen = match __caelix_header_name.as_str() {
-                    "x-request-id" => &mut __caelix_request_id_seen,
-                    "traceparent" => &mut __caelix_traceparent_seen,
-                    "x-trace-id" => &mut __caelix_trace_id_seen,
-                    _ => continue,
-                };
-                if std::mem::replace(__caelix_seen, true) {
-                    return #response_adapter(caelix::IntoCaelixResponse::into_response(
-                        caelix::BadRequestException::new(format!(
-                            "duplicate correlation header '{}'",
-                            __caelix_header_name,
-                        )),
-                    ));
-                }
-            }
-            let correlation = caelix::CorrelationContext::from_header_values(
-                #request_headers.get("x-request-id").and_then(|value| value.to_str().ok()),
-                #request_headers.get("traceparent").and_then(|value| value.to_str().ok()),
-                #request_headers.get("x-trace-id").and_then(|value| value.to_str().ok()),
-            );
-            let mut ctx = if #needs_request_context || state.throttle.is_some() {
+        let request_context_setup = if needs_request_context || throttle_enabled {
+            quote! {
                 let mut headers: std::collections::HashMap<String, String> =
                     std::collections::HashMap::with_capacity(#request_headers.len());
                 for (name, value) in #request_headers.iter() {
                     let value = match value.to_str() {
                         Ok(value) => value,
-                        Err(_) => unreachable!("request headers were validated"),
+                        Err(_) => return #response_adapter(
+                            caelix::IntoCaelixResponse::into_response(
+                                caelix::BadRequestException::new("invalid request header value"),
+                            )
+                        ),
                     };
                     let name = name.as_str().to_string();
                     if name == "cookie" {
@@ -1751,36 +1720,35 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
                         headers.insert(name, value.to_string());
                     }
                 }
-                let mut context = caelix::RequestContext::from_normalized_headers_with_correlation(
+                let mut context = caelix::RequestContext::from_normalized_headers(
                     #request_method,
                     #request_path,
                     headers,
-                    correlation.clone(),
                 );
                 if let Some(peer_addr) = #request_peer {
                     context = context.with_peer_addr(peer_addr);
                 }
-                Some(context)
-            } else {
-                None
-            };
+                let ctx = Some(context);
+            }
+        } else {
+            quote! {}
+        };
+        let request_context_body = quote! {
+            #request_context_setup
             #throttle_check
             #request_context_binding
             #(#guard_checks)*
             #payload_buffering
             #handler_execution
             match __caelix_result {
-                Ok(value) => #response_adapter(correlation.attach_headers(value)),
+                Ok(value) => #response_adapter(value),
                 Err(err) => {
-                    caelix::log_http_exception_with_correlation(
+                    caelix::log_http_exception_with_request(
                         &err,
                         #request_method,
                         #request_path,
-                        &correlation,
                     );
-                    #response_adapter(correlation.attach_headers(
-                        caelix::IntoCaelixResponse::into_response(err)
-                    ))
+                    #response_adapter(caelix::IntoCaelixResponse::into_response(err))
                 }
             }
         };

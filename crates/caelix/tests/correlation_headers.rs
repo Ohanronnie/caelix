@@ -34,7 +34,7 @@ impl Module for CorrelationModule {
 }
 
 #[caelix::test]
-async fn generated_routes_reject_duplicate_correlation_headers() {
+async fn generated_routes_treat_former_correlation_headers_as_ordinary_headers() {
     let app = TestApplication::new::<CorrelationModule>().await.unwrap();
 
     for (name, first, second) in [
@@ -46,68 +46,27 @@ async fn generated_routes_reject_duplicate_correlation_headers() {
         ),
         ("x-trace-id", "trace-one", "trace-two"),
     ] {
-        let error: serde_json::Value = app
-            .get("/correlation/")
+        app.get("/correlation/")
             .append_header(name, first)
             .append_header(name, second)
             .send()
             .await
             .unwrap()
-            .assert_status(StatusCode::BAD_REQUEST)
-            .json()
-            .await;
-
-        assert_eq!(
-            error["message"],
-            format!("duplicate correlation header '{name}'")
-        );
+            .assert_status(StatusCode::OK);
     }
 }
 
 #[caelix::test]
-async fn generated_routes_reject_mixed_validity_duplicate_correlation_headers() {
+async fn generated_routes_do_not_emit_correlation_headers() {
     let app = TestApplication::new::<CorrelationModule>().await.unwrap();
 
-    let error: serde_json::Value = app
+    let response = app
         .get("/correlation/")
-        .append_header("x-request-id", "request-one")
-        .append_header("x-request-id", "not valid as a correlation identifier")
-        .send()
-        .await
-        .unwrap()
-        .assert_status(StatusCode::BAD_REQUEST)
-        .json()
-        .await;
-
-    assert_eq!(
-        error["message"],
-        "duplicate correlation header 'x-request-id'"
-    );
-}
-
-#[caelix::test]
-async fn generated_routes_accept_single_and_absent_correlation_headers() {
-    let app = TestApplication::new::<CorrelationModule>().await.unwrap();
-
-    app.get("/correlation/")
         .send()
         .await
         .unwrap()
         .assert_status(StatusCode::OK);
 
-    for (name, value) in [
-        ("x-request-id", "request-one"),
-        (
-            "traceparent",
-            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        ),
-        ("x-trace-id", "trace-one"),
-    ] {
-        app.get("/correlation/")
-            .header(name, value)
-            .send()
-            .await
-            .unwrap()
-            .assert_status(StatusCode::OK);
-    }
+    assert_eq!(response.header("x-request-id"), None);
+    assert_eq!(response.header("x-trace-id"), None);
 }

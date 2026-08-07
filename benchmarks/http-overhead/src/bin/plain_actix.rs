@@ -1,11 +1,8 @@
 use actix_web::{App, HttpResponse, HttpServer, http::header, web};
 
 async fn hello() -> HttpResponse {
-    let request_id = uuid::Uuid::new_v4().to_string();
     HttpResponse::Ok()
         .insert_header((header::CONTENT_TYPE, "application/json"))
-        .insert_header(("x-request-id", request_id.clone()))
-        .insert_header(("x-trace-id", request_id))
         .body(r#""Hello, world!""#)
 }
 

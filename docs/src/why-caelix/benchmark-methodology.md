@@ -4,7 +4,7 @@ This benchmark measures the HTTP overhead of a generated Caelix controller
 against matched plain Actix and Axum handlers. Each pair uses the same runtime,
 route, JSON response, and correlation response headers.
 
-The run was performed on 2026-07-28. Results are specific to this machine and
+The run was performed on 2026-08-06. Results are specific to this machine and
 load profile, so treat small differences as noise rather than a general runtime
 ranking.
 
@@ -14,7 +14,7 @@ ranking.
 - macOS 27.0.0 (`arm64`)
 - Rust 1.96.0
 - `wrk` 4.2.0 (`kqueue`)
-- Caelix `0.0.36`
+- Caelix `0.0.40`
 - Actix Web 4.14.0 and Axum 0.8.9
 
 ## Configuration
@@ -48,17 +48,18 @@ correlation headers.
       </tr>
     </thead>
     <tbody>
-      <tr><th>Actix</th><td>Plain Actix</td><td>150,715</td><td>baseline</td><td>1.63 ms</td><td>1.80 ms</td><td>2.35 ms</td></tr>
-      <tr><th>Actix</th><td><strong>Caelix Actix</strong></td><td><strong>151,959</strong></td><td>+0.83%</td><td><strong>1.64 ms</strong></td><td><strong>1.80 ms</strong></td><td><strong>2.14 ms</strong></td></tr>
-      <tr><th>Axum</th><td>Plain Axum</td><td>152,687</td><td>baseline</td><td>1.55 ms</td><td>1.79 ms</td><td>2.54 ms</td></tr>
-      <tr><th>Axum</th><td><strong>Caelix Axum</strong></td><td><strong>154,583</strong></td><td>+1.24%</td><td><strong>1.45 ms</strong></td><td><strong>1.87 ms</strong></td><td><strong>2.66 ms</strong></td></tr>
+      <tr><th>Actix</th><td>Plain Actix</td><td>151,617</td><td>baseline</td><td>1.64 ms</td><td>1.78 ms</td><td>2.24 ms</td></tr>
+      <tr><th>Actix</th><td><strong>Caelix Actix</strong></td><td><strong>152,949</strong></td><td>+0.88%</td><td><strong>1.63 ms</strong></td><td><strong>1.77 ms</strong></td><td><strong>2.25 ms</strong></td></tr>
+      <tr><th>Axum</th><td>Plain Axum</td><td>153,655</td><td>baseline</td><td>1.55 ms</td><td>1.77 ms</td><td>2.29 ms</td></tr>
+      <tr><th>Axum</th><td><strong>Caelix Axum</strong></td><td><strong>155,342</strong></td><td>+1.10%</td><td><strong>1.45 ms</strong></td><td><strong>1.84 ms</strong></td><td><strong>2.52 ms</strong></td></tr>
     </tbody>
   </table>
 </div>
 
 The median throughput difference is within 2% for both backends. On this
 machine and load profile, Caelix is effectively at parity with the matched
-plain handlers; treat the small positive differences as measurement noise.
+plain handlers; the small positive differences do not establish a meaningful
+throughput advantage.
 
 ## Reproduce
 

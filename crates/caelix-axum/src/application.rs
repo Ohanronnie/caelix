@@ -251,6 +251,11 @@ impl Application {
         })
     }
 
+    /// Resolves a registered provider from this application's container.
+    pub fn resolve<T: Send + Sync + 'static>(&self) -> Result<Arc<T>> {
+        self.container.resolve::<T>()
+    }
+
     /// Runs the `body_limit` public API operation.
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
@@ -538,6 +543,26 @@ mod tests {
         }
     }
 
+    struct ResolvedService;
+
+    impl Injectable for ResolvedService {
+        fn dependencies() -> Vec<caelix_core::ProviderDependency> {
+            caelix_core::provider_dependencies![]
+        }
+
+        fn create(_container: &Container) -> caelix_core::BoxFuture<'_, caelix_core::Result<Self>> {
+            Box::pin(async move { Ok(Self) })
+        }
+    }
+
+    struct ResolvedModule;
+
+    impl Module for ResolvedModule {
+        fn register() -> ModuleMetadata {
+            ModuleMetadata::new().provider::<ResolvedService>()
+        }
+    }
+
     struct DoctorService;
 
     impl Injectable for DoctorService {
@@ -648,6 +673,13 @@ mod tests {
             .layer(tower_http::trace::TraceLayer::new_for_http())
             .layer(tower_http::compression::CompressionLayer::new())
             .into_router();
+    }
+
+    #[tokio::test]
+    async fn application_resolves_registered_providers() {
+        let application = Application::new::<ResolvedModule>().await.unwrap();
+
+        application.resolve::<ResolvedService>().unwrap();
     }
 
     #[tokio::test]

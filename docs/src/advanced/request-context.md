@@ -1,27 +1,18 @@
 # Request Context
 
-`RequestContext` contains the request method, path, correlation identifiers,
-headers, bearer token helper, and typed extensions.
+`RequestContext` contains the request method, path, headers, bearer token
+helper, peer address, and typed extensions.
 
 ```rust
 let method = ctx.method();
 let path = ctx.path();
-let request_id = ctx.request_id();
-let trace_id = ctx.trace_id();
 let token = ctx.bearer_token();
 ```
 
 Header lookup is case-insensitive. Caelix lowercases header names when the context is created.
-An incoming `X-Request-Id` is retained when valid; otherwise Caelix generates a
-UUID. `trace_id()` reads the W3C `traceparent` trace ID, then `X-Trace-Id`, and
-finally falls back to the request ID. Generated controller responses include
-both identifiers as response headers.
-
-Each correlation header (`X-Request-Id`, `traceparent`, and `X-Trace-Id`) may
-appear at most once. Generated routes reject a duplicate correlation header or
-a non-text request-header value with `400 Bad Request` before constructing the
-request context, applying throttling, running guards or interceptors, or
-calling the controller.
+Headers such as `X-Request-Id` and `traceparent` have no special framework
+behavior; native Actix or Tower middleware can validate, store, propagate, and
+return them according to the application's observability policy.
 
 `bearer_token()` reads the `Authorization` header and strips the exact `Bearer ` prefix:
 

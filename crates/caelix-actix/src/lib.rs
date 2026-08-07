@@ -14,6 +14,8 @@ mod websocket;
 /// `actix-web` solely to satisfy expanded paths.
 #[doc(hidden)]
 pub use actix_web as __actix_web;
+/// Native Actix Web API used to customize [`Application`].
+pub use actix_web;
 
 /// Re-exported public API.
 pub use application::{Application, Logging, to_actix_response};

@@ -78,12 +78,12 @@ readiness reflect dependencies that must be available to accept traffic, such
 as a required database or broker. Do not expose credentials, internal topology,
 or expensive diagnostics from public health routes.
 
-## Configure logs and correlation
+## Configure logs and tracing
 
 Set `CAELIX_SERVICE_NAME` and `CAELIX_ENVIRONMENT` for deployment identity.
-`CAELIX_LOG` controls framework and application log verbosity. Caelix accepts
-or generates request and trace identifiers, returns them as `X-Request-Id` and
-`X-Trace-Id`, and includes them in logged server errors.
+`CAELIX_LOG` controls framework and application log verbosity. Add native
+Actix or Tower/OpenTelemetry middleware when the deployment requires request
+identifiers or distributed tracing.
 
 For Actix access logs, opt in explicitly with `Logging::default()` or
 `Logging::info()`. For Axum, attach the Tower layer that matches your tracing

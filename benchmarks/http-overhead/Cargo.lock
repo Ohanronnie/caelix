@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "caelix"
-version = "0.0.36"
+version = "0.0.41"
 dependencies = [
  "caelix-actix",
  "caelix-axum",
@@ -315,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-actix"
-version = "0.0.36"
+version = "0.0.41"
 dependencies = [
  "actix-codec",
  "actix-http",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-axum"
-version = "0.0.36"
+version = "0.0.41"
 dependencies = [
  "axum",
  "bytes",
@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "caelix-core"
-version = "0.0.36"
+version = "0.0.41"
 dependencies = [
  "anyhow",
  "bytes",
@@ -372,23 +372,21 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
- "uuid",
 ]
 
 [[package]]
-name = "caelix-correlation-header-benchmark"
+name = "caelix-http-overhead-benchmark"
 version = "0.1.0"
 dependencies = [
  "actix-web",
  "axum",
  "caelix",
  "tokio",
- "uuid",
 ]
 
 [[package]]
 name = "caelix-macros"
-version = "0.0.36"
+version = "0.0.41"
 dependencies = [
  "proc-macro2",
  "quote",

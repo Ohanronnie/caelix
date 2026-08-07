@@ -1,7 +1,7 @@
 //! Run with `cargo run -p caelix --example anyhow_error_server`.
 //!
 //! Then trigger the error with:
-//! `curl --fail-with-body -H 'X-Request-Id: demo-request-123' http://127.0.0.1:3100/demo/fail`
+//! `curl --fail-with-body http://127.0.0.1:3100/demo/fail`
 
 use anyhow::Context;
 use caelix::{Application, Module, ModuleMetadata, Response, Result, controller, injectable};

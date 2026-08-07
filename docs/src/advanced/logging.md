@@ -22,10 +22,10 @@ for manual construction. `CAELIX_LOG` selects `error`, `warn`, `info`/`log`, or
 debug. Framework startup, module/provider initialization, route mapping,
 readiness, shutdown, and internal server failures use the same logger.
 
-Generated controller routes include correlation metadata on every logged
-server error. Error output is formatted as a compact diagnostic block, with
-the original error chain retained for operators while the HTTP response stays
-sanitized:
+Generated controller routes include request and deployment metadata on every
+logged server error. Error output is formatted as a compact diagnostic block,
+with the original error chain retained for operators while the HTTP response
+stays sanitized:
 
 ```text
 [2026-07-26T14:32:08.190Z ERROR caelix::error] 500 Internal Server Error
@@ -33,14 +33,13 @@ sanitized:
   caused by:
     0: database unavailable
   request: GET "/orders"
-  correlation: request_id="9e285a20-9405-4cc8-8941-0f758d84f524" trace_id="4bf92f3577b34da6a3ce929d0e0e4736"
   deployment: service="orders-api" environment="production"
 ```
 
-Caelix accepts `X-Request-Id` and `X-Trace-Id`, and understands the trace ID
-inside a W3C `traceparent` header. Missing request IDs are generated as UUIDs;
-invalid correlation headers are ignored. `X-Request-Id` and `X-Trace-Id` are
-included on the response so clients can report them.
+Caelix does not generate or interpret request and trace identifiers. Install
+native Actix middleware through `listen_with_app`, or Tower/OpenTelemetry
+middleware through Axum's `Application::layer`, when the application needs
+request IDs or distributed tracing.
 
 Set `CAELIX_SERVICE_NAME` and `CAELIX_ENVIRONMENT` to identify the deployment.
 `OTEL_SERVICE_NAME` is also accepted for the service name; `APP_ENV` and

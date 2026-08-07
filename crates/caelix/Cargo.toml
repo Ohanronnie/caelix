@@ -1,6 +1,6 @@
 [package]
 name = "caelix"
-version = "0.0.40"
+version = "0.0.41"
 edition = "2024"
 description = "Public Caelix framework crate."
 license = "MIT"
@@ -23,12 +23,12 @@ microservices-nats = ["dep:caelix-microservices", "caelix-microservices/nats", "
 microservices-redis = ["dep:caelix-microservices", "caelix-microservices/redis", "dep:tokio", "caelix-macros/microservices", "caelix-macros/tokio"]
 
 [dependencies]
-caelix-actix = { path = "../caelix-actix", version = "0.0.40", optional = true, default-features = false }
-caelix-axum = { path = "../caelix-axum", version = "0.0.40", optional = true, default-features = false }
-caelix-socketio = { path = "../caelix-socketio", version = "0.0.40", optional = true }
-caelix-core = { path = "../caelix-core", version = "0.0.40", default-features = false }
-caelix-macros = { path = "../caelix-macros", version = "0.0.40", default-features = false }
-caelix-microservices = { path = "../caelix-microservices", version = "0.0.40", optional = true, default-features = false }
+caelix-actix = { path = "../caelix-actix", version = "0.0.41", optional = true, default-features = false }
+caelix-axum = { path = "../caelix-axum", version = "0.0.41", optional = true, default-features = false }
+caelix-socketio = { path = "../caelix-socketio", version = "0.0.41", optional = true }
+caelix-core = { path = "../caelix-core", version = "0.0.41", default-features = false }
+caelix-macros = { path = "../caelix-macros", version = "0.0.41", default-features = false }
+caelix-microservices = { path = "../caelix-microservices", version = "0.0.41", optional = true, default-features = false }
 tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
 serde = { workspace = true, optional = true, features = ["derive"] }
 validator = { workspace = true, optional = true, features = ["derive"] }

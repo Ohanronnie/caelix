@@ -6,9 +6,9 @@ use std::{
 };
 
 use actix_web::{
-    App, HttpRequest, HttpResponse, HttpServer,
+    App, Error, HttpRequest, HttpResponse, HttpServer,
     body::{BodySize, MessageBody},
-    dev::{Service, ServiceResponse},
+    dev::{Service, ServiceFactory, ServiceRequest, ServiceResponse},
     error::{JsonPayloadError, PathError, QueryPayloadError},
     http::header,
     web,
@@ -408,6 +408,11 @@ impl Application {
         })
     }
 
+    /// Resolves a registered provider from this application's container.
+    pub fn resolve<T: Send + Sync + 'static>(&self) -> Result<Arc<T>> {
+        self.container.resolve::<T>()
+    }
+
     /// Runs the `body_limit` public API operation.
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
@@ -472,7 +477,18 @@ impl Application {
         (self.shutdown_fn)(&self.container).await
     }
 
-    fn prepare_doctor_runtime(&self) {
+    fn prepare_doctor_runtime<F, T, B>(&self, app_factory: &F)
+    where
+        F: Fn() -> App<T>,
+        T: ServiceFactory<
+                ServiceRequest,
+                Config = (),
+                Response = ServiceResponse<B>,
+                Error = Error,
+                InitError = (),
+            > + 'static,
+        B: MessageBody + 'static,
+    {
         let container = self.container.clone();
         let configure_fn = self.configure_fn;
         let body_limit = self.body_limit;
@@ -483,7 +499,7 @@ impl Application {
         let openapi = self.openapi.clone();
         let route_container = container.clone();
 
-        let _app = App::new()
+        let _app = app_factory()
             .app_data(web::Data::from(container.clone()))
             .configure({
                 move |cfg| {
@@ -505,13 +521,57 @@ impl Application {
 
     /// Runs the `listen` public API operation.
     pub async fn listen(self, addr: &str) -> std::io::Result<()> {
-        self.listen_with_doctor_mode(addr, has_doctor_argument(std::env::args_os()))
-            .await
+        self.listen_with_app(addr, App::new).await
     }
 
-    async fn listen_with_doctor_mode(self, addr: &str, doctor_mode: bool) -> std::io::Result<()> {
+    /// Starts the server using a native Actix application factory.
+    ///
+    /// The factory is invoked for every Actix worker. Caelix adds its application data,
+    /// controllers, gateways, OpenAPI routes, fallback, and configured access logging to the
+    /// returned [`App`].
+    pub async fn listen_with_app<F, T, B>(self, addr: &str, app_factory: F) -> std::io::Result<()>
+    where
+        F: Fn() -> App<T> + Send + Clone + 'static,
+        T: ServiceFactory<
+                ServiceRequest,
+                Config = (),
+                Response = ServiceResponse<B>,
+                Error = Error,
+                InitError = (),
+            > + 'static,
+        T::Service: 'static,
+        <T::Service as Service<ServiceRequest>>::Future: 'static,
+        B: MessageBody + 'static,
+    {
+        self.listen_with_app_doctor_mode(
+            addr,
+            app_factory,
+            has_doctor_argument(std::env::args_os()),
+        )
+        .await
+    }
+
+    async fn listen_with_app_doctor_mode<F, T, B>(
+        self,
+        addr: &str,
+        app_factory: F,
+        doctor_mode: bool,
+    ) -> std::io::Result<()>
+    where
+        F: Fn() -> App<T> + Send + Clone + 'static,
+        T: ServiceFactory<
+                ServiceRequest,
+                Config = (),
+                Response = ServiceResponse<B>,
+                Error = Error,
+                InitError = (),
+            > + 'static,
+        T::Service: 'static,
+        <T::Service as Service<ServiceRequest>>::Future: 'static,
+        B: MessageBody + 'static,
+    {
         if doctor_mode {
-            self.prepare_doctor_runtime();
+            self.prepare_doctor_runtime::<F, T, B>(&app_factory);
             return self.shutdown().await.map_err(to_io_error);
         }
 
@@ -543,7 +603,7 @@ impl Application {
             let access_log_format = logging.access_log_format();
             let server = match HttpServer::new(move || {
                 let route_container = logging_container.clone();
-                App::new()
+                app_factory()
                     .app_data(web::Data::from(logging_container.clone()))
                     .wrap_fn(move |req, service| {
                         let request_log_start = Instant::now();
@@ -603,7 +663,7 @@ impl Application {
         } else {
             let server = match HttpServer::new(move || {
                 let route_container = container.clone();
-                App::new()
+                app_factory()
                     .app_data(web::Data::from(container.clone()))
                     .configure({
                         let openapi = openapi.clone();
@@ -962,9 +1022,48 @@ mod tests {
     async fn new_builds_container_from_module_metadata() {
         let app = Application::new::<TestModule>().await.unwrap();
 
-        let service = app.container.resolve::<HealthService>().unwrap();
+        let service = app.resolve::<HealthService>().unwrap();
 
         assert_eq!(service.status, "ok");
+    }
+
+    #[actix_web::test]
+    async fn native_app_middleware_wraps_routes_errors_and_fallbacks() {
+        let application = Application::new::<JsonModule>().await.unwrap();
+        let app = actix_test::init_service(
+            App::new()
+                .wrap_fn(|request, service| {
+                    let future = service.call(request);
+                    async move {
+                        let mut response = future.await?;
+                        response.headers_mut().insert(
+                            header::HeaderName::from_static("x-native-middleware"),
+                            header::HeaderValue::from_static("active"),
+                        );
+                        Ok(response)
+                    }
+                })
+                .configure(|cfg| application.configure_services(cfg)),
+        )
+        .await;
+
+        for request in [
+            actix_test::TestRequest::post()
+                .uri("/json")
+                .set_payload("{}")
+                .to_request(),
+            actix_test::TestRequest::post()
+                .uri("/json")
+                .set_payload("{")
+                .to_request(),
+            actix_test::TestRequest::get().uri("/missing").to_request(),
+        ] {
+            let response = actix_test::call_service(&app, request).await;
+            assert_eq!(
+                response.headers().get("x-native-middleware").unwrap(),
+                "active"
+            );
+        }
     }
 
     #[actix_web::test]
@@ -1281,7 +1380,7 @@ mod tests {
         assert_eq!(DOCTOR_STARTUP_COUNT.load(Ordering::SeqCst), 1);
 
         application
-            .listen_with_doctor_mode("not a socket address", true)
+            .listen_with_app_doctor_mode("not a socket address", App::new, true)
             .await
             .unwrap();
 
@@ -1294,7 +1393,7 @@ mod tests {
         let error = Application::new::<FailingShutdownModule>()
             .await
             .unwrap()
-            .listen_with_doctor_mode("not a socket address", true)
+            .listen_with_app_doctor_mode("not a socket address", App::new, true)
             .await
             .unwrap_err();
 
@@ -1306,7 +1405,7 @@ mod tests {
         let error = Application::new::<TestModule>()
             .await
             .unwrap()
-            .listen_with_doctor_mode("127.0.0.1:not-a-port", false)
+            .listen_with_app_doctor_mode("127.0.0.1:not-a-port", App::new, false)
             .await
             .unwrap_err();
 

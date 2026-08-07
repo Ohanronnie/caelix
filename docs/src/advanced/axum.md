@@ -348,10 +348,23 @@ underlying Axum router:
 
 ```rust
 use caelix::Application;
+use tower::ServiceBuilder;
+use tower_http::request_id::{
+    MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer,
+};
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 
+let request_id_header = "x-request-id".parse().unwrap();
 let app = Application::new::<AppModule>()
     .await?
+    .layer(
+        ServiceBuilder::new()
+            .layer(SetRequestIdLayer::new(
+                request_id_header.clone(),
+                MakeRequestUuid,
+            ))
+            .layer(PropagateRequestIdLayer::new(request_id_header)),
+    )
     .layer(TraceLayer::new_for_http())
     .layer(CompressionLayer::new())
     .into_router();
@@ -363,7 +376,8 @@ application:
 
 ```toml
 [dependencies]
-tower-http = { version = "0.6.8", features = ["compression-full", "trace"] }
+tower = "0.5.3"
+tower-http = { version = "0.6.8", features = ["compression-full", "request-id", "trace"] }
 ```
 
 Layers are attached to the router after Caelix has registered its routes, so

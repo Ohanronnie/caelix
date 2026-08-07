@@ -21,7 +21,7 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
-use crate::{Controller, CorrelationContext, HttpException, Module, RequestContext, RouteDef};
+use crate::{Controller, HttpException, Module, RequestContext, RouteDef};
 
 const RESET: &str = "\x1b[0m";
 const TIMESTAMP: &str = "\x1b[38;5;245m";
@@ -274,40 +274,26 @@ pub fn log_http_exception(exception: &HttpException) {
     log_http_exception_message(exception, None);
 }
 
-/// Logs a server-side HTTP exception with request correlation metadata.
+/// Logs a server-side HTTP exception with request metadata.
 pub fn log_http_exception_with_context(exception: &HttpException, context: &RequestContext) {
     log_http_exception_message(
         exception,
         Some(RequestLogContext {
             method: context.method(),
             path: context.path(),
-            correlation: context.correlation(),
         }),
     );
 }
 
 /// Logs a server-side HTTP exception from the lightweight request path.
 #[doc(hidden)]
-pub fn log_http_exception_with_correlation(
-    exception: &HttpException,
-    method: &str,
-    path: &str,
-    correlation: &CorrelationContext,
-) {
-    log_http_exception_message(
-        exception,
-        Some(RequestLogContext {
-            method,
-            path,
-            correlation,
-        }),
-    );
+pub fn log_http_exception_with_request(exception: &HttpException, method: &str, path: &str) {
+    log_http_exception_message(exception, Some(RequestLogContext { method, path }));
 }
 
 struct RequestLogContext<'a> {
     method: &'a str,
     path: &'a str,
-    correlation: &'a CorrelationContext,
 }
 
 fn log_http_exception_message(exception: &HttpException, context: Option<RequestLogContext<'_>>) {
@@ -338,13 +324,8 @@ fn format_http_exception_message(
         let service = configured_service_name();
         let environment = configured_environment();
         message.push_str(&format!(
-            "\n  request: {} {:?}\n  correlation: request_id={:?} trace_id={:?}\n  deployment: service={:?} environment={:?}",
-            context.method,
-            context.path,
-            context.correlation.request_id(),
-            context.correlation.trace_id(),
-            service,
-            environment,
+            "\n  request: {} {:?}\n  deployment: service={:?} environment={:?}",
+            context.method, context.path, service, environment,
         ));
     }
 
@@ -1164,20 +1145,18 @@ mod tests {
             "request processing failed",
         )
         .with_source(anyhow::anyhow!("database connection refused"));
-        let correlation =
-            CorrelationContext::from_header_values(Some("request-123"), None, Some("trace-456"));
         let message = format_http_exception_message(
             &exception,
             Some(RequestLogContext {
                 method: "POST",
                 path: "/orders",
-                correlation: &correlation,
             }),
         );
 
         assert!(message.starts_with(
-            "500 Internal Server Error\n  message: request processing failed\n  caused by:\n    0: database connection refused\n  request: POST \"/orders\"\n  correlation: request_id=\"request-123\" trace_id=\"trace-456\"\n  deployment: service="
+            "500 Internal Server Error\n  message: request processing failed\n  caused by:\n    0: database connection refused\n  request: POST \"/orders\"\n  deployment: service="
         ));
+        assert!(!message.contains("correlation:"));
     }
 
     #[test]

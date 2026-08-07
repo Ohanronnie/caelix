@@ -155,6 +155,11 @@ response.insert_header("X-Request-Id", request_id);
 Ok(response)
 ```
 
+That header applies only when this interceptor runs. Use Actix
+`listen_with_app` or Axum `Application::layer` for application-wide request
+identifiers that must also cover guards, framework errors, OpenAPI routes, and
+the fallback.
+
 ## Execution Order
 
 For each request, the generated wrapper:

@@ -82,6 +82,10 @@ pub use caelix_macros::{main, test};
 pub use caelix_actix::__actix_web;
 
 #[cfg(feature = "actix")]
+/// Native Actix Web API for application middleware and customization.
+pub use caelix_actix::actix_web;
+
+#[cfg(feature = "actix")]
 /// Re-exported public API.
 pub use caelix_actix::{
     Application, Logging, RawRequestPayload, RequestPayload, TestApplication,
