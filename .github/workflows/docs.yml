@@ -21,28 +21,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Install mdBook
+        uses: peaceiris/actions-mdbook@v2
         with:
-          bun-version: 1.3.14
+          mdbook-version: latest
 
-      - name: Install documentation dependencies
-        working-directory: website
-        run: bun install --frozen-lockfile
-
-      - name: Check and build documentation
-        working-directory: website
-        run: |
-          bun run check
-          bun run build
-
-      - name: Install browser for site checks
-        working-directory: website
-        run: bunx playwright install --with-deps chromium chromium-headless-shell
-
-      - name: Test documentation site
-        working-directory: website
-        run: bun run test:browser
+      - name: Build
+        run: mdbook build
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

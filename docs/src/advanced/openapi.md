@@ -18,6 +18,9 @@ let app = Application::new::<AppModule>()
 
 `OpenApiConfig::json_path(...)` and `OpenApiConfig::ui_path(...)` customize these paths. They must not collide with controller routes.
 
+After the application binds, Caelix logs direct URLs for both Swagger UI and
+the OpenAPI JSON document.
+
 ## What Caelix publishes
 
 At startup, Caelix walks the complete imported module graph and builds one

@@ -22,6 +22,8 @@ use caelix_core::build_container;
 #[cfg(feature = "socketio")]
 use caelix_core::build_container_with_setup;
 #[cfg(feature = "openapi")]
+use caelix_core::log_openapi_ready;
+#[cfg(feature = "openapi")]
 use caelix_core::openapi::{OpenApiConfig, build_openapi};
 #[cfg(feature = "socketio")]
 use caelix_core::visit_module_gateways;
@@ -379,6 +381,10 @@ impl Application {
             }
         };
         log_ready(addr, self.startup_started.elapsed());
+        #[cfg(feature = "openapi")]
+        if let Some(openapi) = self.openapi.as_ref() {
+            log_openapi_ready(addr, &openapi.config.json_path, &openapi.config.ui_path);
+        }
         let shutdown_fn = self.shutdown_fn;
         let container = self.container.clone();
         let router = self.into_router();

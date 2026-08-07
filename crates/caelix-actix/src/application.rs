@@ -16,6 +16,8 @@ use actix_web::{
 #[cfg(feature = "uploads")]
 use caelix_core::UploadConfig;
 #[cfg(feature = "openapi")]
+use caelix_core::log_openapi_ready;
+#[cfg(feature = "openapi")]
 use caelix_core::openapi::{OpenApiConfig, build_openapi};
 use caelix_core::{
     BadRequestException, BoxFuture, Container, HttpException, HttpResponse as CaelixHttpResponse,
@@ -527,6 +529,13 @@ impl Application {
             access_log_format: AccessLogFormat::Compact,
         });
         let openapi = self.openapi.clone();
+        #[cfg(feature = "openapi")]
+        let openapi_endpoints = self.openapi.as_ref().map(|openapi| {
+            (
+                openapi.config.json_path.clone(),
+                openapi.config.ui_path.clone(),
+            )
+        });
 
         let result = if logging.access_log_enabled() {
             let logging_container = container.clone();
@@ -578,6 +587,10 @@ impl Application {
             {
                 Ok(server) => {
                     log_ready(&addr, self.startup_started.elapsed());
+                    #[cfg(feature = "openapi")]
+                    if let Some((json_path, ui_path)) = &openapi_endpoints {
+                        log_openapi_ready(&addr, json_path, ui_path);
+                    }
                     server.run()
                 }
                 Err(err) => {
@@ -620,6 +633,10 @@ impl Application {
             {
                 Ok(server) => {
                     log_ready(&addr, self.startup_started.elapsed());
+                    #[cfg(feature = "openapi")]
+                    if let Some((json_path, ui_path)) = &openapi_endpoints {
+                        log_openapi_ready(&addr, json_path, ui_path);
+                    }
                     server.run()
                 }
                 Err(err) => {

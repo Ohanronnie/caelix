@@ -213,8 +213,8 @@ fn format_elapsed(duration: Duration) -> String {
 
 fn log_target(context: &str) -> String {
     match context {
-        "bootstrap" | "routes" | "server" | "module" | "provider" | "controller" | "route"
-        | "HTTP" => format!("caelix::{}", context.to_ascii_lowercase()),
+        "bootstrap" | "routes" | "server" | "openapi" | "module" | "provider" | "controller"
+        | "route" | "HTTP" => format!("caelix::{}", context.to_ascii_lowercase()),
         "ExceptionHandler" => "caelix::error".to_string(),
         context if context.contains("::") => context.to_string(),
         context => format!("app::{context}"),
@@ -519,6 +519,28 @@ pub fn log_ready(addr: &str, elapsed: Duration) {
         format!("Listening on http://{addr}"),
         Some(elapsed),
     );
+}
+
+/// Logs the OpenAPI endpoints exposed by a successfully bound application.
+pub fn log_openapi_ready(addr: &str, json_path: &str, ui_path: &str) {
+    log(
+        "openapi",
+        LogLevel::Info,
+        format!(
+            "Swagger UI: {} | OpenAPI JSON: http://{addr}{json_path}",
+            openapi_ui_url(addr, ui_path),
+        ),
+        None,
+    );
+}
+
+fn openapi_ui_url(addr: &str, ui_path: &str) -> String {
+    let ui_path = ui_path.trim_end_matches('/');
+    if ui_path.is_empty() {
+        format!("http://{addr}/")
+    } else {
+        format!("http://{addr}{ui_path}/")
+    }
 }
 
 /// Runs the `log_module_initialized` public API operation.
@@ -1083,6 +1105,18 @@ mod tests {
         assert!(line.contains("INFO"));
         assert!(line.contains("caelix::server"));
         assert!(line.contains("Listening on http://127.0.0.1:3000 in 18ms"));
+    }
+
+    #[test]
+    fn openapi_ui_url_uses_the_bound_address_and_ui_route() {
+        assert_eq!(
+            openapi_ui_url("127.0.0.1:3000", "/docs"),
+            "http://127.0.0.1:3000/docs/"
+        );
+        assert_eq!(
+            openapi_ui_url("127.0.0.1:3000", "/"),
+            "http://127.0.0.1:3000/"
+        );
     }
 
     #[test]
